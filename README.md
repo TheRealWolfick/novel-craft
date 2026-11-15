@@ -17,7 +17,7 @@ All data stays in the vault as markdown. There is no database: the app reads the
 ## Requirements
 
 - [Node.js](https://nodejs.org) 20 or newer (the vault watcher needs recursive `fs.watch`).
-- An Obsidian vault, existing or new (see [Vault structure](#vault-structure) and [Seeding](#seeding-a-vault)). Obsidian itself is optional; the plugins Templater, Dataview and Bases are optional and only matter for working in Obsidian.
+- An Obsidian vault, existing or new (see [Vault structure](#vault-structure) and [Importing data](#importing-data)). Obsidian itself is optional; the plugins Templater, Dataview and Bases are optional and only matter for working in Obsidian.
 - Linux with systemd if you want it as a background service; otherwise any OS that runs Node.
 
 ## Installation
@@ -27,12 +27,13 @@ git clone https://github.com/TheRealWolfick/world-builder.git
 cd world-builder
 npm install
 
-# a new vault, or the missing pieces of an existing one (never overwrites anything)
-npm run seed -- ~/Documents/Obsidian/books --novel "My First Novel" --world "My World"
-
 # run it, then open http://127.0.0.1:4321 and choose your vault folder on the Settings page
 node server.js
+# or as a desktop app with the system's Electron
+npm run app
 ```
+
+A new vault starts empty. Import a dataset (Tools → Import data) to add the data store schema, ledger types and a basic taxonomy: the [World Builder starter data](https://github.com/TheRealWolfick/world-builder-data), or anyone else's.
 
 The vault folder is set on the app's **Settings** page (sidebar → Tools → Settings): type the path or browse to it; folders Obsidian has opened are marked "vault". The app switches to it at once and remembers it in `~/.config/books-meta-viewer/settings.json`. Until a folder is chosen the app shows only that page.
 
@@ -102,21 +103,21 @@ stat-templates: {}            # stat templates (made on the novel's Stats tab)
 
 Folder names inside a novel can be changed with `characters-folder`, `chapters-folder`, `ledgers-folder`, `volumes-folder`, `chapter-plans-folder`, `plots-folder` and `creatures-folder`.
 
-### Seeding a vault
+### Importing data
+
+**Tools → Import data** adds a dataset from any GitHub repository: paste its URL (`https://github.com/<owner>/<repo>`, or `…/tree/<branch>/<folder>`; a folder on this computer works too). The app downloads it and compares every file with the vault:
+
+- files you already have with the same content are skipped (notes count as the same when only their created date or the way empty fields are written differ);
+- for files that differ it shows both versions side by side: Overwrite or Skip, one at a time or all remaining at once;
+- new notes whose name another note already uses are listed (Obsidian links by name) and skipped unless you untick that.
+
+Afterwards every collection in the schema gets its folder. A dataset is a repository with the files at their vault paths, in `vault/` (or the folder `world-builder.json` names as `root`, or the repository itself without README, LICENSE and dot files). The [starter data](https://github.com/TheRealWolfick/world-builder-data) is an example.
+
+To add a novel and a world to a vault that has a schema:
 
 ```sh
-npm run seed -- <vault folder> [--novel "Name"] [--number 3] [--world "Name"] [--no-taxonomy] [--dry-run]
+npm run scaffold -- <vault folder> [--novel "Name"] [--number 3] [--world "Name"] [--dry-run]
 ```
-
-The seed adds whatever is missing, and never overwrites:
-
-- `90. Templater/Data Store Schema.md` and `Ledger Types.md` (Inventory, Journal, Stats, Relationships, with callout templates);
-- a folder for every collection in the schema;
-- a basic taxonomy: Rarity, Item Condition, Rating and Location Scales (ranked), Units, Genres, Elements, Energy Sources, Traditions, Material, Creature, Ability and Recipe Categories, Faction Types, Location Types and Item Categories;
-- with `--novel`, a novel folder with its subfolders, `config.md` and its `Taxonomy/Novels` note (numbered after the existing novels unless you give `--number`);
-- with `--world`, a world note.
-
-Use `--dry-run` to see what it would change. The seed data lives in `seed/`.
 
 ## Development
 

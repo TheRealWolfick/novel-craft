@@ -20,6 +20,8 @@ import { asCallout, renderTemplate } from "./lib/template.js";
 import { foldStock } from "./lib/ledger.js";
 import { Renamer } from "./lib/rename.js";
 import { Search } from "./lib/search.js";
+import { Importer } from "./lib/importer.js";
+import { parseSections, isImagesSection } from "./public/sections.js";
 import { CALLOUT_STYLES_NOTE, mergeStyles } from "./public/callout-style.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -41,7 +43,7 @@ const VAULT_SOURCES = [["--vault", arg("vault")], ["settings", readSettings().va
 const startSource = VAULT_SOURCES.find(([, v]) => v);
 const isFolder = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
-let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, search;
+let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, search, importer;
 let vaultSource = null, vaultProblem = null, epoch = 0;
 const clients = new Set();
 const version = () => epoch * 1e9 + (vault?.version ?? 0);
@@ -60,6 +62,7 @@ async function openVault(dir, source) {
     worlds = new Worlds(vault, store);
     renamer = new Renamer(vault, store, worlds);
     search = new Search(vault, novels, store);
+    importer = new Importer(vault, store);
     novels.sheetHook = (novel, owner, set) => stats.sheetValues(novel, owner, set);
     vault.on("change", broadcast);
     vault.watch();
@@ -73,8 +76,10 @@ const STATIC = {
     "/style.css": ["public/style.css", "text/css"],
     "/outline.js": ["public/outline.js", "text/javascript"],
     "/blocks.js": ["public/blocks.js", "text/javascript"],
+    "/sections.js": ["public/sections.js", "text/javascript"],
     "/callout-style.js": ["public/callout-style.js", "text/javascript"],
     "/callout-designer.js": ["public/callout-designer.js", "text/javascript"],
+    "/importer.js": ["public/importer.js", "text/javascript"],
     "/writer.js": ["public/writer.js", "text/javascript"],
     "/stats-core.js": ["public/stats-core.js", "text/javascript"],
     "/map-core.js": ["public/map-core.js", "text/javascript"],
@@ -151,7 +156,16 @@ const routes = {
     "GET /api/note": ({ q }) => {
         const p = need(q.get("path"), "path");
         const page = found(store.page(p), "Note");
-        return { ...page, plan: plans.describe(p), stats: stats.describeNote(p), creatureStats: page.collection === "Creatures" ? stats.creatureUses(p) : undefined };
+        // the body as blocks (text before the first "## " heading, then one per section), each rendered
+        const parts = parseSections(page.body ?? "");
+        const sections = parts.sections.map((x) => ({ title: x.title, text: x.text, raw: x.raw, images: isImagesSection(x), html: isImagesSection(x) ? "" : renderMarkdown(x.text, vault) }));
+        const folder = path.posix.dirname(p);
+        // block titles other notes in the same folder use, most common first (suggestions for "Add block")
+        const used = new Map();
+        for (const n of vault.inFolder(folder)) if (n.path !== p) for (const m of n.body.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)) if (!/^images$/i.test(m[1])) used.set(m[1], (used.get(m[1]) ?? 0) + 1);
+        const own = new Set(sections.map((x) => x.title.toLowerCase()));
+        const sectionTitles = [...used].filter(([t]) => !own.has(t.toLowerCase())).sort((a, b) => b[1] - a[1]).slice(0, 30).map(([t]) => t);
+        return { ...page, pre: { text: parts.pre, html: parts.pre.trim() ? renderMarkdown(parts.pre, vault) : "" }, sections, sectionTitles, plan: plans.describe(p), stats: stats.describeNote(p), creatureStats: page.collection === "Creatures" ? stats.creatureUses(p) : undefined };
     },
     "GET /api/blueprint": ({ q }) => blueprints.tree(need(q.get("item"), "item"), Number(q.get("count") ?? 1)),
     "GET /api/search": ({ q }) => search.run({ q: q.get("q") ?? "", novel: q.get("novel") || null, kind: q.get("kind") || null, limit: Math.min(200, Number(q.get("limit") ?? 80) || 80) }),
@@ -169,6 +183,10 @@ const routes = {
             "Callout styles for World Builder's callout designer (Tools → Callout designer). Edit them there.\n");
         return { mtime: vault.notes.get(CALLOUT_STYLES_NOTE)?.mtime ?? null };
     },
+    // dataset import: download and compare, preview a conflict, write
+    "POST /api/import/check": async ({ req }) => importer.check((await json(req)).source),
+    "GET /api/import/preview": ({ q }) => importer.preview(need(q.get("id"), "id"), need(q.get("path"), "path")),
+    "POST /api/import/apply": async ({ req }) => { const b = await json(req); return importer.apply(need(b.id, "id"), { overwrite: b.overwrite ?? [], skipClashes: b.skipClashes !== false }); },
     "GET /api/qa": () => ({ ...store.qa(), stats: stats.qa() }),
     "POST /api/render": async ({ req }) => ({ html: renderMarkdown((await json(req)).markdown ?? "", vault) }),
 
@@ -214,6 +232,7 @@ const routes = {
         return {
             ...novel, configMtime: vault.notes.get(novel.configPath)?.mtime ?? null, ledgerTypes: novels.ledgerTypes(novel), chapters: novels.chapters(novel).map((c) => ({ ...c, entries: ledgers.reduce((n, l) => n + l.entries.filter((e) => e.chapter === c.number).length, 0) })),
             latestChapter: novels.latestChapter(novel),
+            scratchpad: vault.notes.has(novels.scratchpadPath(novel)) ? novels.scratchpadPath(novel) : null, scratchpadPath: novels.scratchpadPath(novel),
             characters: novels.characters(novel).map((n) => ({ path: n.path, name: n.name, fm: n.fm, cover: store.cover(n), mtime: n.mtime })),
             ledgers: ledgers.map((l) => ({ path: l.path, owner: l.owner, ownerPath: l.ownerPath, type: l.type, entries: l.entries.length, unplaced: l.entries.filter((e) => !placed.has(`${l.name.toLowerCase()}#${e.key}`)).length })),
             stores: [...new Set(ledgers.flatMap((l) => l.entries.flatMap((e) => e.lines.flatMap((x) => [x.store, x["to-store"]]))).filter(Boolean))].sort(),
@@ -414,6 +433,13 @@ const routes = {
     "POST /api/stats/creature": async ({ req }) => {
         const b = await json(req);
         return { path: await stats.createCreature(getNovel(b.novel), need(b.creature, "creature"), need(b.template, "template")) };
+    },
+    // the novel's scratchpad note (made on first use)
+    "POST /api/scratchpad": async ({ req }) => {
+        const novel = getNovel((await json(req)).novel);
+        const rel = novels.scratchpadPath(novel);
+        if (!vault.notes.has(rel)) await createNote(vault, rel, { type: "scratchpad", novel: novel.name, title: `${novel.name} scratchpad` }, "");
+        return { path: rel };
     },
     "POST /api/character": async ({ req }) => {
         const b = await json(req);

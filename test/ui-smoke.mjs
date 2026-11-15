@@ -37,6 +37,15 @@ const firstOf = (c) => index.notes.find((n) => n.collection === c)?.path;
 const recipe = firstOf("Recipes");
 const itemWithRecipe = index.notes.find((n) => n.collection === "Items" && n.fm.recipe)?.path;
 
+// every module the browser imports must be served (jsdom imports from disk, so a missing STATIC entry would pass)
+{
+    const mods = new Set(["app.js"]);
+    for (const f of fs.readdirSync(new URL("../public/", import.meta.url))) if (f.endsWith(".js")) for (const m of fs.readFileSync(new URL(`../public/${f}`, import.meta.url), "utf8").matchAll(/from "\.\/([\w-]+\.js)"/g)) mods.add(m[1]);
+    const missing = [];
+    for (const m of mods) if ((await realFetch(new URL(`/${m}`, BASE))).status !== 200) missing.push(m);
+    console.log(`${missing.length ? "FAIL" : "ok  "} every browser module is served${missing.length ? `: missing ${missing.join(", ")}` : ""}`);
+    if (missing.length) process.exitCode = 1;
+}
 await import("../public/app.js");
 await wait(600);
 const routes = [
@@ -716,6 +725,106 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     // a chapter without a note can be started from the writer
     const created = await realFetch(new URL("/api/write/chapter", BASE), { method: "POST", headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: JSON.stringify({ novel: novel.folder, n: 777, title: "Smoke Start" }) }).then((r) => r.json());
     check(created.path?.endsWith("/777 - Smoke Start.md") && fs.readFileSync(`${COPY}/${created.path}`, "utf8").includes("chapter title: Smoke Start"), "a chapter note is created like the Templater template", JSON.stringify(created));
+}
+// note blocks: the body's "## " sections can be edited, moved, deleted and added
+{
+    const doc = w.document;
+    const fire = (el, type, init = {}) => el.dispatchEvent(new (type.startsWith("key") ? w.KeyboardEvent : w.Event)(type, { bubbles: true, cancelable: true, ...init }));
+    const btn = (label, root = doc) => [...root.querySelectorAll("button")].find((b) => b.textContent.trim() === label);
+    const rel = "80. Global Data Store/Worlds/Smoke Blocks World.md";
+    fs.writeFileSync(`${COPY}/${rel}`, "---\ntitle: Smoke Blocks World\ntype: world\n---\nIntro line.\n\n## Calendar\n1. Sol\n2. Luna\n\n## Languages\nCommon tongue\n");
+    await wait(600);
+    const read = () => fs.readFileSync(`${COPY}/${rel}`, "utf8");
+    const open = async () => { w.location.hash = "#/qa"; await wait(300); w.location.hash = `#/note/${enc(rel)}`; await wait(1000); };
+    await open();
+    const heads = () => [...doc.querySelectorAll("main .nblock-head h3")].map((h) => h.textContent);
+    check(heads().join() === "Calendar,Languages" && !!doc.querySelector("main .nblock.pre"), "note body shows as blocks", heads().join());
+    // move Languages up with the arrow keys
+    doc.querySelector("main button[aria-label='Move Languages']").click(); await wait(100);
+    const moving = doc.querySelector("main .nblock.moving");
+    fire(moving, "keydown", { key: "ArrowUp" }); await wait(100);
+    fire(doc.querySelector("main .nblock.moving"), "keydown", { key: "Enter" }); await wait(800);
+    check(/## Languages\nCommon tongue\n\n## Calendar\n1. Sol\n2. Luna\n/.test(read()) && read().startsWith("---\ntitle: Smoke Blocks World\ntype: world\n---\nIntro line.\n\n## Languages"), "moving a block with the arrow keys reorders the sections", JSON.stringify(read()));
+    // edit Calendar
+    doc.querySelector("main button[aria-label='Edit Calendar']").click(); await wait(300);
+    const t = doc.querySelector("main .nblock.editing textarea");
+    t.value = "Sol (summer)"; fire(t, "input"); await wait(100);
+    btn("Save", doc.querySelector("main .nblock.editing")).click(); await wait(900);
+    check(read().includes("## Calendar\n1. Sol (summer)\n2. Luna\n") && read().includes("## Languages\nCommon tongue\n"), "editing a block rewrites only that section", JSON.stringify(read()));
+    // delete Languages (two clicks)
+    const del = () => doc.querySelector("main button[aria-label='Delete Languages']");
+    del().click(); await wait(50); del().click(); await wait(900);
+    check(!read().includes("Languages") && read().includes("## Calendar"), "deleting a block removes its section");
+    // add a block
+    btn("+ Add block").click(); await wait(100);
+    const ti = doc.querySelector("main .nblock-add input");
+    ti.value = "Currency"; fire(ti, "input"); await wait(50);
+    fire(ti, "keydown", { key: "Enter" }); await wait(300);
+    const t2 = doc.querySelector("main .nblock.editing textarea");
+    t2.value = "Spirit stones"; fire(t2, "input"); await wait(100);
+    btn("Add", doc.querySelector("main .nblock.editing")).click(); await wait(900);
+    check(/## Currency\nSpirit stones\n/.test(read()) && heads().includes("Currency"), "adding a block appends a section", JSON.stringify(read()));
+    // scratchpad: started from the novel page, ideas are blocks
+    w.location.hash = `#/novel/${enc(novel.folder)}`; await wait(900);
+    [...doc.querySelectorAll(".tabs button")].find((b) => b.textContent.trim() === "Scratchpad").click(); await wait(400);
+    btn("Start the scratchpad").click(); await wait(1200);
+    btn("+ Add idea").click(); await wait(100);
+    const si = doc.querySelector("main .nblock-add input");
+    si.value = "Twist"; fire(si, "input"); await wait(50); fire(si, "keydown", { key: "Enter" }); await wait(300);
+    const st = doc.querySelector("main .nblock.editing textarea");
+    st.value = "The mentor is the **villain**"; fire(st, "input"); await wait(100);
+    check(!doc.querySelector("main .nblock.editing .be-toolbar button[aria-label='Callout']"), "the scratchpad editor has no callouts");
+    btn("Add", doc.querySelector("main .nblock.editing")).click(); await wait(900);
+    const pad = `${COPY}/${novel.folder}/Plan/Scratchpad (${novel.name}).md`;
+    check(fs.existsSync(pad) && fs.readFileSync(pad, "utf8").includes("## Twist\nThe mentor is the **villain**") && !!doc.querySelector("main .nblock strong"), "the scratchpad saves ideas as formatted blocks", fs.existsSync(pad) ? fs.readFileSync(pad, "utf8") : "no file");
+}
+// import data: identical files skip themselves, conflicts are decided, name clashes are skipped
+{
+    const doc = w.document;
+    const fire = (el, type, init = {}) => el.dispatchEvent(new (type.startsWith("key") ? w.KeyboardEvent : w.Event)(type, { bubbles: true, cancelable: true, ...init }));
+    const btn = (label) => [...doc.querySelectorAll("main button")].find((b) => b.textContent.trim().startsWith(label));
+    const ds = fs.mkdtempSync(`${process.env.SETTINGS_DIR ?? "/tmp"}/dataset-`);
+    const items = index.notes.filter((n) => n.collection === "Items");
+    const same = items[0].path, diff = items[1].path, clashName = items[2].name;
+    const put = (rel, text) => { fs.mkdirSync(`${ds}/vault/${rel.split("/").slice(0, -1).join("/")}`, { recursive: true }); fs.writeFileSync(`${ds}/vault/${rel}`, text); };
+    fs.writeFileSync(`${ds}/world-builder.json`, JSON.stringify({ name: "Smoke dataset", root: "vault" }));
+    fs.writeFileSync(`${ds}/README.md`, "not data");
+    put(same, fs.readFileSync(`${COPY}/${same}`, "utf8"));
+    put(diff, fs.readFileSync(`${COPY}/${diff}`, "utf8") + "\nIncoming change.\n");
+    put("80. Global Data Store/Items/Smoke Imported Item.md", "---\ntitle: Smoke Imported Item\n---\n");
+    // the same note with another created date and an empty field written differently counts as identical
+    const eq = items[3].path, eqText = fs.readFileSync(`${COPY}/${eq}`, "utf8");
+    put(eq, eqText.includes("created-date:") ? eqText.replace(/created-date:.*/, "created-date: 1999-01-01").replace(/^---\n/, "---\nsmoke-empty: \"\"\n") : eqText);
+    put(`80. Global Data Store/Materials/${clashName}.md`, "---\ntitle: clash\n---\n");
+    w.location.hash = "#/import"; await wait(500);
+    const src = doc.querySelector(".import-source input");
+    src.value = ds; fire(src, "input"); await wait(50);
+    btn("Check").click(); await wait(1500);
+    const counts = [...doc.querySelectorAll(".import-counts .chip")].map((c) => c.textContent);
+    check(counts.join("|") === "1 new|2 identical (skipped)|1 different|1 name already used", "the import check sorts files into new, identical, different and name clashes", counts.join("|"));
+    check(!!doc.querySelector(".import-diff .diff") && btn("Import").disabled, "a different file shows both versions and must be decided before importing");
+    btn("Overwrite").click(); await wait(200);
+    btn("Import").click(); await wait(1200);
+    check(fs.readFileSync(`${COPY}/${diff}`, "utf8").endsWith("Incoming change.\n") && fs.existsSync(`${COPY}/80. Global Data Store/Items/Smoke Imported Item.md`)
+        && !fs.existsSync(`${COPY}/80. Global Data Store/Materials/${clashName}.md`) && !fs.existsSync(`${COPY}/README.md`) && !!doc.querySelector(".import-done"),
+        "importing writes new files and chosen overwrites, skipping name clashes and repository files");
+}
+// a new vault has no data until a dataset is imported (the starter data repository, when it is on this machine)
+const STARTER = `${process.env.HOME}/Projects/world-builder-data`;
+if (process.env.SETTINGS_DIR && fs.existsSync(STARTER)) {
+    const send = (method, p, body) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: body && JSON.stringify(body) }).then(async (r) => ({ status: r.status, ...(await r.json()) }));
+    const empty = `${process.env.SETTINGS_DIR}/Empty Vault`;
+    fs.mkdirSync(`${empty}/.obsidian`, { recursive: true });
+    await send("POST", "/api/settings", { vault: empty });
+    const before = await get("/api/settings");
+    const c = await send("POST", "/api/import/check", { source: STARTER });
+    const a = await send("POST", "/api/import/apply", { id: c.id });
+    const after = await get("/api/settings");
+    check(!before.hasSchema && before.notes === 0 && c.counts.new > 100 && a.added === c.counts.new && a.folders > 5 && after.hasSchema && fs.existsSync(`${empty}/80. Global Data Store/Items`),
+        "an empty vault gets the schema, taxonomy and collection folders from the starter data", JSON.stringify({ before: before.notes, counts: c.counts, a }));
+    const again = await send("POST", "/api/import/check", { source: STARTER });
+    check(again.counts.same === c.counts.new && again.counts.new === 0 && again.counts.conflict === 0, "importing the same data again finds every file identical");
+    await send("POST", "/api/settings", { vault: COPY });
 }
 // callout designer: styles saved to the vault, callout metadata rendered
 {

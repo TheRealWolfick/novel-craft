@@ -5,8 +5,10 @@ import htm from "htm";
 import { parseOutline, serializeOutline } from "./outline.js";
 import { MapEditor } from "./map-editor.js";
 import { WorldView, WorldOutline } from "./world.js";
-import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter } from "./writer.js";
+import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, BlockEditor } from "./writer.js";
+import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from "./sections.js";
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
+import { ImportView } from "./importer.js";
 import { FIELD_TYPES, normalizeTemplates, checkTemplate, checkValue, fromText, toText, parseResource, computeValues, displayValue, defaultKey, fieldId, namesField, fieldNamed } from "./stats-core.js";
 
 const html = htm.bind(h);
@@ -192,7 +194,7 @@ addEventListener("keydown", (e) => {
     if (e.key === "[") toggleWriter();
     else setDrawer({ ...drawer, open: !drawer.open });
 });
-addEventListener("keydown", (e) => { if (e.key === "Escape" && drawer.open && !document.querySelector(".lightbox") && !e.target.closest?.(".writer")) collapseDrawer(); });
+addEventListener("keydown", (e) => { if (e.key === "Escape" && drawer.open && !document.querySelector(".lightbox") && !e.target.closest?.(".writer, .block-editor, .nblock.moving")) collapseDrawer(); });
 
 // a renamed note's drawer page follows it
 function renameInDrawer(from, to) { if (drawer.recent.includes(from)) setDrawer({ ...drawer, recent: drawer.recent.map((h) => (h === from ? to : h)) }); }
@@ -454,7 +456,27 @@ function BrowsePane({ index, taxonomy, active }) {
 
 // ------------------------------------------------------------------ novel (drawer tab)
 
-const NOVEL_DRAWER_TABS = [["plan", "Grand plan"], ["plots", "Plots"], ["people", "Characters"], ["world", "World"]];
+const NOVEL_DRAWER_TABS = [["plan", "Grand plan"], ["plots", "Plots"], ["people", "Characters"], ["world", "World"], ["scratch", "Scratchpad"]];
+
+/** The novel's scratchpad: ideas as blocks (add, edit, move, delete) or one page; the note is made on first use */
+function Scratchpad({ folder, novel }) {
+    const [made, setMade] = useState(null);
+    const path = novel.scratchpad ?? made;
+    const { data: page, error } = useApi(path ? `/api/note?${qs({ path })}` : null);
+    const start = async () => {
+        try { const r = await api.send("POST", "/api/scratchpad", { novel: folder }); setMade(r.path); }
+        catch (e) { toast(e.message); }
+    };
+    if (!path) return html`<div class="panel scratch-empty">
+        <h3 style="margin-top:0">Scratchpad</h3>
+        <p class="muted">A place for loose ideas and thoughts about ${novel.name}: write them as blocks you can move around, or as one page. Saved as <code>${novel.scratchpadPath.split("/").slice(1).join("/")}</code>.</p>
+        <button class="primary" onClick=${start}>Start the scratchpad</button>
+    </div>`;
+    if (!page) return html`<${Loading} error=${error} />`;
+    return html`<div class="scratchpad">
+        <${NoteBlocks} key=${page.path} page=${page} callouts=${false} wholePage=${true} addLabel="+ Add idea" empty="Nothing here yet. Add an idea, or write freely with Edit as one page." />
+    </div>`;
+}
 
 function NovelDrawer({ folder, index }) {
     const { data: novel, error } = useApi(`/api/novel?${qs({ folder })}`);
@@ -474,6 +496,7 @@ function NovelDrawer({ folder, index }) {
         <div class="tab-body" key=${tab}>
             ${tab === "people" ? html`<${NovelDrawerPeople} folder=${folder} novel=${novel} />`
             : tab === "world" ? html`<${NovelWorld} novel=${novel} />`
+            : tab === "scratch" ? html`<${Scratchpad} folder=${folder} novel=${novel} />`
             : !plan ? html`<${Loading} />`
             : tab === "plots" ? html`<${PlotBoard} folder=${folder} plan=${plan} />`
             : html`<${GrandPlan} folder=${folder} plan=${plan} />`}
@@ -737,7 +760,7 @@ function Sidebar({ index, novelFolder }) {
         <a class=${`side-pill ${route0() === "world" || route0() === "map" ? "active" : ""}`} href="#/world">World builder<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18" /></svg></a>
         ${section("datastore", "Data store", main.map((c) => html`<a class=${active(`#/c/${encodeURIComponent(c)}`)} href=${`#/c/${encodeURIComponent(c)}`}><span>${c}</span><span class="count">${index.counts[c] ?? 0}</span></a>`))}
         ${section("taxonomy", "Taxonomy", tax.map((c) => html`<a class=${active(`#/c/${encodeURIComponent(c)}`)} href=${`#/c/${encodeURIComponent(c)}`}><span>${collectionLabel(c)}</span><span class="count">${index.counts[c] ?? 0}</span></a>`))}
-        ${section("tools", "Tools", html`<a class=${active("#/qa")} href="#/qa"><span>Quality checks</span></a><a class=${active("#/callout-design")} href="#/callout-design"><span>Callout designer</span></a><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a>`)}
+        ${section("tools", "Tools", html`<a class=${active("#/qa")} href="#/qa"><span>Quality checks</span></a><a class=${active("#/callout-design")} href="#/callout-design"><span>Callout designer</span></a><a class=${active("#/import")} href="#/import"><span>Import data</span></a><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a>`)}
         <div class="theme-switch" role="group" aria-label="Theme">${THEMES.map(([m, label]) => html`<button class=${theme === m ? "on" : ""} aria-pressed=${theme === m} onClick=${() => setTheme(m)}>${label}</button>`)}</div>
     </nav>`;
 }
@@ -1434,7 +1457,7 @@ function NoteView({ index, path, scope = "page" }) {
         ${page.whereUsed?.length > 0 && html`<div class="panel"><h3>Used in</h3><${WhereUsed} uses=${page.whereUsed} /></div>`}
         ${page.creatureStats && html`<${CreatureNovels} page=${page} index=${index} />`}`;
     const imageDrop = html`<div class="panel"><${ImageDrop} path=${page.path} /></div>`;
-    const content = html`
+    const content = blocksFor(page) ? html`<${NoteBlocks} key=${page.path} page=${page} scope=${scope} />` : html`
         ${page.blueprint && html`<${BlueprintPanel} page=${page} index=${index} />`}
         ${page.body.trim() && (page.plan
             ? html`<details class="panel"><summary class="muted">Note body (not used by the plan, edit it in Obsidian)</summary><${Html} html=${page.html} /></details>`
@@ -1493,6 +1516,171 @@ function NoteView({ index, path, scope = "page" }) {
                 ${content}${backlinks}${outlinks}`}
     </div>`;
 }
+
+// ------------------------------------------------------------------ note blocks (the body's "## " sections)
+
+const ICONS = {
+    edit: html`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></svg>`,
+    move: html`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12h18M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" /></svg>`,
+    trash: html`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" /></svg>`,
+};
+
+/**
+ * A note's body as blocks: the text before the first heading, then one block per "## " section (the `## Images`
+ * section stays where it is; the gallery shows it). Each block can be edited (writer's block editor), moved (↑↓ in move
+ * mode, Enter or Escape to finish) or deleted; "+ Add block" offers titles other notes of the collection use.
+ * Changes are saved at once, rewriting only the sections involved. `wholePage` adds "Edit as one page".
+ */
+function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, addLabel = "+ Add block", empty = "" }) {
+    const [local, setLocal] = useState(null); // {mtime, pre, sections} just saved, until the refetched page catches up
+    const doc = local && local.mtime > page.mtime ? local : { mtime: page.mtime, pre: page.pre, sections: page.sections };
+    const [editing, setEditing] = useState(null); // "pre" | section index | "new" | "all"
+    const [draft, setDraft] = useState(null);     // {title, text}
+    const [moving, setMoving] = useState(null);   // {i, list}: the block being moved and the order so far
+    const [adding, setAdding] = useState(false);
+    const [newTitle, setNewTitle] = useState("");
+    const [busy, setBusy] = useState(false);
+    const moveRef = useRef();
+    const dirtyKey = `blocks:${page.path}`;
+    const changed = !!draft && (editing === "new" || draft.changed);
+    useEffect(() => markDirty(scope, dirtyKey, changed), [changed]);
+    useEffect(() => () => markDirty(scope, dirtyKey, false), []);
+    useLayoutEffect(() => { if (moving) moveRef.current?.focus({ preventScroll: false }); }, [moving?.i]);
+    const body = (pre, sections) => joinSections(pre, sections);
+    /** write a new body; edited sections are rendered here so they show before the page is fetched again */
+    const save = async (preText, sections, msg) => {
+        const text = body(preText, sections);
+        if (text === joinSections(doc.pre.text, doc.sections)) return true;
+        setBusy(true);
+        try {
+            const r = await api.send("PATCH", "/api/note", { path: page.path, body: text, baseMtime: Math.max(page.mtime, local?.mtime ?? 0) });
+            const render = (md) => (md.trim() ? api.send("POST", "/api/render", { markdown: md }).then((x) => x.html) : "");
+            const secs = await Promise.all(sections.map(async (x) => (x.html != null || x.images ? x : { ...x, html: await render(x.text) })));
+            const preHtml = preText === doc.pre.text ? doc.pre.html : await render(preText);
+            setLocal({ mtime: r.mtime, pre: { text: preText, html: preHtml }, sections: secs });
+            toast(msg);
+            setBusy(false);
+            return true;
+        } catch (e) { toast(e.message); setBusy(false); return false; }
+    };
+    const startEdit = (key, title, text) => { setMoving(null); setAdding(false); setEditing(key); setDraft({ title, text, changed: false }); };
+    const stopEdit = () => { setEditing(null); setDraft(null); };
+    const saveEdit = async () => {
+        const has = doc.sections.length > 0;
+        let ok;
+        if (editing === "all") {
+            ok = await saveWhole(draft.text);
+        } else if (editing === "pre") {
+            ok = await save(preRaw(draft.text, has), doc.sections, "Saved");
+        } else {
+            const title = draft.title.trim();
+            if (!title) return toast("A block needs a title");
+            const fresh = { title, text: draft.text, raw: sectionRaw(title, draft.text), html: null };
+            const list = [...doc.sections];
+            if (editing === "new") { const img = list.findIndex((x) => x.images); list.splice(img < 0 ? list.length : img, 0, fresh); }
+            else list[editing] = fresh;
+            ok = await save(doc.pre.text, list, editing === "new" ? `Added ${title}` : `Saved ${title}`);
+        }
+        if (ok) stopEdit();
+    };
+    const saveWhole = async (text) => {
+        setBusy(true);
+        try {
+            const r = await api.send("PATCH", "/api/note", { path: page.path, body: text, baseMtime: Math.max(page.mtime, local?.mtime ?? 0) });
+            const parts = parseSections(text);
+            const render = (md) => (md.trim() ? api.send("POST", "/api/render", { markdown: md }).then((x) => x.html) : "");
+            const sections = await Promise.all(parts.sections.map(async (x) => ({ ...x, images: isImagesSection(x), html: isImagesSection(x) ? "" : await render(x.text) })));
+            setLocal({ mtime: r.mtime, pre: { text: parts.pre, html: await render(parts.pre) }, sections });
+            toast("Saved"); setBusy(false); return true;
+        } catch (e) { toast(e.message); setBusy(false); return false; }
+    };
+    const remove = (i) => save(doc.pre.text, doc.sections.filter((_, k) => k !== i), `Deleted ${doc.sections[i].title}`);
+    const removePre = () => save("", doc.sections, "Deleted");
+    // move mode: the order changes locally; leaving move mode saves it
+    const startMove = (i) => { stopEdit(); setAdding(false); setMoving({ i, list: doc.sections.map((x, k) => ({ ...x, k })) }); };
+    const step = (by) => setMoving((m) => {
+        const list = [...m.list];
+        let j = m.i + by;
+        while (list[j]?.images) j += by; // the images section stays put
+        if (j < 0 || j >= list.length) return m;
+        [list[m.i], list[j]] = [list[j], list[m.i]];
+        return { i: j, list };
+    });
+    const finishMove = async () => {
+        const m = moving;
+        setMoving(null);
+        if (!m || !m.list.some((x, k) => x.k !== k)) return;
+        // a section that moved gets a blank line after it (the old last one may end without one)
+        const list = m.list.map(({ k, ...x }, idx) => (k !== idx && idx < m.list.length - 1 && !/\n[ \t]*\n$/.test(x.raw) ? { ...x, raw: x.raw.replace(/\n*$/, "\n\n") } : x));
+        await save(doc.pre.text, list, `Moved ${m.list[m.i].title}`);
+    };
+    const add = () => {
+        const title = newTitle.trim();
+        if (!title) return;
+        if (doc.sections.some((x) => x.title.toLowerCase() === title.toLowerCase())) return toast(`There is a ${title} block already`);
+        setAdding(false); setNewTitle("");
+        startEdit("new", title, "");
+    };
+    const list = moving ? moving.list : doc.sections.map((x, k) => ({ ...x, k }));
+    const tools = (i, title) => html`<span class="nblock-tools">
+        <button class="icon" title=${`Edit ${title}`} aria-label=${`Edit ${title}`} disabled=${busy} onClick=${() => startEdit(i, title, doc.sections[i].text)}>${ICONS.edit}</button>
+        <button class=${`icon ${moving?.i === i ? "on" : ""}`} title=${moving?.i === i ? "Done moving (Enter)" : `Move ${title} (then ↑ ↓)`} aria-label=${`Move ${title}`} aria-pressed=${moving?.i === i} disabled=${busy}
+            onClick=${() => (moving?.i === i ? finishMove() : startMove(i))}>${ICONS.move}</button>
+        <${ConfirmButton} class="icon danger" confirmLabel="Delete?" title=${`Delete ${title}`} aria-label=${`Delete ${title}`} disabled=${busy} onConfirm=${() => remove(i)}>${ICONS.trash}<//>
+    </span>`;
+    const editor = (withTitle) => html`<div class="nblock-edit" onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); e.stopPropagation(); saveEdit(); } }}>
+        ${withTitle && html`<input class="nblock-title-input" value=${draft.title} placeholder="Block title" aria-label="Block title"
+            onInput=${(e) => setDraft({ ...draft, title: e.target.value, changed: true })} />`}
+        <${BlockEditor} value=${draft.text} compact=${true} callouts=${callouts} sceneBreaks=${false} autoFocus=${true}
+            onChange=${(text) => setDraft((d) => ({ ...d, text, changed: true }))} />
+        <div class="row nblock-actions">
+            <button class="primary" disabled=${busy} onClick=${saveEdit}>${busy ? "Saving…" : editing === "new" ? "Add" : "Save"}</button>
+            <button onClick=${stopEdit}>Cancel</button><span class="muted">Ctrl+S</span>
+        </div>
+    </div>`;
+    if (editing === "all") return html`<section class="panel nblock editing">
+        <div class="nblock-head"><h3>Edit as one page</h3></div>${editor(false)}</section>`;
+    const shown = list.filter((x) => !x.images);
+    return html`<div class="note-blocks">
+        ${(doc.pre.text.trim() || editing === "pre") && html`<section class="panel nblock pre">
+            ${editing === "pre" ? editor(false) : html`<div class="nblock-head"><span />
+                <span class="nblock-tools">
+                    <button class="icon" title="Edit" aria-label="Edit the text above the blocks" onClick=${() => startEdit("pre", "", doc.pre.text.replace(/^\s+/, ""))}>${ICONS.edit}</button>
+                    <${ConfirmButton} class="icon danger" confirmLabel="Delete?" title="Delete this text" aria-label="Delete the text above the blocks" onConfirm=${removePre}>${ICONS.trash}<//>
+                </span></div><${Html} html=${doc.pre.html} />`}
+        </section>`}
+        ${shown.map((x) => {
+            const i = list.indexOf(x);
+            const isMoving = moving?.i === i;
+            if (editing === i) return html`<section key=${`e${i}`} class="panel nblock editing">${editor(true)}</section>`;
+            return html`<section key=${x.title} ref=${isMoving ? moveRef : null} class=${`panel nblock ${isMoving ? "moving" : ""}`} tabIndex=${isMoving ? 0 : -1}
+                data-flip=${`nb|${x.title}`}
+                onKeyDown=${isMoving ? (e) => {
+                    if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); step(e.key === "ArrowUp" ? -1 : 1); }
+                    if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finishMove(); }
+                } : undefined}>
+                <div class="nblock-head"><h3>${x.title}</h3>${tools(i, x.title)}</div>
+                ${isMoving && html`<div class="nblock-movehint muted">↑ ↓ to move · Enter or Escape when done</div>`}
+                ${x.html ? html`<${Html} html=${x.html} />` : html`<p class="muted">Empty.</p>`}
+            </section>`;
+        })}
+        ${editing === "new" && html`<section class="panel nblock editing">${editor(true)}</section>`}
+        ${!shown.length && !doc.pre.text.trim() && editing == null && empty && html`<p class="muted">${empty}</p>`}
+        <div class="nblock-add row">
+            ${adding ? html`<input autoFocus list=${`nb-titles-${page.path}`} value=${newTitle} placeholder="Block title, e.g. Calendar" aria-label="New block title"
+                    onInput=${(e) => setNewTitle(e.target.value)} onKeyDown=${(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") { e.stopPropagation(); setAdding(false); } }} />
+                <datalist id=${`nb-titles-${page.path}`}>${(page.sectionTitles ?? []).map((t) => html`<option value=${t} />`)}</datalist>
+                <button class="primary" disabled=${!newTitle.trim()} onClick=${add}>Add</button><button onClick=${() => setAdding(false)}>Cancel</button>`
+            : html`<button disabled=${busy || editing != null} onClick=${() => { setMoving(null); setAdding(true); }}>${addLabel}</button>
+                ${!doc.pre.text.trim() && editing == null && html`<button class="small-link linkish" onClick=${() => startEdit("pre", "", "")}>Add text above the blocks</button>`}
+                ${wholePage && html`<span class="grow" /><button disabled=${editing != null} onClick=${() => { setMoving(null); setEditing("all"); setDraft({ text: joinSections(doc.pre.text, doc.sections), changed: false }); }}>Edit as one page</button>`}`}
+            ${!adding && (page.sectionTitles ?? []).length > 0 && html`<span class="muted nblock-suggest">${page.sectionTitles.slice(0, 6).map((t) => html`<button class="chip linkish" title=${`Add a ${t} block`}
+                disabled=${editing != null} onClick=${() => startEdit("new", t, "")}>${t}</button>`)}</span>`}
+        </div>
+    </div>`;
+}
+/** Notes whose body is shown as blocks (recipes keep their body for the crafting scripts; plans, chapters and ledgers have their own pages) */
+const blocksFor = (page) => !page.plan && !page.blueprint && page.collection !== "Recipes" && !["chapter", "ledger", "config"].includes(page.fm.type) && !page.path.startsWith("90. Templater/");
 
 // ------------------------------------------------------------------ create / edit notes
 
@@ -1942,7 +2130,7 @@ function TemplatesEditor({ folder, data, index }) {
     </div>`;
 }
 
-const NOVEL_TABS = [["plan", "Grand plan"], ["plots", "Plots"], ["people", "Characters & ledgers"], ["stats", "Stats"]];
+const NOVEL_TABS = [["plan", "Grand plan"], ["plots", "Plots"], ["people", "Characters & ledgers"], ["stats", "Stats"], ["scratch", "Scratchpad"]];
 
 function NovelView({ folder }) {
     const { data: novel, error } = useApi(`/api/novel?${qs({ folder })}`);
@@ -1965,6 +2153,7 @@ function NovelView({ folder }) {
         <div class="tab-body" key=${tab}>
             ${tab === "people" ? html`<${NovelPeople} folder=${folder} novel=${novel} />`
                 : tab === "stats" ? html`<${StatsTab} folder=${folder} novel=${novel} />`
+                : tab === "scratch" ? html`<div data-drawer><${Scratchpad} folder=${folder} novel=${novel} /></div>`
                 : !plan ? html`<${Loading} />`
                 : tab === "plots" ? html`<${PlotBoard} folder=${folder} plan=${plan} />`
                 : html`<${GrandPlan} folder=${folder} plan=${plan} />`}
@@ -2836,7 +3025,7 @@ function SettingsView({ settings }) {
             ${settings.vault
                 ? html`<p><code>${settings.vault}</code></p>
                     <p class="muted">${settings.notes} notes · ${SOURCES[settings.source] ?? settings.source}${settings.looksLikeVault ? "" : " · no .obsidian folder here, so Obsidian hasn't opened it as a vault"}</p>
-                    ${!settings.hasSchema && html`<p class="muted">This vault has no <code>90. Templater/Data Store Schema.md</code> yet. Run <code>npm run seed -- "${settings.vault}"</code> to add the schema, ledger types and a basic taxonomy.</p>`}
+                    ${!settings.hasSchema && html`<p class="muted">This vault has no <code>90. Templater/Data Store Schema.md</code> yet. <a href="#/import">Import a dataset</a> (for example the World Builder starter data) to add the schema, ledger types and a basic taxonomy.</p>`}
                     ${settings.overridden && html`<p class="muted">The app was started with <code>--vault</code>, which wins over a folder chosen here when it restarts.</p>`}`
                 : html`<p>${settings.problem ?? "No vault folder chosen yet."} Choose your Obsidian vault below.</p>`}
             <div class="row settings-path">
@@ -2906,6 +3095,7 @@ function App() {
         case "callouts": view = html`<${CalloutSettings} key=${a} folder=${a} />`; break;
         case "qa": view = html`<${QAView} />`; break;
         case "callout-design": view = html`<${CalloutDesigner} />`; break;
+        case "import": view = html`<${ImportView} />`; break;
         case "settings": view = html`<${SettingsView} settings=${settings} />`; break;
         case "world": view = html`<${WorldView} key=${a ?? ""} index=${index} world=${a ?? null} params=${route.params} />`; break;
         case "map": view = html`<${MapEditor} key=${a} index=${index} location=${a} />`; break;

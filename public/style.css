@@ -718,7 +718,7 @@ input.be-mark { width: auto; top: .45em; margin: 0; }
 .be-hr textarea:focus { background: linear-gradient(var(--accent), var(--accent)) center / 100% 2px no-repeat; }
 .writer-preview { font-family: var(--serif); font-size: 18px; line-height: 1.7; }
 /* chapter paragraphs: justified, first line indented (like the vault's .chapter class); image-only lines centred */
-.be-p textarea, .be-p .be-text { text-align: justify; text-indent: 1em; hyphens: manual; }
+.writer .be-p textarea, .writer .be-p .be-text { text-align: justify; text-indent: 1em; hyphens: manual; }
 .writer-preview > p { text-align: justify; text-indent: 1em; margin: 0 0 .55em; }
 .writer-preview > p:has(> img.embed:only-child) { text-indent: 0; text-align: center; }
 .writer-preview img.embed, .be-render img.embed { display: block; margin: 1.2em auto; max-width: 100%; max-height: none; border-radius: 0; }
@@ -799,3 +799,48 @@ input.be-mark { width: auto; top: .45em; margin: 0; }
 .browse-toggle .count { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .browse-list { border: none; border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); max-height: 62vh; overflow-y: auto; }
 .browse-hint { font-size: 12.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* the block editor outside the writer (note blocks, scratchpad): the app's font, smaller, toolbar not sticky */
+.block-editor.compact { max-width: none; }
+.block-editor.compact .be-page { font-family: inherit; font-size: 15px; line-height: 1.6; padding-left: 1.8em; }
+.block-editor.compact .be-toolbar { position: static; padding-top: 0; margin-bottom: 8px; }
+.block-editor.compact .be-row { margin-bottom: .35em; }
+
+/* note blocks: the body's "## " sections as panels with edit / move / delete */
+.note-blocks { display: flex; flex-direction: column; }
+.nblock { position: relative; transition: box-shadow .15s, border-color .15s; }
+.nblock-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.nblock-head h3 { margin: 0; font-family: var(--serif); font-size: 17px; }
+.nblock-tools { display: flex; gap: 2px; opacity: .45; transition: opacity .15s; }
+.nblock:hover .nblock-tools, .nblock:focus-within .nblock-tools, .nblock.moving .nblock-tools { opacity: 1; }
+button.icon { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 4px 6px; border-color: transparent; background: none; color: var(--muted); }
+button.icon:hover { color: var(--accent); border-color: var(--line); }
+button.icon.on { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+button.icon.danger:hover { color: var(--bad); }
+.nblock.moving { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
+.nblock-movehint { font-size: 12px; margin: -2px 0 6px; }
+.nblock.editing { border-color: var(--accent); }
+.nblock-title-input { width: 100%; font: 600 16px var(--serif); margin-bottom: 8px; }
+.nblock-actions { margin-top: 8px; }
+.nblock-add { margin: 2px 0 14px; flex-wrap: wrap; }
+.nblock-add input { flex: 1; min-width: 160px; }
+.nblock-suggest { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.nblock-suggest .chip { cursor: pointer; border-style: dashed; }
+.nblock .md > :first-child { margin-top: 0; } .nblock .md > :last-child { margin-bottom: 0; }
+.scratch-empty { max-width: 640px; }
+
+/* import data */
+.import-page { max-width: 1200px; }
+.import-source { display: flex; gap: 10px; align-items: center; }
+.import-source input { flex: 1; font-size: 15px; padding: 7px 10px; }
+.import-counts { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.chip.warn, .badge.warn { border-color: var(--warn); color: var(--warn); }
+.import-conflict { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 12px 0; background: var(--bg); }
+.import-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.import-diff pre { margin: 4px 0 0; max-height: 360px; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: 12px/1.5 var(--mono); white-space: pre-wrap; }
+.import-diff pre .diff { background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.import-decide { margin-top: 10px; flex-wrap: wrap; }
+.import-list { margin: 8px 0; }
+.import-list summary { cursor: pointer; }
+.import-folder { margin: 6px 0 0 14px; }
+.import-folder .chip { font-size: 12px; }

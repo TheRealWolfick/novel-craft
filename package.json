@@ -10,7 +10,7 @@
     "app": "sh scripts/electron.sh .",
     "package:arch": "sh packaging/arch/build.sh",
     "test": "sh test/run.sh",
-    "seed": "node scripts/seed.js"
+    "scaffold": "node scripts/scaffold.js"
   },
   "dependencies": {
     "htm": "3.1.1",

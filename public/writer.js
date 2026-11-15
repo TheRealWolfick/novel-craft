@@ -316,7 +316,7 @@ const HISTORY = 200;
  * Tab / Shift+Tab indent list items, Alt+↑↓ moves a block. Typing "# ", "- ", "1. ", "> " or "- [ ] " at the start of
  * a paragraph turns it into that block; "---" + Enter makes a divider. Ctrl+Z / Ctrl+Shift+Z undo and redo.
  */
-export function BlockEditor({ value, onChange, breaks = [] }) {
+export function BlockEditor({ value, onChange, breaks = [], callouts = true, sceneBreaks = true, compact = false, autoFocus = false }) {
     const [doc, setDoc] = useState(() => withBlock(parseBlocks(value)));
     const [editing, setEditing] = useState(null); // id of the block whose text is being edited (the others show formatted)
     const [, setRenderTick] = useState(0);
@@ -476,7 +476,7 @@ export function BlockEditor({ value, onChange, breaks = [] }) {
         }
         const wk = mod && !e.altKey ? WRAP_KEYS[e.shiftKey ? e.key.toUpperCase() : e.key.toLowerCase()] : null;
         if (wk && b.kind !== "hr" && b.kind !== "code" && b.kind !== "raw") { e.preventDefault(); return wrap(i, wk[0], wk[1]); }
-        if (mod && e.shiftKey && e.key === "Enter") { e.preventDefault(); return insertBreak(i); }
+        if (mod && e.shiftKey && e.key === "Enter" && sceneBreaks) { e.preventDefault(); return insertBreak(i); }
         if (e.key === "Escape" && (showsRendered(b) || showsLive(b))) { e.preventDefault(); el.blur(); return; }
         if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             e.preventDefault();
@@ -583,16 +583,18 @@ export function BlockEditor({ value, onChange, breaks = [] }) {
     const curBlock = blocks[cur.current.i];
     const kindOf = (b) => (!b ? "" : b.kind === "h" ? `h${b.level}` : b.kind === "quote" && /^\[!/.test(b.text) ? "callout" : b.kind);
     const numbers = olNumbers(blocks);
-    return html`<div class="block-editor" ref=${box}>
+    // start editing the first block (a block or scratchpad opened for editing)
+    useEffect(() => { if (autoFocus) { focus.current = { i: 0 }; setDoc((d) => ({ ...d })); } }, []);
+    return html`<div class=${`block-editor ${compact ? "compact" : ""}`} ref=${box}>
         <div class="be-toolbar" role="toolbar" aria-label="Formatting">
-            <span class="be-group">${KIND_BUTTONS.map(([k, label, tip]) => html`<button class=${`small ${kindOf(curBlock) === k ? "on" : ""}`} title=${tip} aria-label=${tip}
+            <span class="be-group">${KIND_BUTTONS.filter(([k]) => callouts || k !== "callout").map(([k, label, tip]) => html`<button class=${`small ${kindOf(curBlock) === k ? "on" : ""}`} title=${tip} aria-label=${tip}
                 onMouseDown=${tool((i) => setKind(i, k))}>${label}</button>`)}</span>
             <span class="be-group">${WRAPS.map(([l, r, label, tip]) => html`<button class="small" title=${tip} aria-label=${tip} onMouseDown=${tool((i) => wrap(i, l, r))}>${label}</button>`)}</span>
-            <span class="be-group">
+            ${sceneBreaks && html`<span class="be-group">
                 <button class="small" title="Insert a centred scene break line (Ctrl+Shift+Enter)" onMouseDown=${tool((i) => insertBreak(i))}>✱ Break</button>
                 ${breaks.length > 1 && html`<select class="be-break-pick" value=${sceneBreak} title="Scene break image" aria-label="Scene break image" onChange=${(e) => setBreakImg(e.target.value)}>
                     ${breaks.map((x) => html`<option value=${x}>${x.replace(/^pb-|\.\w+$/g, "")}</option>`)}</select>`}
-            </span>
+            </span>`}
             <span class="be-group">
                 <button class="small" title="Undo (Ctrl+Z)" aria-label="Undo" disabled=${!hist.current.undo.length} onMouseDown=${tool(() => restore("undo", "redo"))}>↶</button>
                 <button class="small" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled=${!hist.current.redo.length} onMouseDown=${tool(() => restore("redo", "undo"))}>↷</button>
@@ -637,7 +639,7 @@ export function BlockEditor({ value, onChange, breaks = [] }) {
                     onBlur=${() => { if (editing === b.id) setEditing(null); }} />
             </div>`)}
         </div>
-        <div class="plan-hint muted">Enter: new paragraph · Shift+Enter: line break · "# ", "- ", "1. ", "> " at the start: heading, list, quote · Tab: indent list · Alt+↑↓: move · Ctrl+B / I / K: bold, italic, link · Ctrl+Shift+Enter: scene break · click text to edit it, Escape to show it formatted · Ctrl+click a link to open it</div>
+        <div class="plan-hint muted">Enter: new paragraph · Shift+Enter: line break · "# ", "- ", "1. ", "> " at the start: heading, list, quote · Tab: indent list · Alt+↑↓: move · Ctrl+B / I / K: bold, italic, link · ${sceneBreaks ? "Ctrl+Shift+Enter: scene break · " : ""}click text to edit it, Escape to show it formatted · Ctrl+click a link to open it</div>
     </div>`;
 }
 
