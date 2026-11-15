@@ -11,7 +11,7 @@ license=('MIT')
 depends=("$_electron")
 options=('!strip' '!debug')
 
-_repo="$(realpath "$startdir/../..")"
+_repo="${WB_REPO:-$(realpath "$startdir/../..")}"
 
 pkgver() {
     cd "$_repo"
