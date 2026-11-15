@@ -14,11 +14,13 @@ import { Plans } from "./lib/plans.js";
 import { Stats } from "./lib/stats.js";
 import { Worlds } from "./lib/worlds.js";
 import { fromText, fieldNamed } from "./public/stats-core.js";
-import { patchNote, trashNote } from "./lib/write.js";
+import { patchNote, trashNote, createNote } from "./lib/write.js";
 import { renderMarkdown } from "./lib/render.js";
 import { asCallout, renderTemplate } from "./lib/template.js";
 import { foldStock } from "./lib/ledger.js";
 import { Renamer } from "./lib/rename.js";
+import { Search } from "./lib/search.js";
+import { CALLOUT_STYLES_NOTE, mergeStyles } from "./public/callout-style.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const arg = (name, def) => { const i = process.argv.indexOf(`--${name}`); return i > -1 ? process.argv[i + 1] : def; };
@@ -39,7 +41,7 @@ const VAULT_SOURCES = [["--vault", arg("vault")], ["settings", readSettings().va
 const startSource = VAULT_SOURCES.find(([, v]) => v);
 const isFolder = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
-let vault = null, novels, blueprints, store, plans, stats, worlds, renamer;
+let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, search;
 let vaultSource = null, vaultProblem = null, epoch = 0;
 const clients = new Set();
 const version = () => epoch * 1e9 + (vault?.version ?? 0);
@@ -57,6 +59,7 @@ async function openVault(dir, source) {
     stats = new Stats(vault, novels, store);
     worlds = new Worlds(vault, store);
     renamer = new Renamer(vault, store, worlds);
+    search = new Search(vault, novels, store);
     novels.sheetHook = (novel, owner, set) => stats.sheetValues(novel, owner, set);
     vault.on("change", broadcast);
     vault.watch();
@@ -69,6 +72,10 @@ const STATIC = {
     "/app.js": ["public/app.js", "text/javascript"],
     "/style.css": ["public/style.css", "text/css"],
     "/outline.js": ["public/outline.js", "text/javascript"],
+    "/blocks.js": ["public/blocks.js", "text/javascript"],
+    "/callout-style.js": ["public/callout-style.js", "text/javascript"],
+    "/callout-designer.js": ["public/callout-designer.js", "text/javascript"],
+    "/writer.js": ["public/writer.js", "text/javascript"],
     "/stats-core.js": ["public/stats-core.js", "text/javascript"],
     "/map-core.js": ["public/map-core.js", "text/javascript"],
     "/world.js": ["public/world.js", "text/javascript"],
@@ -147,6 +154,21 @@ const routes = {
         return { ...page, plan: plans.describe(p), stats: stats.describeNote(p), creatureStats: page.collection === "Creatures" ? stats.creatureUses(p) : undefined };
     },
     "GET /api/blueprint": ({ q }) => blueprints.tree(need(q.get("item"), "item"), Number(q.get("count") ?? 1)),
+    "GET /api/search": ({ q }) => search.run({ q: q.get("q") ?? "", novel: q.get("novel") || null, kind: q.get("kind") || null, limit: Math.min(200, Number(q.get("limit") ?? 80) || 80) }),
+    // callout designer: styles per callout type (defaults for types the note doesn't set)
+    "GET /api/callout-styles": () => {
+        const n = vault.notes.get(CALLOUT_STYLES_NOTE);
+        const saved = n?.fm["callout-styles"] && typeof n.fm["callout-styles"] === "object" ? n.fm["callout-styles"] : {};
+        return { styles: mergeStyles(saved), saved: Object.keys(saved), mtime: n?.mtime ?? null, note: CALLOUT_STYLES_NOTE };
+    },
+    "POST /api/callout-styles": async ({ req }) => {
+        const b = await json(req);
+        if (!b.styles || typeof b.styles !== "object") throw fail(400, "Missing styles");
+        if (vault.notes.has(CALLOUT_STYLES_NOTE)) await patchNote(vault, CALLOUT_STYLES_NOTE, { set: { "callout-styles": b.styles }, baseMtime: b.baseMtime });
+        else await createNote(vault, CALLOUT_STYLES_NOTE, { type: "config", "callout-styles": b.styles },
+            "Callout styles for World Builder's callout designer (Tools → Callout designer). Edit them there.\n");
+        return { mtime: vault.notes.get(CALLOUT_STYLES_NOTE)?.mtime ?? null };
+    },
     "GET /api/qa": () => ({ ...store.qa(), stats: stats.qa() }),
     "POST /api/render": async ({ req }) => ({ html: renderMarkdown((await json(req)).markdown ?? "", vault) }),
 
@@ -232,6 +254,36 @@ const routes = {
             volume: volume ? { path: volume.path, title: volume.title, label: plans.volumeLabel(volume) } : null,
             prev: nums.filter((x) => x < n).at(-1) ?? null, next: nums.find((x) => x > n) ?? null,
         };
+    },
+    // the chapter writer: a chapter note's frontmatter and text (null when the chapter has no note yet)
+    "GET /api/write": ({ q }) => {
+        const novel = getNovel(q.get("novel"));
+        const n = Number(need(q.get("n"), "chapter"));
+        const c = novels.chapters(novel).find((x) => x.number === n);
+        const note = c ? vault.notes.get(c.path) : null;
+        const planNote = plans.chapterPlans(novel).get(n);
+        const nums = plans.chapters(novel).map((x) => x.number);
+        // scene break images (pb-*), the ones this novel uses most first; config `scene-break` comes first when set
+        const used = new Map();
+        for (const ch of novels.chapters(novel)) for (const m of (vault.notes.get(ch.path)?.body ?? "").matchAll(/!\[\[([^\]|#]+)/g)) used.set(m[1].trim(), (used.get(m[1].trim()) ?? 0) + 1);
+        const images = [...vault.files].filter((f) => /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(f));
+        const found = images.filter((f) => /^pb-/i.test(f.split("/").pop())).map((f) => f.split("/").pop())
+            .sort((x, y) => (used.get(y) ?? 0) - (used.get(x) ?? 0) || x.localeCompare(y));
+        const cfgBreak = novel.config["scene-break"] ? String(novel.config["scene-break"]).replace(/^!?\[\[|\]\]$/g, "") : null;
+        const breaks = [...new Set([cfgBreak, ...found].filter(Boolean))];
+        return {
+            breaks,
+            novel: novel.name, folder: novel.folder, n, workingTitle: String(planNote?.fm.title ?? ""),
+            chapter: note ? { path: note.path, name: note.name, title: c.title, fm: note.fm, body: note.body, mtime: note.mtime } : null,
+            prev: nums.filter((x) => x < n).at(-1) ?? null, next: nums.find((x) => x > n) ?? null,
+        };
+    },
+    "POST /api/write/chapter": async ({ req }) => {
+        const b = await json(req);
+        const novel = getNovel(b.novel);
+        const rel = await novels.createChapter(novel, Number(need(b.n, "chapter")), b.title ?? "");
+        await plans.afterPatch(rel);
+        return { path: rel };
     },
     "GET /api/callout": ({ q }) => {
         const ledger = ledgerAt(q.get("ledger"));
@@ -434,12 +486,22 @@ const server = http.createServer(async (req, res) => {
     }
 });
 
-if (startSource) {
-    const [source, value] = startSource;
-    const dir = expand(value);
-    if (isFolder(dir)) await openVault(dir, source);
-    else { vaultProblem = `Vault folder not found: ${dir} (from ${source})`; console.error(`${vaultProblem}. Choose one on the Settings page.`); }
-} else console.error("No vault folder set yet. Choose one on the Settings page.");
-server.listen(PORT, HOST, () => {
-    console.log(`World Builder: http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}  (${vault ? `vault: ${vault.root}, ${vault.notes.size} notes` : "no vault yet: open Settings"})`);
-});
+/**
+ * Open the vault (--vault, settings.json, BOOKS_VAULT) and listen. `node server.js` calls it; the Electron app imports
+ * this module and calls it with port 0 (any free port). Resolves with the port in use.
+ */
+export async function start({ port = PORT, host = HOST } = {}) {
+    if (startSource) {
+        const [source, value] = startSource;
+        const dir = expand(value);
+        if (isFolder(dir)) await openVault(dir, source);
+        else { vaultProblem = `Vault folder not found: ${dir} (from ${source})`; console.error(`${vaultProblem}. Choose one on the Settings page.`); }
+    } else console.error("No vault folder set yet. Choose one on the Settings page.");
+    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, host, resolve); });
+    const actual = server.address().port;
+    console.log(`World Builder: http://${host === "0.0.0.0" ? "localhost" : host}:${actual}  (${vault ? `vault: ${vault.root}, ${vault.notes.size} notes` : "no vault yet: open Settings"})`);
+    return { port: actual, server };
+}
+
+// run directly (node server.js, the systemd service): start at once
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await start();

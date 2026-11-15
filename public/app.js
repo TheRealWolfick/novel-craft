@@ -3,8 +3,10 @@ import { h, render } from "preact";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "preact/hooks";
 import htm from "htm";
 import { parseOutline, serializeOutline } from "./outline.js";
-import { WorldView } from "./world.js";
 import { MapEditor } from "./map-editor.js";
+import { WorldView, WorldOutline } from "./world.js";
+import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter } from "./writer.js";
+import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
 import { FIELD_TYPES, normalizeTemplates, checkTemplate, checkValue, fromText, toText, parseResource, computeValues, displayValue, defaultKey, fieldId, namesField, fieldNamed } from "./stats-core.js";
 
 const html = htm.bind(h);
@@ -152,10 +154,12 @@ addEventListener("beforeunload", (e) => { if (dirtyForms.size) e.preventDefault(
 
 // ------------------------------------------------------------------ side drawer (note and chapter links in tables and inside the drawer)
 
-// the five most recent drawer pages (hrefs #/note/… or #/chapter/…), newest first; recent[0] is shown.
-// The drawer never closes: it collapses to a tab on the right edge and stays mounted, so unsaved edits survive navigation.
+// The drawer has three tabs: the viewer (the five most recent drawer pages, hrefs #/note/… or #/chapter/…, newest
+// first; recent[0] is shown), lookup (search everything, with recently opened results) and the novel you are in.
+// It never closes: it collapses to buttons on the right edge and stays mounted, so unsaved edits survive navigation.
 const DRAWER_RECENT = 5;
-let drawer = { recent: [], open: false };
+const DRAWER_TABS = [["viewer", "Viewer"], ["lookup", "Lookup"], ["datastore", "Data store"], ["taxonomy", "Taxonomy"], ["novel", "Novel"]];
+let drawer = { recent: [], open: false, tab: "viewer" };
 const drawerListeners = new Set();
 const setDrawer = (d) => { drawer = d; drawerListeners.forEach((f) => f(d)); };
 function useDrawer() {
@@ -164,12 +168,14 @@ function useDrawer() {
     return d;
 }
 function collapseDrawer() { if (drawer.open) setDrawer({ ...drawer, open: false }); }
-function expandDrawer() { if (drawer.recent.length && !drawer.open) setDrawer({ ...drawer, open: true }); }
-// opening a page moves it to the front of the recent list (a known page moves up, others shift right)
+function expandDrawer() { if (!drawer.open) setDrawer({ ...drawer, open: true }); }
+/** Open the drawer on a tab (viewer, lookup, novel) */
+function openDrawerTab(tab) { setDrawer({ ...drawer, open: true, tab }); }
+// opening a page shows the viewer and moves the page to the front of the recent list (a known page moves up, others shift right)
 function openInDrawer(href) {
-    if (drawer.recent[0] === href) return expandDrawer();
+    if (drawer.recent[0] === href) return setDrawer({ ...drawer, open: true, tab: "viewer" });
     if (!confirmDiscard("drawer")) return;
-    setDrawer({ recent: [href, ...drawer.recent.filter((h) => h !== href)].slice(0, DRAWER_RECENT), open: true });
+    setDrawer({ ...drawer, recent: [href, ...drawer.recent.filter((h) => h !== href)].slice(0, DRAWER_RECENT), open: true, tab: "viewer" });
 }
 // Note and chapter links inside a [data-drawer] container open in the drawer; [data-page] links and modified clicks don't
 document.addEventListener("click", (e) => {
@@ -178,7 +184,15 @@ document.addEventListener("click", (e) => {
     e.preventDefault();
     openInDrawer(a.getAttribute("href"));
 });
-addEventListener("keydown", (e) => { if (e.key === "Escape" && drawer.open && !document.querySelector(".lightbox")) collapseDrawer(); });
+// Escape collapses the drawer (not while typing in the writer, and not under an open lightbox)
+// Ctrl+[ opens / closes the writer (left), Ctrl+] the drawer (right), from anywhere
+addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || (e.key !== "[" && e.key !== "]")) return;
+    e.preventDefault();
+    if (e.key === "[") toggleWriter();
+    else setDrawer({ ...drawer, open: !drawer.open });
+});
+addEventListener("keydown", (e) => { if (e.key === "Escape" && drawer.open && !document.querySelector(".lightbox") && !e.target.closest?.(".writer")) collapseDrawer(); });
 
 // a renamed note's drawer page follows it
 function renameInDrawer(from, to) { if (drawer.recent.includes(from)) setDrawer({ ...drawer, recent: drawer.recent.map((h) => (h === from ? to : h)) }); }
@@ -186,7 +200,7 @@ function renameInDrawer(from, to) { if (drawer.recent.includes(from)) setDrawer(
 // a deleted note leaves the recent list; the drawer collapses when nothing is left
 function dropFromDrawer(href) {
     const recent = drawer.recent.filter((h) => h !== href);
-    setDrawer({ recent, open: drawer.open && recent.length > 0 });
+    setDrawer({ ...drawer, recent, open: drawer.open && (recent.length > 0 || drawer.tab !== "viewer") });
 }
 
 // Choosing an item for a form (a ledger line) from the drawer: while set, collection pages of `collections` and item
@@ -210,6 +224,7 @@ const parseDrawerHref = (href) => href.replace(/^#\//, "").split("/").map(decode
 function drawerLabel(href, index) {
     const [name, ...args] = parseDrawerHref(href);
     if (name === "chapter") return `Chapter ${args[1]}`;
+    if (name === "newchar") return "New character";
     if (name === "c") return collectionLabel(args.join("/"));
     if (name === "new") return `New ${index?.schema.collections[args.join("/")]?.label ?? collectionLabel(args.join("/"))}`;
     const path = args.join("/");
@@ -217,32 +232,306 @@ function drawerLabel(href, index) {
     return n?.fm.title || n?.name || path.split("/").pop().replace(/\.md$/, "");
 }
 
-function Drawer({ index }) {
+function Drawer({ index, novel }) {
     const d = useDrawer();
+    const tab = d.tab === "novel" && !novel ? "viewer" : d.tab;
+    // panes stay mounted once shown, so a half-typed search or unsaved edits survive switching tabs
+    const [seen, setSeen] = useState(() => new Set([tab]));
+    useEffect(() => { if (!seen.has(tab)) setSeen(new Set([...seen, tab])); }, [tab]);
+    const tabs = DRAWER_TABS.filter(([k]) => k !== "novel" || novel);
+    const label = (h) => drawerLabel(h, index);
+    const href = d.recent[0];
+    const sideLabel = (k, l) => (k === "viewer" && href ? `${l}: ${label(href)}` : k === "novel" && novel ? `${l}: ${novelName(index, novel)}` : l);
+    return html`<div class=${`drawer-wrap ${d.open ? "open" : "collapsed"}`}>
+        <div class="drawer-side" role="group" aria-label="Open the drawer">${tabs.map(([k, l]) => html`<button key=${k}
+            class=${`drawer-tab ${k === tab ? "current" : ""}`} title=${sideLabel(k, l)} tabIndex=${d.open ? -1 : 0}
+            onClick=${() => openDrawerTab(k)}><span>${sideLabel(k, l)}</span></button>`)}</div>
+        <aside class="drawer" data-drawer inert=${!d.open}>
+            <div class="drawer-tabs" role="tablist">
+                ${tabs.map(([k, l]) => html`<button key=${k} role="tab" aria-selected=${k === tab} class=${k === tab ? "on" : ""} onClick=${() => openDrawerTab(k)}>${sideLabel(k, l)}</button>`)}
+                <span class="grow" />
+                <button class="small" title="Collapse (Ctrl+])" onClick=${collapseDrawer}>»</button>
+            </div>
+            <div class="drawer-pane" hidden=${tab !== "viewer"}><${DrawerViewer} index=${index} d=${d} /></div>
+            ${seen.has("lookup") && html`<div class="drawer-pane" hidden=${tab !== "lookup"}><${Lookup} index=${index} novel=${novel} active=${tab === "lookup" && d.open} /></div>`}
+            ${seen.has("datastore") && html`<div class="drawer-pane" hidden=${tab !== "datastore"}><${BrowsePane} index=${index} taxonomy=${false} active=${tab === "datastore" && d.open} /></div>`}
+            ${seen.has("taxonomy") && html`<div class="drawer-pane" hidden=${tab !== "taxonomy"}><${BrowsePane} index=${index} taxonomy=${true} active=${tab === "taxonomy" && d.open} /></div>`}
+            ${novel && seen.has("novel") && html`<div class="drawer-pane" hidden=${tab !== "novel"}><${NovelDrawer} key=${novel} folder=${novel} index=${index} /></div>`}
+        </aside>
+    </div>`;
+}
+const novelName = (index, folder) => index?.novels.find((n) => n.folder === folder)?.name ?? folder.replace(/^\d+\.\s*/, "");
+
+/** The viewer tab: recent pages as boxes, the newest one shown */
+function DrawerViewer({ index, d }) {
     const pick = useItemPick();
-    if (!d.recent.length) return null;
+    const label = (h) => drawerLabel(h, index);
+    if (!d.recent.length) return html`<div class="drawer-body"><div class="drawer-empty muted">
+        <p>Nothing opened yet. Links in tables, the novel tab and lookup results open here.</p>
+        <button onClick=${() => openDrawerTab("lookup")}>Look something up</button></div></div>`;
     const href = d.recent[0];
     const [name, ...args] = parseDrawerHref(href);
-    const label = (h) => drawerLabel(h, index);
-    return html`<div class=${`drawer-wrap ${d.open ? "open" : "collapsed"}`}>
-        <div class="drawer-backdrop" onClick=${collapseDrawer} />
-        <button class="drawer-tab" title=${`Open drawer: ${label(href)}`} onClick=${expandDrawer} tabIndex=${d.open ? -1 : 0}><span>${label(href)}</span></button>
-        <aside class="drawer" data-drawer inert=${!d.open}>
-            <div class="drawer-head">
-                <div class="drawer-recent">${d.recent.map((h, i) => html`<button key=${h} class=${i ? "" : "on"} title=${h.replace(/^#\//, "")}
-                    onClick=${() => openInDrawer(h)}>${label(h)}</button>`)}</div>
-                <button onClick=${() => { collapseDrawer(); go(href); }}>Open page</button>
-                <button title="Collapse" onClick=${collapseDrawer}>»</button>
+    return html`<div class="drawer-head">
+            <div class="drawer-recent">${d.recent.map((h, i) => html`<button key=${h} class=${i ? "" : "on"} title=${h.replace(/^#\//, "")}
+                onClick=${() => openInDrawer(h)}>${label(h)}</button>`)}</div>
+            <button onClick=${() => { collapseDrawer(); go(href); }}>Open page</button>
+        </div>
+        <div class="drawer-body" key=${href}>
+            ${pick && html`<div class="pick-banner"><span>Choosing for <b>${pick.label}</b>: press Add on a row, or open one and press Use this.</span>
+                <span class="row">${pick.collections.map((c) => html`<button class=${`small ${name === "c" && args.join("/") === c ? "on" : ""}`} onClick=${() => openInDrawer(`#/c/${encodeURIComponent(c)}`)}>${collectionLabel(c)}</button>`)}
+                    <button class="small" onClick=${() => setItemPick(null)}>Cancel</button></span></div>`}
+            ${name === "chapter" ? html`<${ChapterView} folder=${args[0]} n=${args[1]} scope="drawer" />`
+            : name === "c" ? html`<${CollectionView} index=${index} collection=${args.join("/")} novelFilter="" scope="drawer" />`
+            : name === "new" ? html`<${NoteForm} index=${index} collection=${args.join("/")} scope="drawer" />`
+            : name === "newchar" ? html`<${NoteForm} index=${index} collection="characters" novel=${args[0]} scope="drawer" />`
+            : html`<${NoteView} index=${index} path=${args.join("/")} scope="drawer" />`}</div>`;
+}
+
+// ------------------------------------------------------------------ lookup (drawer tab)
+
+const LOOKUP_KINDS = [["", "All"], ["data", "Data store"], ["taxonomy", "Taxonomy"], ["chapter", "Chapters"], ["character", "Characters"], ["plan", "Plans"], ["ledger", "Ledgers"], ["other", "Other"]];
+const KIND_LABEL = Object.fromEntries(LOOKUP_KINDS);
+const LOOKUP_RECENT = 30;
+
+// Recently opened lookup results, newest first (a convenience kept in localStorage), shared by the lookup, data store
+// and taxonomy tabs
+let lookupRecent = store.get("lookupRecent", []);
+const recentListeners = new Set();
+const saveRecent = (l) => { lookupRecent = l; store.set("lookupRecent", l); recentListeners.forEach((f) => f(l)); };
+const recent = {
+    add: (r) => saveRecent([{ ...r, at: Date.now() }, ...lookupRecent.filter((x) => x.href !== r.href)].slice(0, LOOKUP_RECENT)),
+    remove: (href) => saveRecent(lookupRecent.filter((x) => x.href !== href)),
+    clear: () => saveRecent([]),
+};
+function useLookupRecent() {
+    const [list, set] = useState(lookupRecent);
+    useEffect(() => { recentListeners.add(set); return () => recentListeners.delete(set); }, []);
+    return { list, ...recent };
+}
+
+/** "a b" -> text with every word marked */
+function Marked({ text, words }) {
+    if (!words.length || !text) return text ?? "";
+    const re = new RegExp(`(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+    return text.split(re).map((part, i) => (i % 2 ? html`<mark>${part}</mark>` : part));
+}
+
+function Lookup({ index, novel, active }) {
+    const [q, setQ] = useState(() => store.get("lookupQuery", ""));
+    const [term, setTerm] = useState(q);
+    const [kind, setKind] = useState("");
+    const [onlyNovel, setOnlyNovel] = useState(store.get("lookupOnlyNovel", true));
+    const [hl, setHl] = useState(0);
+    const recent = useLookupRecent();
+    const input = useRef();
+    useEffect(() => { if (active) setTimeout(() => input.current?.focus(), 60); }, [active]);
+    useEffect(() => { const t = setTimeout(() => { setTerm(q.trim()); store.set("lookupQuery", q); }, 200); return () => clearTimeout(t); }, [q]);
+    const scoped = novel && onlyNovel ? novel : "";
+    const { data, error } = useApi(term ? `/api/search?${qs({ q: term, kind, novel: scoped })}` : null);
+    const words = term.toLowerCase().split(/\s+/).filter(Boolean);
+    const results = term && data ? data.results : [];
+    useEffect(() => setHl(0), [term, kind, scoped]);
+    const hrefOf = (r) => noteHref(r.path);
+    const open = (r) => {
+        const href = r.href ?? hrefOf(r);
+        recent.add({ href, label: r.title || r.name, kind: r.kind, hint: r.hint ?? hintOf(r), path: r.path, novel: r.novel, chapter: r.chapter });
+        openInDrawer(href);
+    };
+    const hintOf = (r) => (r.kind === "data" || r.kind === "taxonomy" ? collectionLabel(r.collection)
+        : r.kind === "chapter" ? `${r.novelName} · chapter ${r.chapter ?? "?"}` : r.novelName ? `${r.novelName}${r.planType ? ` · ${r.planType}` : ""}` : r.path.split("/").slice(0, -1).join(" / "));
+    const onKey = (e) => {
+        if (e.key === "ArrowDown") { e.preventDefault(); setHl(Math.min(hl + 1, results.length - 1)); }
+        if (e.key === "ArrowUp") { e.preventDefault(); setHl(Math.max(hl - 1, 0)); }
+        if (e.key === "Enter" && results[hl]) open(results[hl]);
+        if (e.key === "Escape" && q) { e.stopPropagation(); setQ(""); }
+    };
+    const writeBtn = (r) => r.kind === "chapter" && r.chapter != null && html`<button class="small" title="Open in the writer"
+        onClick=${(e) => { e.stopPropagation(); recent.add({ href: hrefOf(r), label: r.title || r.name, kind: r.kind, hint: hintOf(r), path: r.path, novel: r.novel, chapter: r.chapter }); openWriter(r.novel, r.chapter); }}>✎ Write</button>`;
+    return html`<div class="drawer-body lookup">
+        <div class="lookup-bar">
+            <input ref=${input} type="search" class="grow" value=${q} placeholder="Look up notes, taxonomy, chapter text…" aria-label="Look up"
+                onInput=${(e) => setQ(e.target.value)} onKeyDown=${onKey} />
+            ${novel && html`<label class="row muted lookup-scope" title="Only this novel's chapters, characters, plans and ledgers (data store notes always count)">
+                <input type="checkbox" checked=${onlyNovel} onChange=${(e) => { setOnlyNovel(e.target.checked); store.set("lookupOnlyNovel", e.target.checked); }} />
+                Only ${novelName(index, novel)}</label>`}
+        </div>
+        ${term && html`<div class="lookup-kinds">${LOOKUP_KINDS.map(([k, l]) => {
+            const n = k ? data?.counts?.[k] ?? 0 : data?.total ?? 0;
+            return html`<button key=${k} class=${`chip ${kind === k ? "on" : ""} ${!n && k !== kind ? "off" : ""}`} onClick=${() => setKind(k)}>${l} <span class="count">${n}</span></button>`;
+        })}</div>`}
+        ${error && html`<p class="error">${error}</p>`}
+        ${term ? html`<ul class="lookup-list" role="listbox" aria-label="Results">
+            ${!data ? html`<li class="muted">Searching…</li>` : !results.length ? html`<li class="muted">Nothing found for “${term}”.</li>` : results.map((r, i) => html`<li key=${r.path} role="option" aria-selected=${i === hl}
+                class=${`lookup-item ${i === hl ? "hl" : ""}`} onClick=${() => open(r)} onMouseEnter=${() => setHl(i)}>
+                <div class="lookup-line"><b><${Marked} text=${r.title || r.name} words=${words} /></b>
+                    ${r.title && r.title !== r.name && html`<span class="muted">${r.name}</span>`}
+                    <span class=${`badge kind-${r.kind}`}>${KIND_LABEL[r.kind] ?? r.kind}</span>
+                    <span class="muted lookup-hint">${hintOf(r)}</span>
+                    ${r.where === "text" && r.matches > 1 && html`<span class="muted">${r.matches} matches</span>`}
+                    <span class="grow" />${writeBtn(r)}</div>
+                ${r.snippet && html`<div class="lookup-snippet"><${Marked} text=${r.snippet} words=${words} /></div>`}
+            </li>`)}
+            ${data && data.results.length < (kind ? data.counts[kind] : data.total) && html`<li class="muted">Showing the best ${data.results.length}; add words to narrow it down.</li>`}
+        </ul>` : html`<div class="lookup-recent">
+            <div class="spread"><h3>Recently opened</h3>${recent.list.length > 0 && html`<button class="small" onClick=${recent.clear}>Clear</button>`}</div>
+            ${!recent.list.length ? html`<p class="muted">Results you open are listed here.</p>` : html`<ul class="lookup-list">${recent.list.map((r) => html`<li key=${r.href} class="lookup-item" onClick=${() => open(r)}>
+                <div class="lookup-line"><b>${r.label}</b><span class=${`badge kind-${r.kind}`}>${KIND_LABEL[r.kind] ?? r.kind}</span><span class="muted lookup-hint">${r.hint}</span>
+                    <span class="grow" />${writeBtn(r)}
+                    <button class="small" title="Remove from the list" aria-label=${`Remove ${r.label}`} onClick=${(e) => { e.stopPropagation(); recent.remove(r.href); }}>×</button></div>
+            </li>`)}</ul>`}
+        </div>`}
+    </div>`;
+}
+
+// ------------------------------------------------------------------ data store / taxonomy (drawer tabs)
+
+/**
+ * Every data store (or taxonomy) note, one collapsible group per collection, for finding something without knowing
+ * its name. Only one group is open at a time (big collections stay cheap); the filter hides what doesn't match and
+ * opens the first group with matches when the open one has none. Opening a note shows it in the viewer.
+ */
+function BrowsePane({ index, taxonomy, active }) {
+    const key = taxonomy ? "taxonomy" : "datastore";
+    const [q, setQ] = useState("");
+    const [open, setOpenState] = useState(() => store.get(`browseOpen:${key}`, null));
+    const setOpen = (c) => { setOpenState(c); store.set(`browseOpen:${key}`, c); };
+    const pick = useItemPick();
+    const input = useRef();
+    useEffect(() => { if (active) setTimeout(() => input.current?.focus(), 60); }, [active]);
+    const groups = useMemo(() => {
+        if (!index) return [];
+        const cols = Object.keys(index.schema.collections).filter((c) => c.startsWith("Taxonomy/") === taxonomy);
+        return cols.map((c) => {
+            const notes = index.inCollection(c);
+            const rankedAll = notes.length > 0 && notes.every(ranked);
+            const sorted = [...notes].sort((a, b) => (rankedAll ? Number(a.fm.class) - Number(b.fm.class) : 0) || String(a.fm.title || a.name).localeCompare(String(b.fm.title || b.name)));
+            return { c, label: collectionLabel(c), notes: sorted, rankedAll };
+        });
+    }, [index, taxonomy]);
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const hay = (n) => [n.name, n.fm.title, ...asList(n.fm.aliases), n.fm.description, ...asList(n.fm.cat).map(linkLabel), n.fm.parent && linkLabel(n.fm.parent)]
+        .filter(Boolean).join(" ").toLowerCase();
+    const shown = groups.map((g) => ({ ...g, hits: words.length ? g.notes.filter((n) => { const h = hay(n); return words.every((w) => h.includes(w)); }) : g.notes }))
+        .filter((g) => !words.length || g.hits.length);
+    const current = shown.some((g) => g.c === open) ? open : words.length ? shown[0]?.c ?? null : null;
+    const openNote = (n, g) => {
+        const href = noteHref(n.path);
+        recent.add({ href, label: n.fm.title || n.name, kind: taxonomy ? "taxonomy" : "data", hint: g.label, path: n.path });
+        openInDrawer(href);
+    };
+    const hint = (n, g) => taxonomy
+        ? [g.rankedAll ? `#${n.fm.class}` : "", n.fm.parent ? `in ${linkLabel(n.fm.parent)}` : ""].filter(Boolean).join(" · ")
+        : String(n.fm.description ?? "").replace(/\s+/g, " ").slice(0, 110);
+    if (!index) return html`<div class="drawer-body"><${Loading} /></div>`;
+    return html`<div class="drawer-body browse">
+        <div class="lookup-bar">
+            <input ref=${input} type="search" class="grow" value=${q} placeholder=${taxonomy ? "Filter taxonomy…" : "Filter the data store…"} aria-label="Filter"
+                onInput=${(e) => setQ(e.target.value)} onKeyDown=${(e) => { if (e.key === "Escape" && q) { e.stopPropagation(); setQ(""); } }} />
+            ${words.length > 0 && html`<span class="muted">${shown.reduce((s, g) => s + g.hits.length, 0)} found</span>`}
+        </div>
+        ${!shown.length && html`<p class="muted">Nothing matches “${q}”.</p>`}
+        <div class="browse-groups">${shown.map((g) => {
+            const isOpen = g.c === current;
+            return html`<section key=${g.c} class=${`browse-group ${isOpen ? "open" : ""}`}>
+                <div class="browse-head">
+                    <button class="browse-toggle" aria-expanded=${isOpen} onClick=${() => setOpen(isOpen ? null : g.c)}>
+                        <span class="caret" aria-hidden="true">▸</span><b>${g.label}</b>
+                        <span class="count">${words.length ? `${g.hits.length} / ${g.notes.length}` : g.notes.length}</span></button>
+                    <button class="small" title=${`New ${g.label}`} onClick=${() => openInDrawer(`#/new/${encodeURIComponent(g.c)}`)}>+ New</button>
+                </div>
+                ${isOpen && html`<ul class="lookup-list browse-list">${g.hits.map((n) => html`<li key=${n.path} class="lookup-item" onClick=${() => openNote(n, g)}>
+                    <div class="lookup-line"><b><${Marked} text=${n.fm.title || n.name} words=${words} /></b>
+                        ${n.fm.title && n.fm.title !== n.name && html`<span class="muted">${n.name}</span>`}
+                        <span class="grow" />
+                        ${pickable(pick, g.c) && html`<button class="small primary" onClick=${(e) => { e.stopPropagation(); pick.pick(n.name); }}>Add</button>`}</div>
+                    ${hint(n, g) && html`<div class="muted browse-hint"><${Marked} text=${hint(n, g)} words=${words} /></div>`}
+                </li>`)}
+                ${!g.hits.length && html`<li class="muted">None yet.</li>`}</ul>`}
+            </section>`;
+        })}</div>
+    </div>`;
+}
+
+// ------------------------------------------------------------------ novel (drawer tab)
+
+const NOVEL_DRAWER_TABS = [["plan", "Grand plan"], ["plots", "Plots"], ["people", "Characters"], ["world", "World"]];
+
+function NovelDrawer({ folder, index }) {
+    const { data: novel, error } = useApi(`/api/novel?${qs({ folder })}`);
+    const { data: plan } = useApi(`/api/plan?${qs({ novel: folder })}`);
+    const [tab, setTabState] = useState(store.get("drawerNovelTab", "plan"));
+    const setTab = (t) => { setTabState(t); store.set("drawerNovelTab", t); };
+    if (!novel) return html`<div class="drawer-body"><${Loading} error=${error} /></div>`;
+    return html`<div class="drawer-body novel-drawer">
+        <div class="spread">
+            <div><div class="muted">${novel.folder}</div><h2 style="margin:0">${novel.name}</h2></div>
+            <div class="row">
+                <button onClick=${() => openWriter(folder, novel.latestChapter)} title="Open the latest chapter in the writer">✎ Write chapter ${novel.latestChapter}</button>
+                <a class="button" href=${novelHref(folder)} data-page>Novel page</a>
             </div>
-            <div class="drawer-body" key=${href}>
-                ${pick && html`<div class="pick-banner"><span>Choosing for <b>${pick.label}</b>: press Add on a row, or open one and press Use this.</span>
-                    <span class="row">${pick.collections.map((c) => html`<button class=${`small ${name === "c" && args.join("/") === c ? "on" : ""}`} onClick=${() => openInDrawer(`#/c/${encodeURIComponent(c)}`)}>${collectionLabel(c)}</button>`)}
-                        <button class="small" onClick=${() => setItemPick(null)}>Cancel</button></span></div>`}
-                ${name === "chapter" ? html`<${ChapterView} folder=${args[0]} n=${args[1]} scope="drawer" />`
-                : name === "c" ? html`<${CollectionView} index=${index} collection=${args.join("/")} novelFilter="" scope="drawer" />`
-                : name === "new" ? html`<${NoteForm} index=${index} collection=${args.join("/")} scope="drawer" />`
-                : html`<${NoteView} index=${index} path=${args.join("/")} scope="drawer" />`}</div>
-        </aside>
+        </div>
+        <div class="tabs" style="margin-top:10px">${NOVEL_DRAWER_TABS.map(([k, l]) => html`<button class=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</div>
+        <div class="tab-body" key=${tab}>
+            ${tab === "people" ? html`<${NovelDrawerPeople} folder=${folder} novel=${novel} />`
+            : tab === "world" ? html`<${NovelWorld} novel=${novel} />`
+            : !plan ? html`<${Loading} />`
+            : tab === "plots" ? html`<${PlotBoard} folder=${folder} plan=${plan} />`
+            : html`<${GrandPlan} folder=${folder} plan=${plan} />`}
+        </div>
+    </div>`;
+}
+
+/** Characters (open in the viewer), other ledger owners, and a New character form in the viewer */
+function NovelDrawerPeople({ folder, novel }) {
+    const [filter, setFilter] = useState("");
+    const characterNames = new Set(novel.characters.map((c) => c.name.toLowerCase()));
+    const ledgersOf = (o) => novel.ledgers.filter((l) => l.owner.toLowerCase() === o.toLowerCase());
+    const others = [...new Set(novel.ledgers.map((l) => l.owner))].filter((o) => !characterNames.has(o.toLowerCase()));
+    const f = filter.trim().toLowerCase();
+    const chars = novel.characters.filter((c) => !f || c.name.toLowerCase().includes(f) || String(c.fm.title ?? "").toLowerCase().includes(f));
+    return html`<div>
+        <div class="row" style="margin-bottom:10px">
+            <input class="grow" type="search" placeholder="Filter characters…" value=${filter} onInput=${(e) => setFilter(e.target.value)} aria-label="Filter characters" />
+            <button class="primary" onClick=${() => openInDrawer(`#/newchar/${encodeURIComponent(folder)}`)}>+ New character</button>
+            <button onClick=${() => go(entryHref(folder, {}))}>New ledger entry</button>
+        </div>
+        <ul class="people-list">${chars.map((c) => html`<li key=${c.path}>
+            ${c.cover ? html`<span class="avatar" style=${`background-image:url("${c.cover}")`} />` : html`<span class="avatar empty" aria-hidden="true">${c.name[0]}</span>`}
+            <div class="grow"><a href=${noteHref(c.path)}><b>${c.fm.title || c.name}</b></a>
+                <div class="muted people-sub">${[c.fm.race, c.fm.role, c.fm.personality].map(shownValue).filter(Boolean).join(" · ").slice(0, 160)}</div></div>
+            <span class="row">${ledgersOf(c.name).map((l) => html`<span class="chip">${l.type} ${l.entries}</span>`)}
+                <a class="small-link" href=${ownerHref(folder, c.name)} data-page title="Ledgers and holdings page">Ledgers</a></span>
+        </li>`)}</ul>
+        ${!chars.length && html`<p class="muted">${f ? "No character matches." : "No characters yet."}</p>`}
+        ${others.length > 0 && html`<h3>Other ledger owners</h3><ul class="people-list">${others.map((o) => html`<li key=${o}>
+            <span class="avatar empty" aria-hidden="true">${o[0]}</span><div class="grow"><b>${o}</b></div>
+            <span class="row">${ledgersOf(o).map((l) => html`<span class="chip">${l.type} ${l.entries}</span>`)}<a class="small-link" href=${ownerHref(folder, o)} data-page>Ledgers</a></span>
+        </li>`)}</ul>`}
+    </div>`;
+}
+
+/** The world hierarchy of the novel's world (Worlds whose `novels` names it), as the editable outline */
+function NovelWorld({ novel }) {
+    const { data: worlds } = useApi("/api/worlds");
+    const mine = worlds?.worlds.filter((w) => w.novels?.some((n) => n.folder === novel.folder || n.name.toLowerCase() === novel.name.toLowerCase())) ?? [];
+    const key = `drawerWorld:${novel.folder}`;
+    const [picked, setPicked] = useState(store.get(key, null));
+    const choices = mine.length ? mine : worlds?.worlds ?? [];
+    const current = choices.find((w) => w.path === picked)?.path ?? choices[0]?.path ?? null;
+    const { data, error } = useApi(current ? `/api/world?${qs({ world: current })}` : null);
+    if (!worlds) return html`<${Loading} />`;
+    if (!choices.length) return html`<p class="muted">No worlds yet. Create one in the <a href="#/c/Worlds" data-page>Worlds</a> collection.</p>`;
+    return html`<div class="novel-world">
+        <div class="spread" style="margin-bottom:10px">
+            <span class="muted">${mine.length ? "" : html`No world lists ${novel.name} in its <code>novels</code>; showing all worlds.`}</span>
+            <div class="row">
+                ${choices.length > 1 && html`<select value=${current} onChange=${(e) => { setPicked(e.target.value); store.set(key, e.target.value); }} aria-label="World">
+                    ${choices.map((w) => html`<option value=${w.path}>${w.title} (${w.count})</option>`)}</select>`}
+                <a class="button" href=${noteHref(current)}>World note</a>
+                <a class="button" href=${`#/world/${encodeURIComponent(current)}`} data-page>World builder</a>
+            </div>
+        </div>
+        ${!data ? html`<${Loading} error=${error} />` : html`<${WorldOutline} key=${current} data=${data} world=${current} worlds=${worlds.worlds} />`}
     </div>`;
 }
 
@@ -448,7 +737,7 @@ function Sidebar({ index, novelFolder }) {
         <a class=${`side-pill ${route0() === "world" || route0() === "map" ? "active" : ""}`} href="#/world">World builder<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18" /></svg></a>
         ${section("datastore", "Data store", main.map((c) => html`<a class=${active(`#/c/${encodeURIComponent(c)}`)} href=${`#/c/${encodeURIComponent(c)}`}><span>${c}</span><span class="count">${index.counts[c] ?? 0}</span></a>`))}
         ${section("taxonomy", "Taxonomy", tax.map((c) => html`<a class=${active(`#/c/${encodeURIComponent(c)}`)} href=${`#/c/${encodeURIComponent(c)}`}><span>${collectionLabel(c)}</span><span class="count">${index.counts[c] ?? 0}</span></a>`))}
-        ${section("tools", "Tools", html`<a class=${active("#/qa")} href="#/qa"><span>Quality checks</span></a><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a>`)}
+        ${section("tools", "Tools", html`<a class=${active("#/qa")} href="#/qa"><span>Quality checks</span></a><a class=${active("#/callout-design")} href="#/callout-design"><span>Callout designer</span></a><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a>`)}
         <div class="theme-switch" role="group" aria-label="Theme">${THEMES.map(([m, label]) => html`<button class=${theme === m ? "on" : ""} aria-pressed=${theme === m} onClick=${() => setTheme(m)}>${label}</button>`)}</div>
     </nav>`;
 }
@@ -1423,7 +1712,8 @@ function NoteForm({ index, collection, novel, scope = "page" }) {
             if (collection === "characters") {
                 const fm = Object.fromEntries(Object.entries(vals).filter(([k, v]) => v !== "" && !(Array.isArray(v) && !v.length) && !generated.has(k)).map(([k, v]) => [k, coerce(v)]));
                 const r = await api.send("POST", "/api/character", { novel, name, fm });
-                go(noteHref(r.path));
+                if (scope === "drawer") openInDrawer(noteHref(r.path));
+                else go(noteHref(r.path));
             } else {
                 const fm = Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, coerce(v)]));
                 const r = await api.send("POST", "/api/note", { collection, name, fm });
@@ -1447,7 +1737,7 @@ function NoteForm({ index, collection, novel, scope = "page" }) {
         </div></div>
         ${err && html`<p class="error">${err}</p>`}
         <div class="row"><button class="primary" disabled=${busy || !name.trim()} onClick=${save}>Create</button>
-            <button onClick=${() => history.back()}>Cancel</button></div>
+            <button onClick=${() => (scope === "drawer" ? (drawer.recent.length > 1 ? openInDrawer(drawer.recent[1]) : collapseDrawer()) : history.back())}>Cancel</button></div>
         ${generated.size > 0 && html`<p class="muted">Generated from ledgers (not editable here): ${[...generated].join(", ")}</p>`}
     </div>`;
 }
@@ -2101,7 +2391,8 @@ function ChapterView({ folder, n, scope = "page" }) {
             </div>
         </div>
         <p class="row">
-            ${data.chapter ? html`<a href=${noteHref(data.chapter.path)}>Open chapter note</a>` : html`<span class="badge">not written yet</span>`}
+            <button class="primary" onClick=${() => openWriter(folder, num, { withPlan: scope !== "drawer" })} title="Write in the chapter writer (left); the plan stays on the right">✎ ${data.chapter ? "Write" : "Start writing"}</button>
+            ${!data.chapter && html`<span class="badge">not written yet</span>`}
             ${data.entries.length > 0 && html`<span class="muted">${unplaced} ${unplaced === 1 ? "entry" : "entries"} not yet in the chapter text</span>`}
         </p>
         <${ChapterPlan} key=${`${folder}:${num}`} folder=${folder} n=${num} plan=${data.plan} hasNote=${!!data.chapter} scope=${scope} />
@@ -2471,7 +2762,7 @@ function CalloutSettings({ folder }) {
     };
     return html`<div>
         <div class="muted"><a href=${novelHref(folder)}>${novel.name}</a></div>
-        <h1>Callout templates</h1>
+        <div class="spread"><h1>Callout templates</h1><a class="button" href="#/callout-design">Callout designer (how they look)</a></div>
         <p class="muted">Overrides are saved under <code>ledger-types</code> in <code>${novel.configPath}</code>. Shared defaults live in <code>90. Templater/Ledger Types.md</code>.</p>
         ${Object.values(novel.ledgerTypes).map((t) => {
             const own = draft[t.name]?.callouts ?? {};
@@ -2580,16 +2871,25 @@ function App() {
     const { data: settings } = useApi("/api/settings");
     const noVault = settings && !settings.vault;
     const index = useIndex(!noVault);
+    useCalloutStyles(!!settings && !noVault);
     const [novelFilter, setNovelFilter] = useState(store.get("novelFilter", ""));
     const setNF = (v) => { setNovelFilter(v); store.set("novelFilter", v); };
     const [a, b] = route.args;
-    useEffect(() => collapseDrawer(), [location.hash]);
+    const writer = useWriter();
+    useEffect(() => { collapseDrawer(); collapseWriter(); }, [location.hash]);
+    const d = useDrawer();
     // the novel you're in tints the app; data store pages follow the novel filter
     const novelFolder = !index ? null
         : ["novel", "owner", "chapter", "entry", "callouts", "newchar"].includes(route.name) ? a
         : route.name === "note" || route.name === "edit" ? index.novels.find((n) => a?.startsWith(`${n.folder}/`))?.folder ?? null
         : index.novels.find((n) => n.name === novelFilter)?.folder ?? null;
-    const accent = novelColour(index, novelFolder);
+    // the drawer's novel tab: the novel the page belongs to (not the data store filter), else the chapter being written
+    const inNovel = !index ? null
+        : ["novel", "owner", "chapter", "entry", "callouts", "newchar"].includes(route.name) ? (index.novels.some((n) => n.folder === a) ? a : null)
+        : route.name === "note" || route.name === "edit" ? index.novels.find((n) => a?.startsWith(`${n.folder}/`))?.folder ?? null
+        : null;
+    const drawerNovel = inNovel ?? (writer.folder && (writer.open || d.open) ? writer.folder : null);
+    const accent = novelColour(index, novelFolder ?? (writer.open ? writer.folder : null));
     useEffect(() => applyNovelAccent(accent), [accent]);
     let view;
     switch (route.name) {
@@ -2605,6 +2905,7 @@ function App() {
         case "entry": view = html`<${EntryEditor} key=${location.hash} index=${index} folder=${a} params=${route.params} />`; break;
         case "callouts": view = html`<${CalloutSettings} key=${a} folder=${a} />`; break;
         case "qa": view = html`<${QAView} />`; break;
+        case "callout-design": view = html`<${CalloutDesigner} />`; break;
         case "settings": view = html`<${SettingsView} settings=${settings} />`; break;
         case "world": view = html`<${WorldView} key=${a ?? ""} index=${index} world=${a ?? null} params=${route.params} />`; break;
         case "map": view = html`<${MapEditor} key=${a} index=${index} location=${a} />`; break;
@@ -2612,17 +2913,22 @@ function App() {
     }
     // no vault folder yet: the Settings page is all there is
     if (noVault) view = html`<${SettingsView} settings=${settings} />`;
-    return html`<div class="layout">
+    // the writer sits beside the open drawer; while the writer slides away it keeps the width it had
+    const beside = useRef(false);
+    if (writer.open) beside.current = d.open;
+    return html`<div class=${`layout ${writer.open ? "writing" : ""} ${d.open ? "drawer-open" : ""} ${beside.current ? "writer-beside" : ""}`}>
         <${Sidebar} index=${index} novelFolder=${novelFolder} />
         <main class="main">
             <div class="topbar"><${Search} index=${index} /><${NovelFilter} index=${index} value=${novelFilter} onChange=${setNF} /></div>
             <div class=${`view view-${route.name}`} key=${route.name + (a ?? "")}>${view}</div>
         </main>
-        <${Drawer} index=${index} />
+        ${!noVault && html`<div class=${`drawer-backdrop ${d.open || writer.open ? "on" : ""}`} onClick=${() => { collapseDrawer(); collapseWriter(); }} />
+        <${WriterDrawer} index=${index} />
+        <${Drawer} index=${index} novel=${drawerNovel} />`}
     </div>`;
 }
 
 render(html`<${App} />`, document.getElementById("app"));
 
 // shared with world.js and map-editor.js (used only inside components, so the import cycle is safe)
-export { api, useApi, qs, toast, store, go, noteHref, linkLabel, isLink, asList, openInDrawer, renameInDrawer, ConfirmButton, markDirty, confirmDiscard, Loading, useRoute, RenameDialog };
+export { api, useApi, qs, toast, store, go, noteHref, linkLabel, isLink, asList, openInDrawer, renameInDrawer, ConfirmButton, markDirty, confirmDiscard, Loading, useRoute, RenameDialog, Html, fieldInput, useNovelLinks };

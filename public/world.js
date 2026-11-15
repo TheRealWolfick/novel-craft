@@ -65,6 +65,8 @@ export function WorldView({ world, params }) {
 
 // ------------------------------------------------------------------ outline
 
+/** A world's locations as an editable tree (also the novel drawer's World tab, as WorldOutline) */
+export { Outline as WorldOutline };
 function Outline({ data, world, worlds }) {
     const tree = useTree(data.locations);
     const key = `worldClosed:${world ?? "-"}`;

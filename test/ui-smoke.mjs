@@ -45,7 +45,7 @@ const routes = [
     `#/edit/${enc(firstOf("Items"))}`, "#/new/Items", `#/newchar/${enc(novel.folder)}`,
     `#/novel/${enc(novel.folder)}`, owner && `#/owner/${enc(novel.folder)}/${enc(owner)}`,
     `#/chapter/${enc(novel.folder)}/${novel.latestChapter}`, `#/entry/${enc(novel.folder)}?owner=${enc(owner ?? "")}&type=Inventory`,
-    `#/callouts/${enc(novel.folder)}`, "#/qa", "#/settings",
+    `#/callouts/${enc(novel.folder)}`, "#/qa", "#/callout-design", "#/settings",
 ].filter(Boolean);
 
 let failed = 0;
@@ -170,7 +170,7 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     await wait(700);
     check(doc.querySelector(".drawer .class-strip a.on")?.textContent === next.textContent && !!doc.querySelector(".drawer .note-main .note-summary"),
         "clicking a class opens it in the drawer with its summary");
-    doc.querySelector(".drawer-head button[title='Collapse']").click();
+    doc.querySelector(".drawer-tabs button[title^='Collapse']").click();
     await wait(300);
 
     // notes are editable in place with a Save changes button
@@ -217,7 +217,7 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
             row.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
             await wait(900);
             check(new RegExp(`Chapter ${planned.number}\\b`).test(doc.querySelector(".drawer h1")?.textContent ?? "") && doc.querySelectorAll(".drawer .plan-row").length > 3, "chapter opens in the drawer with its plan");
-            doc.querySelector(".drawer-head button[title='Collapse']").click();
+            doc.querySelector(".drawer-tabs button[title^='Collapse']").click();
             await wait(400);
         }
 
@@ -243,7 +243,7 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
         const vol = plan.volumes.find((v) => last + 1 >= v.start && last + 1 <= (v.end ?? Infinity));
         check(saved.includes("- Smoke event\n  \t- Smoke sub event\n  \t- Second sub") && (!vol || saved.includes(`volume: ${vol.label}`)),
             "saving a new chapter plan creates the plan note with its volume", saved.slice(0, 300));
-        doc.querySelector(".drawer-head button[title='Collapse']").click();
+        doc.querySelector(".drawer-tabs button[title^='Collapse']").click();
         await wait(400);
 
         tab("Plots").click();
@@ -555,6 +555,186 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     check(!fs.existsSync(`${COPY}/${path}`) && fs.existsSync(`${COPY}/.trash/Smoke Delete Plot.md`), "second click moves the note to .trash", w.location.hash);
     const r = await send("DELETE", `/api/note?path=${enc(`${novel.folder}/config.md`)}`);
     check(r.status === 400 && fs.existsSync(`${COPY}/${novel.folder}/config.md`), "config notes can't be deleted", JSON.stringify(r));
+}
+// chapter writer (left drawer) and the drawer's Lookup and Novel tabs
+{
+    const doc = w.document;
+    const { parseBlocks, serializeBlocks, inlineHtml } = await import("../public/blocks.js");
+    const shown = (md) => inlineHtml(md).replace(/<span[^>]*>|<\/span>/g, "");
+    check(shown("\\**Knock*\\*") === "*<em>Knock</em>*" && shown("a **b** ***c***") === "a <strong>b</strong> <em><strong>c</strong></em>" && shown("5 * 3 * 2") === "5 * 3 * 2",
+        "live preview shows bold, italics and escaped stars like Obsidian", shown("\\**Knock*\\*"));
+    // click a formatted paragraph: it becomes a text box with the caret in it
+    const editPara = async (test) => {
+        const div = [...doc.querySelectorAll(".writer .be-p.be-live .be-text")].find((d) => test(d.textContent));
+        if (!div) return null;
+        div.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
+        await wait(200);
+        return doc.querySelector(".writer .be-p textarea");
+    };
+    const fire = (el, type, init = {}) => el.dispatchEvent(new (type.startsWith("key") ? w.KeyboardEvent : w.Event)(type, { bubbles: true, cancelable: true, ...init }));
+    const btn = (label, root = doc) => [...root.querySelectorAll("button")].find((b) => b.textContent.trim() === label);
+    // every chapter in the vault copy reads and writes back unchanged
+    let same = 0, all = 0, wn = null, wc = null;
+    for (const n of index.novels) {
+        const d = await get(`/api/novel?folder=${enc(n.folder)}`);
+        for (const c of d.chapters) {
+            const text = fs.readFileSync(`${COPY}/${c.path}`, "utf8");
+            const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, "");
+            all++; if (serializeBlocks(parseBlocks(body)) === body) same++;
+            if (!wc && /\n\n[A-Za-z"“]/.test(body) && body.length > 400) { wn = d; wc = c; }
+        }
+    }
+    check(all > 0 && same === all, "chapter text round-trips through the block editor model", `${same}/${all}`);
+
+    // side buttons: viewer + lookup outside a novel, + novel inside one
+    w.location.hash = "#/qa"; await wait(500);
+    const side = () => [...doc.querySelectorAll(".drawer-side .drawer-tab")].map((b) => b.textContent.split(":")[0].trim());
+    check(side().join() === "Viewer,Lookup,Data store,Taxonomy", "outside a novel the collapsed drawer offers Viewer, Lookup, Data store and Taxonomy", side().join());
+    // data store tab: one group open at a time, the filter hides what doesn't match, opening shows the note in the viewer
+    [...doc.querySelectorAll(".drawer-side .drawer-tab")].find((b) => b.textContent.startsWith("Data store")).click();
+    await wait(400);
+    const groupsBox = () => doc.querySelector(".drawer-pane:not([hidden]) .browse-groups");
+    const toggles = () => [...groupsBox().querySelectorAll(".browse-toggle")];
+    toggles()[0].click(); await wait(100);
+    toggles()[1].click(); await wait(100);
+    check(groupsBox().querySelectorAll(".browse-group.open").length === 1 && toggles()[1].getAttribute("aria-expanded") === "true", "the data store tab opens one group at a time");
+    const someItem = index.notes.find((n) => n.collection === "Items");
+    const filter = doc.querySelector(".drawer-pane:not([hidden]) .browse input[type=search]");
+    filter.value = someItem.name; filter.dispatchEvent(new w.Event("input", { bubbles: true }));
+    await wait(200);
+    const rows = [...groupsBox().querySelectorAll(".browse-group.open .lookup-item")];
+    check(rows.length >= 1 && rows.every((r) => r.textContent.toLowerCase().includes(someItem.name.toLowerCase().split(" ")[0])), "the filter hides what doesn't match and opens a group with matches", `${rows.length} rows`);
+    rows[0].click(); await wait(700);
+    check(!!doc.querySelector(".drawer-pane:not([hidden]) .drawer-recent button.on"), "a data store row opens in the viewer");
+    filter.value = ""; filter.dispatchEvent(new w.Event("input", { bubbles: true }));
+    [...doc.querySelectorAll(".drawer-tabs [role=tab]")].find((b) => b.textContent === "Taxonomy").click();
+    await wait(300);
+    check(groupsBox().querySelectorAll(".browse-group").length === Object.keys(index.schema.collections).filter((c) => c.startsWith("Taxonomy/")).length, "the taxonomy tab lists every facet");
+    doc.querySelector(".drawer-tabs button[title^='Collapse']").click();
+    await wait(300);
+    if (wc) {
+        w.location.hash = `#/chapter/${enc(wn.folder)}/${wc.number}`;
+        await wait(1000);
+        check(side().join() === "Viewer,Lookup,Data store,Taxonomy,Novel", "inside a novel it offers the Novel tab too", side().join());
+        const before = fs.readFileSync(`${COPY}/${wc.path}`, "utf8");
+        btn("✎ Write", doc.querySelector("main")).click();
+        await wait(1200);
+        check(!!doc.querySelector(".writer-wrap.open .be-page .be-text") && !!doc.querySelector(".drawer-wrap.open .drawer-pane:not([hidden]) .chapter-plan"),
+            "Write opens the chapter on the left and its plan on the right");
+        check(!!doc.querySelector(".writer .writer-fieldlist .wf label"), "the writer shows the frontmatter fields on top");
+        check(doc.querySelectorAll(".writer .be-p textarea").length === 0 && doc.querySelectorAll(".writer .be-live .be-text").length > 3, "paragraphs show formatted until clicked");
+        check(!doc.querySelector(".writer-body .savebar") && !!doc.querySelector(".writer-foot .savebar"), "the save bar sits below the scrolling text");
+        const para = await editPara((t) => t.length > 20);
+        const old = para.value;
+        para.value = `Smoke writer. ${old}`; fire(para, "input");
+        await wait(100);
+        // Enter splits the paragraph in two
+        const count = doc.querySelectorAll(".writer .be-row").length;
+        para.setSelectionRange(13, 13);
+        fire(para, "keydown", { key: "Enter" });
+        await wait(150);
+        check(doc.querySelectorAll(".writer .be-row").length === count + 1, "Enter in a paragraph starts a new one");
+        btn("Save changes", doc.querySelector(".writer")).click();
+        await wait(1200);
+        const after = fs.readFileSync(`${COPY}/${wc.path}`, "utf8");
+        const want = before.replace(old, `Smoke writer.\n\n ${old}`);
+        const at = [...want].findIndex((ch, k) => after[k] !== ch);
+        check(after === want, "saving the writer changes only the edited paragraph", JSON.stringify([want.slice(at - 60, at + 60), after.slice(at - 60, at + 60)]));
+        // Ctrl+I toggles italics on the word at the caret; Ctrl+Shift+Enter adds a centred scene break line
+        fire(doc.activeElement, "keydown", { key: "Escape" });
+        await wait(150);
+        const p2 = await editPara((t) => /^[A-Za-z]{4,}\b/.test(t));
+        if (p2) {
+            const word = p2.value.match(/^[A-Za-z]+/)[0];
+            p2.focus(); p2.setSelectionRange(2, 2);
+            fire(p2, "keydown", { key: "i", ctrlKey: true });
+            await wait(150);
+            const it = doc.activeElement;
+            check(it?.value?.startsWith(`*${word}*`), "Ctrl+I italicises the word at the caret", it?.value?.slice(0, 40));
+            fire(it, "keydown", { key: "i", ctrlKey: true });
+            await wait(150);
+            check(doc.activeElement?.value?.startsWith(word + (p2.value[word.length] ?? "")), "Ctrl+I again removes it");
+            fire(doc.activeElement, "keydown", { key: "Enter", ctrlKey: true, shiftKey: true });
+            await wait(300);
+            check(!!doc.querySelector(".writer .be-image .be-render"), "Ctrl+Shift+Enter inserts a scene break shown as an image line");
+            btn("Save changes", doc.querySelector(".writer")).click();
+            await wait(1200);
+            check(/\n\n!\[\[pb-[^\]]+\]\]\n\n/.test(fs.readFileSync(`${COPY}/${wc.path}`, "utf8")), "the scene break is saved as its own paragraph");
+        }
+        // find in the chapter: counts matches and steps through them
+        const findBox = doc.querySelector(".writer-find input");
+        findBox.value = "Smoke writer"; fire(findBox, "input");
+        await wait(300);
+        check(doc.querySelector(".writer-find .find-count")?.textContent.trim() === "1 / 1", "the writer's find bar counts matches", doc.querySelector(".writer-find .find-count")?.textContent);
+        findBox.value = ""; fire(findBox, "input");
+        await wait(100);
+        // the drawer keeps its width while writing
+        check(doc.querySelector(".layout").classList.contains("writing") && doc.querySelector(".layout").classList.contains("drawer-open"), "the layout knows both drawers are open");
+        // Ctrl+[ and Ctrl+] close and open the writer and the drawer
+        const key = (k) => w.dispatchEvent(new w.KeyboardEvent("keydown", { key: k, ctrlKey: true, bubbles: true, cancelable: true }));
+        key("["); key("]"); await wait(200);
+        const closed = !doc.querySelector(".writer-wrap.open") && !doc.querySelector(".drawer-wrap.open");
+        key("["); key("]"); await wait(200);
+        check(closed && !!doc.querySelector(".writer-wrap.open") && !!doc.querySelector(".drawer-wrap.open"), "Ctrl+[ and Ctrl+] toggle the writer and the drawer");
+        doc.querySelector(".drawer-backdrop").click();
+        await wait(300);
+        check(!doc.querySelector(".writer-wrap.open") && !!doc.querySelector(".writer-wrap.collapsed .writer-tab"), "the backdrop collapses the writer to a tab on the left");
+
+        // novel tab: characters, New character in the viewer
+        [...doc.querySelectorAll(".drawer-side .drawer-tab")].find((b) => b.textContent.startsWith("Novel")).click();
+        await wait(1200);
+        [...doc.querySelectorAll(".novel-drawer .tabs button")].find((b) => b.textContent === "Characters").click();
+        await wait(300);
+        check(doc.querySelectorAll(".novel-drawer .people-list li").length >= wn.characters.length, "the novel tab lists the characters");
+        btn("+ New character", doc.querySelector(".novel-drawer")).click();
+        await wait(800);
+        check(!!doc.querySelector(".drawer-pane:not([hidden]) h1")?.textContent.includes("New character"), "New character opens its form in the viewer");
+        [...doc.querySelectorAll(".drawer-tabs [role=tab]")].find((b) => b.textContent.startsWith("Novel")).click();
+        await wait(200);
+        [...doc.querySelectorAll(".novel-drawer .tabs button")].find((b) => b.textContent === "World").click();
+        await wait(1200);
+        check(!!doc.querySelector(".novel-drawer .loc-tree, .novel-drawer p.muted"), "the novel tab shows the world hierarchy");
+
+        // lookup: chapter text search, open a result, it is kept in the recent list
+        [...doc.querySelectorAll(".drawer-tabs [role=tab]")].find((b) => b.textContent === "Lookup").click();
+        await wait(300);
+        const q = doc.querySelector(".lookup input[type=search]");
+        q.value = "Smoke writer"; fire(q, "input");
+        await wait(1200);
+        const hit = [...doc.querySelectorAll(".lookup-item")].find((li) => li.textContent.includes("Chapters"));
+        check(!!hit && !!hit.querySelector("mark"), "lookup finds chapter text and marks the words");
+        hit?.click();
+        await wait(800);
+        check(!!doc.querySelector(".drawer-pane:not([hidden]) .drawer-recent button.on"), "opening a lookup result shows it in the viewer");
+        q.value = ""; fire(q, "input");
+        [...doc.querySelectorAll(".drawer-tabs [role=tab]")].find((b) => b.textContent === "Lookup").click();
+        await wait(500);
+        check(doc.querySelectorAll(".lookup-recent .lookup-item").length >= 1, "opened results are listed under Recently opened");
+        doc.querySelector(".drawer-tabs button[title^='Collapse']").click();
+        await wait(200);
+    }
+    // a chapter without a note can be started from the writer
+    const created = await realFetch(new URL("/api/write/chapter", BASE), { method: "POST", headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: JSON.stringify({ novel: novel.folder, n: 777, title: "Smoke Start" }) }).then((r) => r.json());
+    check(created.path?.endsWith("/777 - Smoke Start.md") && fs.readFileSync(`${COPY}/${created.path}`, "utf8").includes("chapter title: Smoke Start"), "a chapter note is created like the Templater template", JSON.stringify(created));
+}
+// callout designer: styles saved to the vault, callout metadata rendered
+{
+    const doc = w.document;
+    const r = await realFetch(new URL("/api/render", BASE), { method: "POST", headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: JSON.stringify({ markdown: "> [!Journal|noattr] Wade\n> Text" }) }).then((x) => x.json());
+    check(/data-callout="journal" data-callout-metadata="noattr"/.test(r.html), "callouts with |metadata render", r.html.slice(0, 120));
+    w.location.hash = "#/callout-design";
+    await wait(1000);
+    check(!!doc.getElementById("callout-styles")?.textContent.includes('data-callout="system"'), "the callout styles are in the page");
+    [...doc.querySelectorAll(".co-types button")].find((b) => b.textContent.includes("Journal")).click();
+    await wait(200);
+    const width = [...doc.querySelectorAll(".co-field")].find((f) => f.textContent.startsWith("Width"))?.querySelector("input[type=number]");
+    width.value = "70"; width.dispatchEvent(new w.Event("change", { bubbles: true }));
+    await wait(100);
+    check(doc.querySelector(".co-designer style").textContent.includes("width: 70%"), "designer changes show in the preview");
+    [...doc.querySelectorAll("button")].find((b) => b.textContent.trim() === "Save styles").click();
+    await wait(1000);
+    const note = `${COPY}/90. Templater/Callout Styles.md`;
+    check(fs.existsSync(note) && /callout-styles:\s*\n\s+journal:\s*\n\s+width: 70/.test(fs.readFileSync(note, "utf8")), "saving writes only the changes to Callout Styles.md", fs.existsSync(note) ? fs.readFileSync(note, "utf8").slice(0, 300) : "no note");
 }
 // settings: the vault folder can be browsed and switched (the test server keeps its settings in SETTINGS_DIR)
 if (process.env.SETTINGS_DIR) {

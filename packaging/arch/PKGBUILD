@@ -1,0 +1,45 @@
+# Local Arch package of World Builder, built from this checkout (not from a download):
+#   sh packaging/arch/build.sh        (or: cd packaging/arch && makepkg -si)
+# Installs the app to /usr/lib/world-builder and runs it with the system's Electron.
+_electron=electron43
+pkgname=world-builder
+pkgver=1.0.0.r18.f792285
+pkgrel=1
+pkgdesc="World Builder: worldbuilding data store, chapter writer, ledgers, plans and maps for an Obsidian vault"
+arch=('any')
+license=('MIT')
+depends=("$_electron")
+options=('!strip' '!debug')
+
+_repo="$(realpath "$startdir/../..")"
+
+pkgver() {
+    cd "$_repo"
+    printf "%s.r%s.%s" "$(node -p 'require("./package.json").version' 2>/dev/null || echo 1.0.0)" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+package() {
+    local app="$pkgdir/usr/lib/$pkgname"
+    install -d "$app/node_modules"
+    cp -r "$_repo"/{server.js,package.json,lib,public,electron} "$app/"
+    # runtime dependencies only (pinned in package.json)
+    for m in yaml marked preact htm; do cp -r "$_repo/node_modules/$m" "$app/node_modules/"; done
+    [ -f "$_repo/LICENSE" ] && install -Dm644 "$_repo/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/$pkgname" <<SH
+#!/bin/sh
+exec /usr/bin/$_electron --ozone-platform-hint=auto /usr/lib/$pkgname "\$@"
+SH
+    install -Dm644 "$_repo/electron/icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/$pkgname.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=World Builder
+Comment=Worldbuilding, chapter writing and ledgers for your Obsidian vault
+Exec=$pkgname %U
+Icon=$pkgname
+Terminal=false
+Categories=Office;WordProcessor;
+StartupWMClass=$pkgname
+DESKTOP
+}
