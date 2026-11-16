@@ -100,7 +100,8 @@ app.whenReady().then(async () => {
     ]));
     try {
         const { start } = await import("../server.js");
-        const { port } = await start({ port: 0, host: "127.0.0.1" });
+        // a fixed port: the page keeps its preferences (theme, where you were) per address, so it must stay the same
+        const { port } = await start({ port: Number(process.env.WB_PORT) || 47321, host: "127.0.0.1", fallback: true });
         origin = `http://127.0.0.1:${port}`;
         createWindow(`${origin}/`);
     } catch (e) {

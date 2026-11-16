@@ -12,9 +12,9 @@ const chapterHref = (folder, n) => `#/chapter/${encodeURIComponent(folder)}/${n}
 // ------------------------------------------------------------------ writer drawer state
 
 // {folder, n, open}: the chapter in the writer; collapsed it is a tab on the left edge and stays mounted
-let writer = { folder: null, n: null, open: false };
+let writer = (() => { try { const w = JSON.parse(localStorage.getItem("writerState")); if (w?.folder) return { folder: w.folder, n: Number(w.n), open: !!w.open }; } catch { /* none */ } return { folder: null, n: null, open: false }; })();
 const writerListeners = new Set();
-const setWriter = (w) => { writer = w; writerListeners.forEach((f) => f(w)); };
+const setWriter = (w) => { writer = w; writerListeners.forEach((f) => f(w)); try { localStorage.setItem("writerState", JSON.stringify(w)); } catch { /* private window */ } };
 export function useWriter() {
     const [w, set] = useState(writer);
     useEffect(() => { writerListeners.add(set); return () => writerListeners.delete(set); }, []);

@@ -989,6 +989,15 @@ if (process.env.SETTINGS_DIR) {
     [...doc.querySelectorAll(".appearance-range button")].forEach((b) => b.click());
     [...doc.querySelectorAll(".accent-swatches button")][0].click(); await wait(600);
 }
+// where you were is remembered: the page and the drawer, for the next start
+{
+    const doc = w.document;
+    w.location.hash = "#/c/Items"; await wait(600);
+    doc.querySelector("main table a[href^='#/note/']").dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true })); await wait(600);
+    const saved = JSON.parse(w.localStorage.getItem("drawerState") ?? "null");
+    check(w.localStorage.getItem("lastHash") === "#/c/Items" && saved?.open === true && saved.recent.length >= 1, "the page and the drawer are saved for the next start", JSON.stringify({ last: w.localStorage.getItem("lastHash"), saved }));
+    doc.querySelector(".drawer-tabs button[title^='Collapse']").click(); await wait(300);
+}
 // settings: the vault folder can be browsed and switched (the test server keeps its settings in SETTINGS_DIR)
 if (process.env.SETTINGS_DIR) {
     const doc = w.document;

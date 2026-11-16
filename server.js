@@ -597,14 +597,17 @@ const server = http.createServer(async (req, res) => {
  * Open the vault (--vault, settings.json, BOOKS_VAULT) and listen. `node server.js` calls it; the Electron app imports
  * this module and calls it with port 0 (any free port). Resolves with the port in use.
  */
-export async function start({ port = PORT, host = HOST } = {}) {
+export async function start({ port = PORT, host = HOST, fallback = false } = {}) {
     if (startSource) {
         const [source, value] = startSource;
         const dir = expand(value);
         if (isFolder(dir)) await openVault(dir, source);
         else { vaultProblem = `Vault folder not found: ${dir} (from ${source})`; console.error(`${vaultProblem}. Choose one on the Settings page.`); }
     } else console.error("No vault folder set yet. Choose one on the Settings page.");
-    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, host, resolve); });
+    const listen = (p) => new Promise((resolve, reject) => { server.once("error", reject); server.listen(p, host, resolve); });
+    // the desktop app asks for a fixed port (so its saved preferences, kept per address, are found again) and takes any
+    // free one when that port is busy
+    try { await listen(port); } catch (e) { if (!fallback || e.code !== "EADDRINUSE") throw e; await listen(0); }
     const actual = server.address().port;
     console.log(`World Builder: http://${host === "0.0.0.0" ? "localhost" : host}:${actual}  (${vault ? `vault: ${vault.root}, ${vault.notes.size} notes` : "no vault yet: open Settings"})`);
     return { port: actual, server };

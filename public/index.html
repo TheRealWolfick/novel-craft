@@ -8,6 +8,8 @@
     <script>
         // apply a saved light/dark choice before first paint (no flash); "system" leaves it to the OS
         try { const t = JSON.parse(localStorage.getItem("theme")); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch { }
+        // opened without a page (the app starting): back to the page you were on
+        try { const h = localStorage.getItem("lastHash"); if ((!location.hash || location.hash === "#/") && h && h !== "#/") location.replace(h); } catch { }
         // the appearance chosen on the Settings page (accent, fonts, sizes), also before first paint
         try { const a = JSON.parse(localStorage.getItem("appearanceVars")); for (const k in a) document.documentElement.style.setProperty(k, a[k]); } catch { }
     </script>

@@ -182,9 +182,10 @@ addEventListener("beforeunload", (e) => { if (dirtyForms.size) e.preventDefault(
 // It never closes: it collapses to buttons on the right edge and stays mounted, so unsaved edits survive navigation.
 const DRAWER_RECENT = 5;
 const DRAWER_TABS = [["viewer", "Viewer"], ["lookup", "Lookup"], ["datastore", "Data store"], ["taxonomy", "Taxonomy"], ["novel", "Novel"]];
-let drawer = { recent: [], open: false, tab: "viewer" };
+// where the drawer was when the app last closed (a convenience: the pages, the tab, open or not)
+let drawer = (() => { try { const d = JSON.parse(localStorage.getItem("drawerState")); if (d && Array.isArray(d.recent)) return { recent: d.recent.slice(0, DRAWER_RECENT), open: !!d.open && (d.recent.length > 0 || d.tab !== "viewer"), tab: d.tab ?? "viewer" }; } catch { /* none */ } return { recent: [], open: false, tab: "viewer" }; })();
 const drawerListeners = new Set();
-const setDrawer = (d) => { drawer = d; drawerListeners.forEach((f) => f(d)); };
+const setDrawer = (d) => { drawer = d; drawerListeners.forEach((f) => f(d)); try { localStorage.setItem("drawerState", JSON.stringify(d)); } catch { /* private window */ } };
 function useDrawer() {
     const [d, set] = useState(drawer);
     useEffect(() => { drawerListeners.add(set); return () => drawerListeners.delete(set); }, []);
@@ -3140,7 +3141,13 @@ function App() {
     const setNF = (v) => { setNovelFilter(v); store.set("novelFilter", v); };
     const [a, b] = route.args;
     const writer = useWriter();
-    useEffect(() => { collapseDrawer(); collapseWriter(); }, [location.hash]);
+    // a new page collapses both drawers, but not the first one: that is where you were when the app closed
+    const firstRoute = useRef(true);
+    useEffect(() => {
+        try { localStorage.setItem("lastHash", location.hash); } catch { /* private window */ }
+        if (firstRoute.current) { firstRoute.current = false; return; }
+        collapseDrawer(); collapseWriter();
+    }, [location.hash]);
     const d = useDrawer();
     // the novel you're in tints the app; data store pages follow the novel filter
     const novelFolder = !index ? null
