@@ -25,56 +25,153 @@ function loadXterm() {
 const COMMANDS = [["/usage", "Usage", "Your plan's usage limits and how much is left (/usage)"], ["/context", "Context", "How full this conversation's context is (/context)"],
     ["/compact", "Compact", "Summarise the conversation so far to free up context (/compact)"], ["/model", "Model", "Choose the model (/model)"], ["/effort", "Effort", "How hard it thinks (/effort)"]];
 /**
- * Your messages as speech bubbles. Claude Code draws a sent message as rows that start with "❯ " on a coloured
- * background (the prompt you type into has none). It runs full screen and scrolls by itself, so after every redraw
- * (next animation frame) the visible rows are scanned and a layer over the terminal puts a bubble on each such block.
- * Earlier messages of a resumed conversation get bubbles too.
+ * What Claude Code shows, read from its rows ({text, bg}: text without trailing spaces, bg = the first visible character
+ * has a background colour), so the overlay can dress it up:
+ * - bubbles: your sent messages, rows starting "❯ " on a background (the prompt you type into has none);
+ * - prompt: a question with choices (permission prompts, questions, its menus): a footer like "Enter to confirm · Esc
+ *   to cancel", the choice marked "❯", the other choices at the same indent (deeper rows are their descriptions), the
+ *   question between a rule (──── or ▔▔▔▔) and the choices, anything between the choices and the footer as notes;
+ * - cover: where its own input area starts (the rule above the bottom "❯" row), when there is no prompt;
+ * - menu: a screen that Escape closes ("Esc to cancel / close…" in its last rows).
+ */
+const RULE = /^[\s│]*[─━═▔▁]{8,}[\s│]*$/;
+export function readScreen(rows) {
+    const n = rows.length;
+    const out = { bubbles: [], prompt: null, cover: null, menu: false };
+    for (let r = Math.max(0, n - 10); r < n; r++) if (/\bEsc to (cancel|close|exit|go back|dismiss)\b/i.test(rows[r].text)) out.menu = true;
+    const plain = (t) => t.replace(/[│┃]/g, " ");
+    const indent = (t) => plain(t).search(/\S/);
+    let footer = -1;
+    for (let r = n - 1; r >= Math.max(0, n - 14) && footer < 0; r--) if (/\bEnter to \w|↑\s*\/?\s*↓|\bto navigate\b/i.test(rows[r].text)) footer = r;
+    if (footer >= 0) {
+        let cur = -1, col = -1;
+        for (let r = footer - 1; r >= Math.max(0, footer - 40) && cur < 0; r--) {
+            const m = /^([\s│┃]*)❯/.exec(rows[r].text);
+            if (m && !rows[r].bg) { cur = r; col = m[1].length + 2; }
+        }
+        if (cur >= 0) {
+            const inside = (r) => r >= 0 && r < footer && rows[r].text.trim() && (r === cur || (indent(rows[r].text) >= col && !/❯/.test(rows[r].text.slice(0, col))));
+            let a = cur, b = cur;
+            while (inside(a - 1)) a--;
+            while (inside(b + 1)) b++;
+            const options = [];
+            let curIndex = 0;
+            for (let r = a; r <= b; r++) {
+                const t = plain(rows[r].text).replace("❯", " ");
+                if (r !== cur && indent(t) > col && options.length) { options.at(-1).desc = `${options.at(-1).desc} ${t.trim()}`.trim(); continue; }
+                const body = t.slice(col).trim().replace(/^[▸›•]\s+/, "").replace(/^(\d+)\.\s+/, "");
+                const [label, ...rest] = body.split(/\s{2,}/);
+                if (r === cur) curIndex = options.length;
+                options.push({ label: label.trim(), desc: rest.join("  ").trim(), row: r });
+            }
+            // the question: from the rule above (or the top) down to the choices, in paragraphs
+            let top = a - 1;
+            while (top > 0 && !RULE.test(rows[top].text) && a - top < 30) top--;
+            const start = RULE.test(rows[top]?.text ?? "") ? top + 1 : Math.max(0, top);
+            const paras = [];
+            let para = [];
+            for (let r = start; r < a; r++) {
+                const t = plain(rows[r].text).trim();
+                if (!t || RULE.test(t)) { if (para.length) paras.push(para.join(" ")); para = []; } else para.push(t);
+            }
+            if (para.length) paras.push(para.join(" "));
+            const notes = [];
+            for (let r = b + 1; r < footer; r++) { const t = plain(rows[r].text).trim(); if (t) notes.push(t); }
+            out.prompt = { top: Math.max(0, top), question: paras, options, cur: curIndex, notes, footer: plain(rows[footer].text).trim() };
+        }
+    }
+    if (!out.prompt) {
+        for (let r = n - 1; r >= Math.max(0, n - 12); r--) {
+            if (/^[\s│┃]*❯/.test(rows[r].text) && !rows[r].bg) { out.cover = r > 0 && RULE.test(rows[r - 1].text) ? r - 1 : r; break; }
+        }
+    }
+    const end = out.prompt ? out.prompt.top : out.cover ?? n;
+    for (let r = 0; r < end; r++) {
+        if (!rows[r].text.startsWith("❯ ") || !rows[r].bg) continue;
+        const lines = [rows[r].text.slice(2)];
+        let k = 1;
+        while (r + k < end && rows[r + k].bg && !rows[r + k].text.startsWith("❯ ")) { lines.push(rows[r + k].text); k++; }
+        out.bubbles.push({ r, n: k, lines });
+        r += k - 1;
+    }
+    return out;
+}
+
+/**
+ * The layer over the terminal: bubbles on your messages, a cover over Claude Code's own input area (you type in the box
+ * below instead), and questions as a card with the choices as buttons. Claude Code runs full screen and redraws as it
+ * likes, so after every redraw (next animation frame) the visible rows are read again (readScreen).
+ * on: {sent() -> your messages, choose(i, prompt), answer(i), cancel(), state({menu, prompt})}
  */
 const norm = (x) => x.replace(/\s+/g, " ").trim();
-function bubbles(t, sent, onMenu) {
+const TYPED = /^(type something|other|something else)\b/i;
+function overlay(t, on) {
     const screen = t.element?.querySelector(".xterm-screen");
     if (!screen) return;
     const layer = Object.assign(document.createElement("div"), { className: "term-bubbles" });
     screen.append(layer);
-    const hasBg = (line) => { const c = line?.getCell(0); return !!c && !c.isBgDefault(); };
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     let last = "";
     const draw = () => {
         const buf = t.buffer.active;
-        const top = buf.viewportY, rowH = screen.offsetHeight / t.rows;
-        const blocks = [];
-        // a screen Escape closes (/usage, /model, /context…): Claude Code says so in its last rows
-        let menu = false;
-        for (let r = Math.max(0, t.rows - 8); r < t.rows && !menu; r++) menu = /\bEsc to (cancel|close|exit|go back|dismiss)\b/i.test(buf.getLine(top + r)?.translateToString(true) ?? "");
-        onMenu(menu);
+        const rowH = screen.offsetHeight / t.rows;
+        const rows = [];
         for (let r = 0; r < t.rows; r++) {
-            const line = buf.getLine(top + r);
-            const first = line?.translateToString(true) ?? "";
-            if (!first.startsWith("❯ ") || !hasBg(line)) continue;
-            const rows = [first.slice(2)];
-            let n = 1;
-            while (r + n < t.rows) {
-                const next = buf.getLine(top + r + n);
-                if (!hasBg(next) || (next.translateToString(true) ?? "").startsWith("❯ ")) break;
-                rows.push(next.translateToString(true));
-                n++;
-            }
-            // rows Claude Code wrapped are one paragraph; a message sent from the box shows as typed (its line breaks)
-            const joined = norm(rows.join(" "));
-            if (joined) blocks.push({ r, n, text: sent().find((m) => norm(m) === joined) ?? joined });
-            r += n - 1;
+            const line = buf.getLine(buf.viewportY + r);
+            const text = (line?.translateToString(true) ?? "").replace(/\s+$/, "");
+            const c = line?.getCell(Math.max(0, text.search(/\S/)));
+            rows.push({ text, bg: !!c && !c.isBgDefault() });
         }
-        const key = `${rowH}|${JSON.stringify(blocks)}`;
+        const sc = readScreen(rows);
+        on.state({ menu: sc.menu && !sc.prompt, prompt: sc.prompt });
+        const key = `${rowH}|${JSON.stringify(sc)}`;
         if (key === last) return;
         last = key;
-        layer.replaceChildren(...blocks.map((b) => {
-            const row = Object.assign(document.createElement("div"), { className: "term-bubble-row" });
+        const parts = sc.bubbles.map((b) => {
+            // rows Claude Code wrapped are one paragraph; a message sent from the box shows as typed (its line breaks)
+            const joined = norm(b.lines.join(" "));
+            const text = on.sent().find((m) => norm(m) === joined) ?? joined;
+            const row = el("div", "term-bubble-row");
             Object.assign(row.style, { top: `${b.r * rowH}px`, height: `${b.n * rowH}px` });
-            const bubble = Object.assign(document.createElement("div"), { className: "term-bubble", textContent: b.text });
+            const bubble = el("div", "term-bubble", text);
             // one line of text per terminal row at most, so it never spills onto Claude Code's answer
             Object.assign(bubble.style, { lineHeight: `${rowH}px`, maxHeight: `${b.n * rowH}px`, fontSize: `${Math.min(14, Math.round(rowH * 0.78))}px` });
             row.append(bubble);
             return row;
-        }));
+        });
+        if (sc.cover != null) {
+            const cover = el("div", "term-cover");
+            cover.style.top = `${sc.cover * rowH}px`;
+            parts.push(cover);
+        }
+        const p = sc.prompt;
+        if (p) {
+            const card = el("div", "term-card");
+            card.style.top = `${p.top * rowH}px`;
+            // clicks stay on the card (the terminal underneath would take the focus and start a selection)
+            card.addEventListener("mousedown", (e) => { e.stopPropagation(); if (e.target.closest("button")) e.preventDefault(); });
+            for (const q of p.question) card.append(el("p", p.question.length > 1 && q === p.question.at(-1) ? "term-q strong" : "term-q", q));
+            const list = el("div", "term-choices");
+            p.options.forEach((o, i) => {
+                const typed = TYPED.test(o.label);
+                const btn = el("button", `term-choice ${i === p.cur ? "current" : ""} ${typed ? "typed" : ""}`);
+                btn.append(el("span", "term-choice-label", typed ? `${o.label} (write it in the box below)` : o.label));
+                if (o.desc) btn.append(el("span", "term-choice-desc", o.desc));
+                btn.addEventListener("click", () => (typed ? on.answer(i) : on.choose(i, p)));
+                list.append(btn);
+            });
+            card.append(list);
+            for (const nt of p.notes) card.append(el("p", "term-note", nt));
+            const foot = el("div", "term-card-foot");
+            foot.append(el("span", "muted small", "↑ ↓ move · Enter chooses · or click a choice"));
+            const cancel = el("button", "small", "Cancel");
+            cancel.title = "Esc";
+            cancel.addEventListener("click", () => on.cancel());
+            foot.append(cancel);
+            card.append(foot);
+            parts.push(card);
+        }
+        layer.replaceChildren(...parts);
     };
     let queued = false;
     const soon = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; draw(); }); } };
@@ -97,8 +194,11 @@ const themeNow = () => ({ background: cssVar("--panel", "#1f1e23"), foreground: 
 export function ClaudeTerminal({ active }) {
     const host = useRef(null);
     const box = useRef(null);                         // the text box under the terminal
-    const sent = useRef([]);
-    const [menu, setMenu] = useState(false);          // one of Claude Code's screens that Escape closes is showing                          // messages sent from it (their bubbles keep the line breaks)
+    const sent = useRef([]);                          // messages sent from it (their bubbles keep the line breaks)
+    const [menu, setMenu] = useState(false);          // one of Claude Code's screens that Escape closes is showing
+    const [prompt, setPrompt] = useState(null);       // a question from Claude Code with choices (shown as a card)
+    const promptRef = useRef(null);
+    const [answering, setAnswering] = useState(null); // the "Type something" choice the box's text goes to
     const [text, setText] = useState("");
     const term = useRef(null);
     const fit = useRef(null);
@@ -147,7 +247,18 @@ export function ClaudeTerminal({ active }) {
                 if (e.code === "KeyV") { navigator.clipboard?.readText().then((txt) => txt && t.paste(txt)); return false; }
                 return true;
             });
-            bubbles(t, () => sent.current, (m) => setMenu((was) => (was === m ? was : m)));
+            overlay(t, {
+                sent: () => sent.current,
+                state: ({ menu: m, prompt: p }) => {
+                    setMenu((was) => (was === m ? was : m));
+                    promptRef.current = p;
+                    setPrompt((was) => (!!was === !!p ? was : p));
+                    if (!p) setAnswering(null);
+                },
+                choose: (i, p) => { const d = i - p.cur; type((d > 0 ? "\x1b[B" : "\x1b[A").repeat(Math.abs(d)) + "\r"); box.current?.focus(); },
+                answer: (i) => { setAnswering(i); box.current?.focus(); },
+                cancel: () => { type("\x1b"); box.current?.focus(); },
+            });
             // [[links]] and vault paths (…/Note.md) in Claude Code's answers open the note in the viewer
             t.registerLinkProvider({
                 provideLinks(y, done) {
@@ -223,6 +334,16 @@ export function ClaudeTerminal({ active }) {
     // so line breaks stay in it, followed by Enter; an empty Enter presses Enter in the terminal (menus, confirmations)
     const sendText = (value = text) => {
         const msg = value.replace(/\s+$/, "");
+        const p = promptRef.current;
+        // the answer to a question's "Type something" choice: move to that choice, write it there, confirm
+        const typedChoice = p && msg ? (answering ?? p.options.findIndex((o) => /^(type something|other|something else)\b/i.test(o.label))) : -1;
+        if (p && msg && typedChoice >= 0) {
+            const d = typedChoice - p.cur;
+            type((d > 0 ? "\x1b[B" : "\x1b[A").repeat(Math.abs(d)));
+            setTimeout(() => type(`${msg}\r`), 150);
+            setAnswering(null); setText(""); box.current?.focus();
+            return;
+        }
         if (msg) sent.current = [...sent.current.slice(-50), msg];
         type(msg ? `\x1b[200~${msg}\x1b[201~\r` : "\r");
         setText("");
@@ -233,9 +354,9 @@ export function ClaudeTerminal({ active }) {
         // presses Enter in Claude Code
         if (e.key === "Enter" && !e.isComposing && (e.shiftKey || e.ctrlKey || !text.trim())) { e.preventDefault(); sendText(); }
         else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); type("\x1b"); }   // stops Claude Code / closes its menus
-        else if (!text && ["ArrowUp", "ArrowDown", "Tab"].includes(e.key) && !e.shiftKey) {
+        else if (!text && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.key) && !e.shiftKey) {
             // with an empty box these steer Claude Code's menus and choices
-            e.preventDefault(); type({ ArrowUp: "\x1b[A", ArrowDown: "\x1b[B", Tab: "\t" }[e.key]);
+            e.preventDefault(); type({ ArrowUp: "\x1b[A", ArrowDown: "\x1b[B", ArrowLeft: "\x1b[D", ArrowRight: "\x1b[C", Tab: "\t" }[e.key]);
         }
     };
 
@@ -279,7 +400,7 @@ export function ClaudeTerminal({ active }) {
             ${running && menu && html`<button class="term-close" title="Close this screen (Escape)" onClick=${() => { type("\x1b"); setMenu(false); box.current?.focus(); }}>✕ Close</button>`}
         </div>
         ${running && html`<div class="ai-input term-input">
-            <textarea ref=${box} rows="1" placeholder="Message Claude Code… (Shift+Enter sends · Enter: new line · Esc stops it)" value=${text}
+            <textarea ref=${box} rows="1" placeholder=${answering != null ? "Write your answer… (Shift+Enter sends it)" : prompt ? "Answer above, or write something here… (Enter chooses · ↑↓ move · Esc cancels)" : "Message Claude Code… (Shift+Enter sends · Enter: new line · Esc stops it)"} value=${text}
                 onInput=${(e) => setText(e.target.value)} onKeyDown=${onBoxKey} />
             <button class="primary" onClick=${() => sendText()} title="Send (Shift+Enter)">Send</button>
         </div>`}

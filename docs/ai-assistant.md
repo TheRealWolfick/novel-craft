@@ -29,14 +29,16 @@ What it can and can't do:
 
 The bar above the terminal has Claude Code's own commands one click away: **Usage** (your plan's limits and how much is left), **Context**, **Compact**, **Model** and **Effort**; a **Close** button appears over screens like these (Escape closes them too). **History** lists your earlier conversations with their titles; pick one to carry on with it. **New** starts a fresh one, **End** closes Claude Code.
 
-Write your messages in the text box under it: an ordinary text field, where you can select, delete and paste as anywhere else. **Shift+Enter** (or **Send**) sends the whole message at once; Enter starts a new line. With the box empty, Enter, the arrow keys and Tab go to Claude Code (for its menus and questions), and Escape stops it. You can also click into the terminal and type there directly.
+Write your messages in the text box under it (Claude Code's own input line is hidden): an ordinary text field, where you can select, delete and paste as anywhere else. **Shift+Enter** (or **Send**) sends the whole message at once; Enter starts a new line. With the box empty, Enter, the arrow keys and Tab go to Claude Code, and Escape stops it.
+
+When Claude Code asks something (a question with choices, a permission prompt, menus such as **Model**), it shows as a card at the bottom of the conversation: the question on top and the answers as buttons. Click one, or move with ↑ ↓ and press Enter; **Cancel** (or Escape) backs out. For a "Type something" answer, write it in the text box and send it. You can also click into the terminal and type there directly.
 
 Your messages show as bubbles in the novel's colour (the app's colour outside a novel), earlier ones in a resumed conversation too. It's still Claude Code underneath, so a sent message can't be edited or deleted. `[[Note]]` links and note paths in its answers are clickable: they open the note in the viewer. Ctrl+C copies what you've selected (with nothing selected it stops Claude Code, as in any terminal), Ctrl+V pastes.
 
 Type `/world-builder` for ready-made prompts: summarise a chapter, review a chapter (with edits to review), brainstorm, draft a data store entry, check a character's continuity.
 
 > [!note] Your sign-in stays with Claude Code
-> World Builder never sees or stores your Claude sign-in: it starts the `claude` you installed, unchanged, and only connects it to its tools. That's also why usage is shown by Claude Code itself.
+> World Builder never sees or stores your Claude sign-in: it starts the `claude` you installed, unchanged, and only connects it to its tools. That's also why usage is shown by Claude Code itself, and why it stays a terminal you type into rather than something the app runs behind the scenes: Anthropic allows you to use your own subscription in your own Claude Code, not apps to use it for you. AI-INTEGRATION.md in World Builder's repository has the details.
 
 ## Asking
 

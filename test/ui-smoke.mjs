@@ -1094,6 +1094,20 @@ if (process.env.SETTINGS_DIR) {
         await send("DELETE", `/api/ai/conversation?id=${one.id}`);
         check(!(await get("/api/ai/conversations")).conversations.some((x) => x.id === one.id), "a conversation can be deleted from History");
     }
+    // Claude Code's screen as the overlay reads it (rows captured from Claude Code 2.1: the trust question, /model, idle)
+    {
+        const { readScreen } = await import("../public/terminal.js");
+        const mk = (n, lines) => { const rows = Array.from({ length: n }, () => ({ text: "", bg: false })); for (const [r, text, bg] of lines) rows[r] = { text, bg: !!bg }; return rows; };
+        const rule = "─".repeat(100);
+        const trust = readScreen(mk(22, [[1, rule], [2, " Accessing workspace:"], [6, " Quick safety check: Is this a project you created or one you trust?"], [15, " Security guide"], [17, " ❯ No, exit"], [18, "   Yes, I trust this folder"], [20, " Enter to confirm · Esc to cancel"]]));
+        check(trust.prompt?.options.map((o) => o.label).join("|") === "No, exit|Yes, I trust this folder" && trust.prompt.cur === 0 && /Quick safety check/.test(trust.prompt.question.join(" ")) && trust.prompt.top === 1,
+            "a Claude Code question becomes a card: its question and choices", JSON.stringify(trust.prompt));
+        const model = readScreen(mk(54, [[37, "▔".repeat(90)], [38, "   Select model"], [41, "     1.  Default (recommended) ✔  Opus 5.5 · Best for everyday"], [42, "   ❯ 2.  Opus 5.5                 For complex work"], [43, "     3.  Sonnet 5.5               Most efficient"], [44, "     4.  Fable 5.2                For your toughest challenges"], [45, "     5.  Haiku 5.5                Fastest"], [46, "     ▸   More models"], [48, "   ◐ Medium effort (default) ←/→ to adjust"], [52, "   Enter to set as default · s to use this session only · Esc to cancel"]]));
+        check(model.prompt?.cur === 1 && model.prompt.options.length === 6 && model.prompt.options[0].desc.startsWith("Opus 5.5") && model.prompt.options[5].label === "More models" && /effort/.test(model.prompt.notes[0]),
+            "menus with numbers and descriptions read as choices, the marked one current", JSON.stringify(model.prompt?.options));
+        const idle = readScreen(mk(53, [[10, "❯ hello there", true], [11, "  and more", true], [12, "  Claude's answer"], [49, rule], [50, '❯ Try "create a util logging.py that..."'], [51, rule], [52, "  ⏵⏵ auto mode on"]]));
+        check(idle.cover === 49 && !idle.prompt && idle.bubbles.length === 1 && idle.bubbles[0].n === 2, "Claude Code's own input area is covered and your messages become bubbles", JSON.stringify(idle));
+    }
     // Claude Code: the terminal (here `cat`), its workspace, and World Builder's MCP server
     if (process.env.SETTINGS_DIR) {
         const ts = await get("/api/terminal/status");

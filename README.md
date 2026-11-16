@@ -195,6 +195,8 @@ The code has no build step: `server.js` (node:http) with modules in `lib/`, and 
 
 The code is released under the [MIT License](LICENSE). The bundled map stamps keep their own licences, listed below.
 
+The AI assistant uses your own Claude account: your own Claude Code with your own plan, or your own Anthropic API key. World Builder never handles your Claude sign-in and doesn't route anyone's use through another account. [`AI-INTEGRATION.md`](AI-INTEGRATION.md) explains how this fits Anthropic's terms, and the rules contributors keep.
+
 ## Credits
 
 The map stamps come from [Azgaar's Fantasy Map Generator](https://github.com/Azgaar/Fantasy-Map-Generator) (MIT), [Kenney](https://kenney.nl) (CC0), and [game-icons.net](https://game-icons.net) (CC BY 3.0; credit them if you publish maps that use those icons); the steampunk, plant and pipework stamps are drawn by `scripts/build-stamps.js`. Details in [`public/stamps/CREDITS.md`](public/stamps/CREDITS.md). The heading font Newsreader is under the SIL Open Font License.
