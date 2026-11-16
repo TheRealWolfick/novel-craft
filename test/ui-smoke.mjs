@@ -1109,6 +1109,11 @@ if (process.env.SETTINGS_DIR) {
         const redraw = readScreen(mk(16, [[2, "❯ /effort", true], [3, "  ⎿  Set effort level to medium"], [4, "❯ /model", true], [5, "  ⎿  Kept model as Opus 5.5"], [6, "◐ medium · /effort ▔"], [7, "   Select model"], [8, "   Switch between Claude models."], [10, "   ❯ 1.  Default (recommended)  Opus 5.5"], [11, "     2.  Opus 5.5 ✔               For complex work"], [13, "   Enter to set as default · Esc to cancel"]]));
         check(redraw.prompt?.top === 6 && redraw.prompt.question.join(" ") === "Select model Switch between Claude models." && redraw.bubbles.length === 2,
             "a menu's question stops at a scrap of its rule or the conversation, even while Claude Code redraws", JSON.stringify(redraw.prompt?.question));
+        // a message whose first row has scrolled off: its remaining rows at the top (in your messages' colour) are still a bubble
+        const top = readScreen(mk(10, [[0, "  rest of a long message", true], [1, "  and its last line", true], [3, "  Claude's answer"], [5, "❯ next message", true]].map(([r, t, bg]) => [r, t, bg])).map((x) => (x.bg ? { ...x, bgColor: 3618615 } : x)));
+        const shaded = readScreen(mk(10, [[0, "  a shaded code line", true], [5, "❯ a message", true]]).map((x, i) => (x.bg ? { ...x, bgColor: i === 0 ? 111 : 3618615 } : x)));
+        check(top.bubbles[0]?.cut && top.bubbles[0].n === 2 && top.bubbles.length === 2 && !shaded.bubbles.some((b) => b.cut),
+            "a message partly scrolled off the top stays a bubble (only in your messages' colour)", JSON.stringify(top.bubbles));
         const linked = readScreen(mk(10, [[2, "  Wade is in [[Wade Ptolemy]] and [[Lantern Cross|the Cross]]."], [4, "❯ ask about [[X]]", true]]));
         check(JSON.stringify(linked.links.map((l) => [l.r, l.c, l.len, l.target, l.label])) === JSON.stringify([[2, 13, 16, "Wade Ptolemy", "Wade Ptolemy"], [2, 34, 27, "Lantern Cross", "the Cross"]]),
             "[[links]] in Claude Code's text are found to draw as links (not inside your own messages)", JSON.stringify(linked.links));

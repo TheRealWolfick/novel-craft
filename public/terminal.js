@@ -36,7 +36,7 @@ const COMMANDS = [["/usage", "Usage", "Your plan's usage limits and how much is 
  * - links: [[Note]] / [[Note|label]] in Claude Code's text (row, column, length in cells), drawn as links over it.
  */
 const RULE = /^[\s│]*[─━═▔▁]{8,}[\s│]*$/;
-export function readScreen(rows) {
+export function readScreen(rows, { msgBg = null } = {}) {
     const n = rows.length;
     const out = { bubbles: [], prompt: null, cover: null, menu: false, links: [] };
     for (let r = Math.max(0, n - 10); r < n; r++) if (/\bEsc to (cancel|close|exit|go back|dismiss)\b/i.test(rows[r].text)) out.menu = true;
@@ -91,7 +91,16 @@ export function readScreen(rows) {
         }
     }
     const end = out.prompt ? out.prompt.top : out.cover ?? n;
-    for (let r = 0; r < end; r++) {
+    // the background your messages have (from one on screen now, else the one seen before), for a message whose
+    // first rows have scrolled off the top: its remaining rows at the top are the rest of it (cut: true)
+    out.msgBg = rows.find((x) => x.text.startsWith("❯ ") && x.bg && x.bgColor != null)?.bgColor ?? msgBg;
+    let r0 = 0;
+    if (out.msgBg != null && end > 0 && rows[0].bg && rows[0].bgColor === out.msgBg && !rows[0].text.startsWith("❯ ")) {
+        const lines = [];
+        while (r0 < end && rows[r0].bg && rows[r0].bgColor === out.msgBg && !rows[r0].text.startsWith("❯ ")) lines.push(rows[r0++].text);
+        out.bubbles.push({ r: 0, n: r0, lines, cut: true });
+    }
+    for (let r = r0; r < end; r++) {
         if (!rows[r].text.startsWith("❯ ") || !rows[r].bg) continue;
         const lines = [rows[r].text.slice(2)];
         let k = 1;
@@ -123,14 +132,15 @@ function overlay(t, on) {
     screen.append(layer);
     // the mouse over the card and the cover stays there: Claude Code follows the mouse (hovering would move its
     // selection and redraw under the card), and the terminal would take the focus or start a selection
-    const keepMouse = (node) => {
-        for (const ev of ["mousedown", "mouseup", "mousemove", "click", "dblclick", "wheel", "contextmenu"]) node.addEventListener(ev, (e) => {
+    // Scrolling stays only on what scrolls itself (a card); over links and the cover it goes on to the conversation.
+    const keepMouse = (node, { scrolls = false } = {}) => {
+        for (const ev of ["mousedown", "mouseup", "mousemove", "click", "dblclick", ...(scrolls ? ["wheel"] : []), "contextmenu"]) node.addEventListener(ev, (e) => {
             e.stopPropagation();
             if (ev === "mousedown" && e.target.closest("button")) e.preventDefault();
         });
     };
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-    let last = "";
+    let last = "", msgBg = null;
     const draw = () => {
         const buf = t.buffer.active;
         const rowH = screen.offsetHeight / t.rows;
@@ -139,9 +149,11 @@ function overlay(t, on) {
             const line = buf.getLine(buf.viewportY + r);
             const text = (line?.translateToString(true) ?? "").replace(/\s+$/, "");
             const c = line?.getCell(Math.max(0, text.search(/\S/)));
-            rows.push({ text, bg: !!c && !c.isBgDefault() });
+            const bg = !!c && !c.isBgDefault();
+            rows.push({ text, bg, bgColor: bg ? c.getBgColor() : null });
         }
-        const sc = readScreen(rows);
+        const sc = readScreen(rows, { msgBg });
+        msgBg = sc.msgBg;
         on.state({ menu: sc.menu && !sc.prompt, prompt: sc.prompt });
         const key = `${rowH}|${JSON.stringify(sc)}`;
         if (key === last) return;
@@ -152,9 +164,12 @@ function overlay(t, on) {
             const text = on.sent().find((m) => norm(m) === joined) ?? joined;
             const row = el("div", "term-bubble-row");
             Object.assign(row.style, { top: `${b.r * rowH}px`, height: `${b.n * rowH}px` });
-            const bubble = el("div", "term-bubble", text);
-            // one line of text per terminal row at most, so it never spills onto Claude Code's answer
-            Object.assign(bubble.style, { lineHeight: `${rowH}px`, maxHeight: `${b.n * rowH}px`, fontSize: `${Math.min(14, Math.round(rowH * 0.78))}px` });
+            const bubble = el("div", `term-bubble${b.cut ? " cut" : ""}`, text);
+            // one line of text per terminal row at most, so it never spills onto Claude Code's answer; a little more
+            // room above and below, reaching into the blank row Claude Code leaves around a message (not above a cut one)
+            const pad = Math.round(rowH * 0.22);
+            Object.assign(bubble.style, { lineHeight: `${rowH}px`, fontSize: `${Math.min(14, Math.round(rowH * 0.78))}px`, padding: `${pad}px 16px`,
+                marginTop: b.cut ? "0" : `${-pad}px`, maxHeight: `${b.n * rowH + pad * (b.cut ? 1 : 2)}px` });
             row.append(bubble);
             return row;
         });
@@ -192,7 +207,7 @@ function overlay(t, on) {
             const card = el("div", "term-card");
             // at least the rows of Claude Code's own menu, more (upwards, to the whole terminal) when the card needs it
             card.style.minHeight = `${(t.rows - p.top) * rowH}px`;
-            keepMouse(card);
+            keepMouse(card, { scrolls: true });
             for (const q of p.question) card.append(el("p", p.question.length > 1 && q === p.question.at(-1) ? "term-q strong" : "term-q", q));
             const list = el("div", "term-choices");
             p.options.forEach((o, i) => {
