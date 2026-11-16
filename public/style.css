@@ -194,20 +194,19 @@ section.group:first-of-type > h2 { margin-top: 4px; }
 .savebar.dirty { animation: pop .25s ease-out; }
 
 /* side drawer (right) and chapter writer (left); one backdrop under both */
-:root { --drawer-w: min(1280px, 94vw); }
-/* Both drawers only ever animate transform (never width, which would re-lay out a whole chapter every frame) with the
-   same timing; the drawer keeps one width and the writer fills what is left beside it */
+:root { --drawer-w: min(1280px, 94%); --slide: .28s cubic-bezier(.22,.8,.3,1); }
+/* Both drawers slide and resize with one timing (--slide), so opening, closing and resizing stay in step; the
+   writer's text is a fixed column centred in it, so a width change moves it rather than reflowing it */
 .drawer-backdrop { position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.28); opacity: 0; pointer-events: none; transition: opacity .22s ease-out; }
 .drawer-backdrop.on { opacity: 1; pointer-events: auto; }
 .drawer-wrap { position: fixed; inset: 0; z-index: 41; pointer-events: none; }
 .drawer { position: absolute; top: 0; right: 0; bottom: 0; width: var(--drawer-w); background: var(--bg); border-left: 1px solid var(--line);
     box-shadow: -12px 0 32px rgba(0,0,0,.18); display: flex; flex-direction: column;
-    transform: translateX(100%); visibility: hidden; transition: transform .24s cubic-bezier(.4,0,.6,1), visibility 0s .24s, width 0s .26s; will-change: transform; contain: layout paint; }
-.drawer-wrap.open .drawer { transform: none; visibility: visible; pointer-events: auto; transition: transform .26s cubic-bezier(.2,.7,.2,1), visibility 0s, width 0s .26s; }
+    transform: translateX(100%); visibility: hidden; transition: transform var(--slide), width var(--slide), visibility 0s .28s; will-change: transform; contain: layout paint; }
+.drawer-wrap.open .drawer { transform: none; visibility: visible; pointer-events: auto; transition: transform var(--slide), width var(--slide), visibility 0s; }
 /* beside the writer the drawer narrows only when the window can't fit both (at once, never while sliding); it widens
    again only after it has slid away */
-.layout.writer-beside { --drawer-w: min(1280px, 94vw, max(420px, calc(100vw - 640px))); }
-.layout.writer-beside .drawer-wrap.open .drawer { transition: transform .26s cubic-bezier(.2,.7,.2,1), visibility 0s, width 0s; }
+.layout.writer-beside { --drawer-w: min(1280px, 94%, max(420px, 100% - 640px)); }
 /* collapsed drawer: a button per tab on the right edge (the viewer's shows the current page) */
 .drawer-side { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; transition: opacity .2s; }
 .drawer-tab { pointer-events: auto; max-height: 19vh; padding: 12px 5px;
@@ -638,13 +637,14 @@ table.holdings td.copy-cell { width: 1%; padding-left: 6px; }
 
 /* chapter writer: a drawer on the left, collapsed to a tab on the left edge */
 .writer-wrap { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
-.writer { position: absolute; top: 0; left: 0; bottom: 0; width: calc(100vw - 40px); background: var(--panel); border-right: 1px solid var(--line);
+.writer { position: absolute; top: 0; left: 0; bottom: 0; width: calc(100% - 40px); background: var(--panel); border-right: 1px solid var(--line);
     border-top: 4px solid var(--accent); box-shadow: 12px 0 32px rgba(0,0,0,.18); display: flex; flex-direction: column;
-    transform: translateX(-100%); visibility: hidden; transition: transform .24s cubic-bezier(.4,0,.6,1), visibility 0s .24s; will-change: transform; contain: layout paint; }
+    transform: translateX(-100%); visibility: hidden; transition: transform var(--slide), width var(--slide), visibility 0s .28s; will-change: transform; contain: layout paint; }
 /* open: it widens only once the drawer has slid away (width 0s .26s) and narrows at once when the drawer comes in */
-.writer-wrap.open .writer { transform: none; visibility: visible; pointer-events: auto; transition: transform .26s cubic-bezier(.2,.7,.2,1), visibility 0s, width 0s .26s; }
-.layout.writer-beside .writer { width: max(640px, calc(100vw - var(--drawer-w))); }
-.layout.writer-beside .writer-wrap.open .writer { transition: transform .26s cubic-bezier(.2,.7,.2,1), visibility 0s, width 0s; }
+.writer-wrap.open .writer { transform: none; visibility: visible; pointer-events: auto; transition: transform var(--slide), width var(--slide), visibility 0s; }
+/* beside the open drawer the writer ends where the drawer begins; widths are % of the (scrollbar-free) window, the
+   same box both drawers sit in, so they meet exactly, and both move with one timing, so every change stays in step */
+.layout.writer-beside .writer { width: max(640px, calc(100% - var(--drawer-w))); }
 .writer-tab { position: absolute; left: 0; top: 50%; transform: translateY(-50%); pointer-events: auto; max-height: 30vh; padding: 12px 5px;
     border: 1px solid var(--line); border-left: none; border-right: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--panel);
     box-shadow: 4px 0 14px rgba(0,0,0,.12); color: var(--text); font-size: 12.5px; transition: opacity .2s, padding .15s; }
@@ -731,8 +731,8 @@ input.be-mark { width: auto; top: .45em; margin: 0; }
 .be-break-pick { font-size: 12px; padding: 2px 4px; max-width: 120px; }
 /* narrow windows: the drawer lies over the writer instead of beside it */
 @media (max-width: 1100px) {
-    .layout.writer-beside { --drawer-w: min(1280px, 94vw); }
-    .layout.writer-beside .writer { width: calc(100vw - 40px); }
+    .layout.writer-beside { --drawer-w: min(1280px, 94%); }
+    .layout.writer-beside .writer { width: calc(100% - 40px); }
 }
 /* lookup (drawer tab) */
 .lookup-bar { display: flex; gap: 12px; align-items: center; position: sticky; top: -16px; z-index: 2; background: var(--bg); padding: 4px 0 10px; }
