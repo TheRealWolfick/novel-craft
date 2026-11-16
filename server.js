@@ -23,6 +23,7 @@ import { Search } from "./lib/search.js";
 import { Importer } from "./lib/importer.js";
 import { Docs } from "./lib/docs.js";
 import { Assets } from "./lib/assets.js";
+import { Assistant } from "./lib/ai.js";
 import { WorldExport } from "./lib/worldexport.js";
 import { textureHash } from "./lib/assets.js";
 import { TEXTURES } from "./public/map-core.js";
@@ -47,6 +48,8 @@ async function writeSettings(patch) {
 }
 const VAULT_SOURCES = [["--vault", arg("vault")], ["settings", readSettings().vault], ["BOOKS_VAULT", process.env.BOOKS_VAULT]];
 const startSource = VAULT_SOURCES.find(([, v]) => v);
+// the AI assistant: its tools read the open vault's services
+const assistant = new Assistant({ settingsFile: SETTINGS_FILE, readSettings, writeSettings, ctx: () => ({ vault, novels, store, plans, worlds, search }) });
 const isFolder = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
 let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, search, importer, assets, exporter;
@@ -86,6 +89,7 @@ const STATIC = {
     "/style.css": ["public/style.css", "text/css"],
     "/outline.js": ["public/outline.js", "text/javascript"],
     "/blocks.js": ["public/blocks.js", "text/javascript"],
+    "/ai.js": ["public/ai.js", "text/javascript"],
     "/sections.js": ["public/sections.js", "text/javascript"],
     "/callout-style.js": ["public/callout-style.js", "text/javascript"],
     "/callout-designer.js": ["public/callout-designer.js", "text/javascript"],
@@ -136,8 +140,15 @@ function entryOut(novel, ledger, e, placed) {
 }
 
 // routes that work without a vault
-const SETUP_ROUTES = new Set(["GET /api/settings", "POST /api/settings", "GET /api/settings/folders", "POST /api/settings/appearance", "GET /api/docs", "GET /api/docs/page", "GET /api/docs/search"]);
+const SETUP_ROUTES = new Set(["GET /api/settings", "POST /api/settings", "GET /api/settings/folders", "POST /api/settings/appearance", "GET /api/docs", "GET /api/docs/page", "GET /api/docs/search", "GET /api/ai/status", "POST /api/ai/settings", "POST /api/ai/signin", "POST /api/ai/signout", "POST /api/ai/test"]);
 const routes = {
+    // AI assistant: connection (Settings), forgetting a conversation; the chat itself streams (see the server below)
+    "GET /api/ai/status": () => assistant.status(),
+    "POST /api/ai/settings": async ({ req }) => assistant.configure(await json(req)),
+    "POST /api/ai/signin": () => assistant.signIn(),
+    "POST /api/ai/signout": () => assistant.signOut(),
+    "POST /api/ai/test": () => assistant.test(),
+    "DELETE /api/ai/conversation": ({ q }) => assistant.forget(q.get("id")),
     "GET /api/settings": () => ({
         vault: vault?.root ?? null, source: vaultSource, notes: vault?.notes.size ?? 0, problem: vaultProblem,
         settingsFile: SETTINGS_FILE, overridden: vaultSource === "--vault",
@@ -559,6 +570,19 @@ async function serveStamp(req, res, pathname) {
     fs.createReadStream(abs).pipe(res);
 }
 
+/** One chat turn, streamed as JSON lines ({t: "text", d} …); closing the request stops it */
+async function aiChat(req, res) {
+    if (!vault) return send(res, 503, { error: "No vault folder chosen yet: open Settings", setup: true });
+    if (req.headers["x-requested-with"] !== "books-meta-viewer") return send(res, 403, { error: "Missing request header" });
+    const body = await json(req);
+    const stop = new AbortController();
+    res.on("close", () => { if (!res.writableFinished) stop.abort(); });
+    res.writeHead(200, { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" });
+    const emit = (ev) => { if (!res.writableEnded) res.write(JSON.stringify(ev) + "\n"); };
+    try { await assistant.chat(body, emit, stop.signal); } catch (e) { emit({ t: "error", message: e.message }); }
+    res.end();
+}
+
 const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     try {
@@ -576,6 +600,7 @@ const server = http.createServer(async (req, res) => {
             const [file, type] = STATIC[url.pathname];
             return send(res, 200, await fsp.readFile(path.join(HERE, file)), type);
         }
+        if (req.method === "POST" && url.pathname === "/api/ai/chat") return await aiChat(req, res);
         const route = routes[`${req.method} ${url.pathname}`];
         if (!route) return send(res, 404, { error: "Not found" });
         if (!vault && !SETUP_ROUTES.has(`${req.method} ${url.pathname}`)) return send(res, 503, { error: "No vault folder chosen yet: open Settings", setup: true });

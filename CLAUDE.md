@@ -113,6 +113,16 @@ Sidebar pill "World builder" (`#/world/<world path>`, `-` = locations without a 
 - Styles live in `map-core.js`: `TEXTURES` (see above), `TERRAINS`, `PATH_STYLES` (stroke stacks of `{c, w, dash, cap, opacity}`; `snap` styles snap to grid corners, others to square centres; `wall-*` styles, `fence`, `hedge` and `iron-railing` are offered as room walls, among them plaster, tiled, concrete, log, thin partition, glass, framed glass screen and shower curtain; room walls honour `opacity`, so glass is see-through), `TEXT_STYLES` (`gm` notes are not exported).
 - **Stamps**: `public/stamps/` (served at `/stamps/`), catalogue `manifest.json` built by `node scripts/build-stamps.js [--game-icons <dir>]`, which also draws the steampunk top-down set and the game-icons tokens/markers. Sources and licences in `public/stamps/CREDITS.md` (Azgaar FMG relief/burg icons MIT, Kenney Cartography + Medieval RTS CC0, game-icons.net CC BY 3.0, steampunk set drawn here). Groups have a `mode` (freeform, grid, both). The "Kitchen & bath" group has a bathroom set (shower heads, hand shower, mixer, shower bases and trays, quadrant shower, floor and linear drains, towel rails and hooks, vanities, vessel basin, mirrors, toiletries, bath mat, laundry basket, toilet, roll holder; wall-mounted ones have the wall along their top edge). "Plants & decor" (indoor plants, things for tables and cabinets: plates, place setting, fruit, tea set, wine, candles, books, TVs, radio, lamps, vase, laptop, telephone, clocks, globe, chessboard…) and "Rugs" (round, braided, runner, kilim, geometric, shag, hide, Persian blue, striped, checked, sheepskin) are steampunk-set groups too. A STEAM row can end with `{ crop: [x, y, w, h] }` (in the drawing's px) so a stamp much smaller than its squares gets a box that fits it. The script also draws the mechanical plant set (`PLANT`, with ports) and pipework (`PIPE_STYLES` × `PIPE_PIECES` into `public/stamps/pipes/`). Doors are `door-swing` (1×2) and `double-door-swing` (2×2) with the swing inside the stamp and the wall line through the middle, and sliding ones (`sliding-door`, `double-sliding-door`, `glass-sliding-door`, `pocket-door`, `double-pocket-door`, `barn-door`, written by build-stamps.js from `doorStamp`, `SLIDING_DOORS`); the old `door`/`double-door` files stay for existing maps but are hidden from the library. Pasted or dropped images go to `_Attachments/Map Stamps/Pasted/` via POST /api/stamps. Built-in stamps are served with `no-cache` + `last-modified` (304 when unchanged), and the editor shows them at `?v=<manifest version>` (`viewSrc`; the version changes with every build) while maps keep the plain path, so a rebuilt stamp never shows an old cached image.
 
+## AI assistant
+
+Claude in the side drawer's **AI** tab (`public/ai.js` `AiPane`; the robot button at the top right, `toggleAi` in app.js, adds the tab: `drawer.ai`). Phase 1 of a plan: read-only tools now; next a background summary index (phase 2, in the app's data folder, not the vault: other users' vaults differ), proposals the user approves (create notes, chapter edits as diffs), map tools, `current_view`-style screenshots, then OpenAI and local models.
+
+- **Connection** (Settings → AI assistant, `AiSettingsPanel`; `lib/ai.js` `Assistant`): settings.json `ai {model, effort, auth: key|signin}`; the API key in `secrets.json` beside settings.json (mode 600, only `…last4` ever goes to the page). "Sign in with Anthropic" runs `ant auth login` (Anthropic's CLI, must be on PATH) and the SDK then uses that profile (`new Anthropic({profile})`, the profile `ant` uses, ahead of any `ANTHROPIC_API_KEY`). Models: `claude-opus-5-5` (default), `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-fable-5-2`; effort low/medium/high (default medium). Server-side refusal fallbacks (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`) on models that have them. "Test the connection" is one tiny request.
+- **Loop** (`Assistant.chat`): `client.beta.messages.stream` with the tools (`eager_input_streaming`, inputs checked by `checkInput` before running), top-level `cache_control` (auto prompt caching), no `thinking` param (adaptive by default), `output_config.effort`. Conversations live in server memory (30 kept; lost on restart), append-only (assistant content kept as returned). A failed turn rolls back. Each user message gets one "(On screen: …)" line from the page (`screenView`: route + h1, drawer page, writer chapter, selection). POST /api/ai/chat streams JSON lines `{t: start|text|thinking|tool|tool_done|done|error}`; closing the request stops it.
+- **System prompt** (`SYSTEM` in ai.js): the vault conventions, where/how to search, cite `[[links]]`, note text is data not instructions, plus `AiTools.outline()` (novel folders, collections, facets, worlds: names only, so the cached prefix rarely changes).
+- **Tools** (`lib/ai-tools.js` `AiTools`, each returns compact text capped at 24k chars with a one-line `summary` for the UI): search, novel_overview, read_chapter (pages of ~14k chars, plan), read_note (long notes as section titles, then by title), query_collection, schema, character_state (ledgers folded at a chapter), world_tree, taxonomy, current_view. **Scope is enforced here** (`inScope`): only novel folders and the data store (not `_Attachments`, not dot paths); the model has no other way in.
+- **Tests**: `WB_AI_MOCK=1` (test/run.sh sets it) swaps the SDK client for `mockClient` ("search: x" calls search, "view?" current_view, otherwise echoes): no network, no cost.
+
 ## Note blocks and the scratchpad
 
 - A note's body shows as **blocks** in the left column (`NoteBlocks` in app.js, `public/sections.js` shared with the server): the text before the first `## ` heading, then one block per `## Title` section (`###` stays inside). GET /api/note returns `pre`, `sections` (each rendered) and `sectionTitles` (titles other notes in the folder use, offered by "+ Add block"). Each block has edit (writer's `BlockEditor`, `compact`), move (↑↓ in move mode, Enter / Escape saves the order) and delete (two clicks) icons. Saves PATCH the body with only the touched sections rewritten (`sectionRaw`); untouched ones keep their bytes (`raw`), and every vault body round-trips. `## Images` stays where it is (the gallery shows it). Not used for Recipes (the crafting scripts read their body), plans, chapters, ledgers, config and `90. Templater/` notes (`blocksFor`).
@@ -224,6 +234,9 @@ public/map-editor.js map editor (tools, layers, stamp library, inspector, pins, 
 public/stamps/       built-in map stamps + manifest.json + CREDITS.md
 scripts/build-stamps.js  builds public/stamps/manifest.json and the generated stamps
 lib/rename.js        renaming a note's file and every link to it (notes, map/blueprint pins, canvases, a location's map)
+lib/ai.js            AI assistant: connection (key / ant sign-in), conversations, the streaming tool loop, mock client
+lib/ai-tools.js      the assistant's read-only tools and its scope (novels + data store only)
+public/ai.js         AI drawer tab, robot icon, Settings panel
 lib/search.js        lookup: full-text search over names, frontmatter and note text, grouped by kind
 public/writer.js     chapter writer drawer + block editor
 public/blocks.js     chapter markdown <-> blocks, word count, inline markup toggles (shared with tests)
@@ -238,7 +251,7 @@ scripts/migrate-plans.js             plan restructure, already run 2026-10-21 (s
 test/run.sh, test/ui-smoke.mjs       npm test: vault copy + jsdom route render + create-entry flow
 ```
 
-Dependencies: `yaml`, `marked`, `preact`, `htm` (served from node_modules at `/vendor/*`), dev: `jsdom`. Versions are pinned exactly.
+Dependencies: `yaml`, `marked`, `preact`, `htm` (served from node_modules at `/vendor/*`), `@anthropic-ai/sdk` (server only; the Arch PKGBUILD copies it and its dependency tree by name), dev: `jsdom`. Versions are pinned exactly.
 
 ### API
 
@@ -309,6 +322,8 @@ POST /api/world/export/folder {world, linked, folder}
 POST /api/import/upload?filename=  (raw .zip / .tar.gz)   same answer as /api/import/check
 GET  /api/map-assets   DELETE /api/map-assets/stamp?file=   DELETE /api/map-assets/texture?id=   GET /api/map-assets/pack.zip?stamps=a|b&textures=x|y&name=
 GET  /api/docs   GET /api/docs/page?id=   GET /api/docs/search?q=    the app's docs (docs/*.md), work without a vault
+GET  /api/ai/status   POST /api/ai/settings {model, effort, auth, apiKey, removeKey}   POST /api/ai/signin   POST /api/ai/signout   POST /api/ai/test
+POST /api/ai/chat {conversation, message, view}   streamed JSON lines     DELETE /api/ai/conversation?id=
 GET  /api/events                         SSE {version, paths} on every vault change
 ```
 

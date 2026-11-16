@@ -15,6 +15,8 @@ const chapterHref = (folder, n) => `#/chapter/${encodeURIComponent(folder)}/${n}
 let writer = (() => { try { const w = JSON.parse(localStorage.getItem("writerState")); if (w?.folder) return { folder: w.folder, n: Number(w.n), open: !!w.open }; } catch { /* none */ } return { folder: null, n: null, open: false }; })();
 const writerListeners = new Set();
 const setWriter = (w) => { writer = w; writerListeners.forEach((f) => f(w)); try { localStorage.setItem("writerState", JSON.stringify(w)); } catch { /* private window */ } };
+/** Where the writer is now ({folder, n, open}), for the assistant's view of the screen */
+export const writerNow = () => writer;
 export function useWriter() {
     const [w, set] = useState(writer);
     useEffect(() => { writerListeners.add(set); return () => writerListeners.delete(set); }, []);

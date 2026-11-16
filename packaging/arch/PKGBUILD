@@ -25,8 +25,12 @@ package() {
     # the in-app docs: pages, index and screenshots (shots.json only drives scripts/screenshots.mjs)
     install -d "$app/docs"
     cp -r "$_repo"/docs/{*.md,index.json,img} "$app/docs/"
-    # runtime dependencies only (pinned in package.json)
-    for m in yaml marked preact htm; do cp -r "$_repo/node_modules/$m" "$app/node_modules/"; done
+    # runtime dependencies only (pinned in package.json), with what the Anthropic SDK needs
+    # (the list is `npm ls --omit=dev --all`; the package check fails if one is missing)
+    for m in yaml marked preact htm @anthropic-ai/sdk @babel/runtime @opentelemetry/api @stablelib/base64 fast-sha256 json-schema-to-ts standardwebhooks ts-algebra; do
+        install -d "$app/node_modules/$(dirname "$m")"
+        cp -r "$_repo/node_modules/$m" "$app/node_modules/$m"
+    done
     [ -f "$_repo/LICENSE" ] && install -Dm644 "$_repo/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 
     install -Dm755 /dev/stdin "$pkgdir/usr/bin/$pkgname" <<SH

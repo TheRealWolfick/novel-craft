@@ -998,6 +998,62 @@ if (process.env.SETTINGS_DIR) {
     check(w.localStorage.getItem("lastHash") === "#/c/Items" && saved?.open === true && saved.recent.length >= 1, "the page and the drawer are saved for the next start", JSON.stringify({ last: w.localStorage.getItem("lastHash"), saved }));
     doc.querySelector(".drawer-tabs button[title^='Collapse']").click(); await wait(300);
 }
+// AI assistant (the test server runs with WB_AI_MOCK=1: a stand-in for Claude, no network)
+{
+    const doc = w.document;
+    const send = (method, p, body) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: body && JSON.stringify(body) });
+    const st = await get("/api/ai/status");
+    check(st.mock && st.ready && st.model === "claude-opus-5-5", "the assistant is ready in test mode with Opus 5.5 by default", JSON.stringify(st));
+    // a chat turn streams JSON lines: text, a tool call with its result, the reply after it
+    const r = await send("POST", "/api/ai/chat", { message: "search: Mara", view: { page: "test" } });
+    const events = (await r.text()).trim().split("\n").map((l) => JSON.parse(l));
+    const tool = events.find((e) => e.t === "tool_done");
+    const reply = events.filter((e) => e.t === "text").map((e) => e.d).join("");
+    check(events[0].t === "start" && tool?.name === "search" && /results/.test(tool.summary) && /Tool said: (\d+ of \d+ results|No results)/.test(reply) && events.at(-1).t === "done", "a chat turn streams text, runs the search tool and answers with its result", JSON.stringify(events.slice(-3)));
+    const conv = events[0].conversation;
+    const r2 = await send("POST", "/api/ai/chat", { conversation: conv, message: "view?", view: { page: "Chapter 2", selection: "the lamp" } });
+    const ev2 = (await r2.text()).trim().split("\n").map((l) => JSON.parse(l));
+    check(ev2[0].conversation === conv && ev2.some((e) => e.t === "tool_done" && e.name === "current_view") && ev2.filter((e) => e.t === "text").map((e) => e.d).join("").includes("Page: Chapter 2"), "the conversation continues and current_view reports the screen");
+    check((await send("POST", "/api/ai/chat", { message: "  " })).ok && true, "an empty message is answered (with an error line)");
+    // the tools reach only novels and the data store
+    const { Vault } = await import("../lib/vault.js"); const { Novels } = await import("../lib/novels.js"); const { Blueprints } = await import("../lib/blueprints.js");
+    const { DataStore } = await import("../lib/datastore.js"); const { Plans } = await import("../lib/plans.js"); const { Worlds } = await import("../lib/worlds.js");
+    const { Search } = await import("../lib/search.js"); const { AiTools } = await import("../lib/ai-tools.js");
+    const v = new Vault(COPY); await v.load();
+    const nv = new Novels(v), ds = new DataStore(v, nv, new Blueprints(v)), pl = new Plans(v, nv, ds), wl = new Worlds(v, ds), se = new Search(v, nv, ds);
+    const tools = new AiTools(() => ({ vault: v, novels: nv, store: ds, plans: pl, worlds: wl, search: se }));
+    v.close?.();
+    const novel = nv.list()[0];
+    check(/outside the novels/.test(tools.run("read_note", { note: "90. Templater/Data Store Schema.md" }).error ?? ""), "notes outside the novels and the data store are refused");
+    check(!/90\. Templater|\.obsidian/.test(tools.run("search", { query: "schema" }).text ?? ""), "search results leave out Templater notes");
+    const ov = tools.run("novel_overview", { novel: novel.name });
+    check(ov.text?.includes("Chapters (") && ov.text.includes(novel.name), "novel_overview lists the chapters", ov.error);
+    const ch = pl.chapters(novel).find((c) => c.written);
+    if (ch) check(tools.run("read_chapter", { novel: novel.folder, chapter: ch.number }).text?.includes(`Chapter ${ch.number}`), "read_chapter returns a chapter's text");
+    const sc = tools.run("schema", { collection: "Items" });
+    check(/cat → links to/.test(sc.text ?? ""), "schema lists a collection's fields and link targets", sc.text?.slice(0, 200));
+    check(!!tools.run("query_collection", { collection: "items", limit: 2 }).text?.match(/rows in Items/), "query_collection lists rows");
+    // the drawer tab: the robot button opens it, a message gets a reply with its steps
+    doc.querySelector(".bot-button").click(); await wait(500);
+    const ta = doc.querySelector(".ai-input textarea");
+    check(!!ta && [...doc.querySelectorAll(".drawer-tabs button")].some((b) => b.textContent === "AI"), "the robot button opens the AI tab");
+    ta.value = "search: Mara"; ta.dispatchEvent(new w.Event("input", { bubbles: true })); await wait(50);
+    doc.querySelector(".ai-input button.primary").click();
+    for (let i = 0; i < 40 && !doc.querySelector(".ai-steps"); i++) await wait(100);
+    check(doc.querySelector(".ai-msg.user")?.textContent === "search: Mara" && /Tool said/.test(doc.querySelector(".ai-msg.bot")?.textContent ?? "") && /1 step$/.test(doc.querySelector(".ai-steps summary")?.textContent ?? ""), "a message in the AI tab gets a rendered reply with its steps", doc.querySelector(".ai-list")?.textContent);
+    doc.querySelector(".drawer-tabs button[title^='Collapse']").click(); await wait(300);
+    // the API key: checked, kept owner-only in secrets.json, never sent back whole
+    if (process.env.SETTINGS_DIR) {
+        check((await send("POST", "/api/ai/settings", { apiKey: "not-a-key" })).status === 400, "something that isn't an API key is refused");
+        const key = "sk-ant-api03-" + "x".repeat(40) + "WXYZ";
+        const saved = await (await send("POST", "/api/ai/settings", { apiKey: key, effort: "high", model: "claude-sonnet-5-5" })).json();
+        const file = `${process.env.SETTINGS_DIR}/books-meta-viewer/secrets.json`;
+        check(saved.hasKey && saved.keyHint === "…WXYZ" && !JSON.stringify(saved).includes(key) && (fs.statSync(file).mode & 0o777) === 0o600 && saved.effort === "high" && saved.model === "claude-sonnet-5-5",
+            "a saved key is kept owner-only and only its last four characters are shown", JSON.stringify(saved));
+        const removed = await (await send("POST", "/api/ai/settings", { removeKey: true, effort: "medium", model: "claude-opus-5-5" })).json();
+        check(!removed.hasKey && !JSON.parse(fs.readFileSync(file, "utf8")).anthropicKey, "the key can be removed");
+    }
+}
 // settings: the vault folder can be browsed and switched (the test server keeps its settings in SETTINGS_DIR)
 if (process.env.SETTINGS_DIR) {
     const doc = w.document;

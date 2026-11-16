@@ -10,6 +10,7 @@ import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
 import { ImportView } from "./importer.js";
 import { DocsView, DocArticle } from "./docs.js";
+import { AiPane, AiSettingsPanel, BotIcon } from "./ai.js";
 import { FIELD_TYPES, normalizeTemplates, checkTemplate, checkValue, fromText, toText, parseResource, computeValues, displayValue, defaultKey, fieldId, namesField, fieldNamed } from "./stats-core.js";
 
 const html = htm.bind(h);
@@ -181,9 +182,10 @@ addEventListener("beforeunload", (e) => { if (dirtyForms.size) e.preventDefault(
 // first; recent[0] is shown), lookup (search everything, with recently opened results) and the novel you are in.
 // It never closes: it collapses to buttons on the right edge and stays mounted, so unsaved edits survive navigation.
 const DRAWER_RECENT = 5;
-const DRAWER_TABS = [["viewer", "Viewer"], ["lookup", "Lookup"], ["datastore", "Data store"], ["taxonomy", "Taxonomy"], ["novel", "Novel"]];
+// "ai" appears once the robot button has been used (drawer.ai), and stays
+const DRAWER_TABS = [["viewer", "Viewer"], ["lookup", "Lookup"], ["datastore", "Data store"], ["taxonomy", "Taxonomy"], ["novel", "Novel"], ["ai", "AI"]];
 // where the drawer was when the app last closed (a convenience: the pages, the tab, open or not)
-let drawer = (() => { try { const d = JSON.parse(localStorage.getItem("drawerState")); if (d && Array.isArray(d.recent)) return { recent: d.recent.slice(0, DRAWER_RECENT), open: !!d.open && (d.recent.length > 0 || d.tab !== "viewer"), tab: d.tab ?? "viewer" }; } catch { /* none */ } return { recent: [], open: false, tab: "viewer" }; })();
+let drawer = (() => { try { const d = JSON.parse(localStorage.getItem("drawerState")); if (d && Array.isArray(d.recent)) return { recent: d.recent.slice(0, DRAWER_RECENT), open: !!d.open && (d.recent.length > 0 || d.tab !== "viewer"), tab: d.tab ?? "viewer", ai: !!d.ai }; } catch { /* none */ } return { recent: [], open: false, tab: "viewer" }; })();
 const drawerListeners = new Set();
 const setDrawer = (d) => { drawer = d; drawerListeners.forEach((f) => f(d)); try { localStorage.setItem("drawerState", JSON.stringify(d)); } catch { /* private window */ } };
 function useDrawer() {
@@ -194,7 +196,9 @@ function useDrawer() {
 function collapseDrawer() { if (drawer.open) setDrawer({ ...drawer, open: false }); }
 function expandDrawer() { if (!drawer.open) setDrawer({ ...drawer, open: true }); }
 /** Open the drawer on a tab (viewer, lookup, novel) */
-function openDrawerTab(tab) { setDrawer({ ...drawer, open: true, tab }); }
+function openDrawerTab(tab) { setDrawer({ ...drawer, open: true, tab, ai: drawer.ai || tab === "ai" }); }
+/** The robot button: opens the AI tab, or collapses the drawer when the AI tab is already showing */
+function toggleAi() { if (drawer.open && drawer.tab === "ai") collapseDrawer(); else openDrawerTab("ai"); }
 // opening a page shows the viewer and moves the page to the front of the recent list (a known page moves up, others shift right)
 function openInDrawer(href) {
     if (drawer.recent[0] === href) return setDrawer({ ...drawer, open: true, tab: "viewer" });
@@ -259,11 +263,11 @@ function drawerLabel(href, index) {
 
 function Drawer({ index, novel }) {
     const d = useDrawer();
-    const tab = d.tab === "novel" && !novel ? "viewer" : d.tab;
+    const tab = (d.tab === "novel" && !novel) || (d.tab === "ai" && !d.ai) ? "viewer" : d.tab;
     // panes stay mounted once shown, so a half-typed search or unsaved edits survive switching tabs
     const [seen, setSeen] = useState(() => new Set([tab]));
     useEffect(() => { if (!seen.has(tab)) setSeen(new Set([...seen, tab])); }, [tab]);
-    const tabs = DRAWER_TABS.filter(([k]) => k !== "novel" || novel);
+    const tabs = DRAWER_TABS.filter(([k]) => (k !== "novel" || novel) && (k !== "ai" || d.ai));
     const label = (h) => drawerLabel(h, index);
     const href = d.recent[0];
     const sideLabel = (k, l) => (k === "viewer" && href ? `${l}: ${label(href)}` : k === "novel" && novel ? `${l}: ${novelName(index, novel)}` : l);
@@ -282,6 +286,7 @@ function Drawer({ index, novel }) {
             ${seen.has("datastore") && html`<div class="drawer-pane" hidden=${tab !== "datastore"}><${BrowsePane} index=${index} taxonomy=${false} active=${tab === "datastore" && d.open} /></div>`}
             ${seen.has("taxonomy") && html`<div class="drawer-pane" hidden=${tab !== "taxonomy"}><${BrowsePane} index=${index} taxonomy=${true} active=${tab === "taxonomy" && d.open} /></div>`}
             ${novel && seen.has("novel") && html`<div class="drawer-pane" hidden=${tab !== "novel"}><${NovelDrawer} key=${novel} folder=${novel} index=${index} /></div>`}
+            ${d.ai && seen.has("ai") && html`<div class="drawer-pane" hidden=${tab !== "ai"}><${AiPane} active=${tab === "ai" && d.open} /></div>`}
         </aside>
     </div>`;
 }
@@ -3095,6 +3100,7 @@ function SettingsView({ settings }) {
     return html`<div class="settings">
         <h1>Settings</h1>
         <${AppearancePanel} saved=${settings.appearance ?? {}} />
+        <${AiSettingsPanel} />
         <div class="panel">
             <h3>Vault folder</h3>
             ${settings.vault
@@ -3193,7 +3199,7 @@ function App() {
     return html`<div class=${`layout ${writer.open ? "writing" : ""} ${d.open ? "drawer-open" : ""} ${beside.current ? "writer-beside" : ""}`}>
         <${Sidebar} index=${index} novelFolder=${novelFolder} />
         <main class="main">
-            ${route.name !== "docs" && html`<div class="topbar"><${Search} index=${index} /><${NovelFilter} index=${index} value=${novelFilter} onChange=${setNF} /></div>`}
+            ${route.name !== "docs" && html`<div class="topbar"><${Search} index=${index} /><${NovelFilter} index=${index} value=${novelFilter} onChange=${setNF} /><span class="grow" /><button class="bot-button" title="AI assistant" aria-label="AI assistant" onClick=${toggleAi}><${BotIcon} /></button></div>`}
             <div class=${`view view-${route.name}`} key=${route.name === "docs" ? "docs" : route.name + (a ?? "")}>${view}</div>
         </main>
         ${!noVault && html`<div class=${`drawer-backdrop ${d.open || writer.open ? "on" : ""}`} onClick=${() => { collapseDrawer(); collapseWriter(); }} />

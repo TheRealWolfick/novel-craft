@@ -15,6 +15,7 @@
     "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
     "htm": "3.1.1",
     "marked": "18.1.1",
     "preact": "11.0.1",
