@@ -21,6 +21,12 @@ import { foldStock } from "./lib/ledger.js";
 import { Renamer } from "./lib/rename.js";
 import { Search } from "./lib/search.js";
 import { Importer } from "./lib/importer.js";
+import { Docs } from "./lib/docs.js";
+import { Assets } from "./lib/assets.js";
+import { WorldExport } from "./lib/worldexport.js";
+import { textureHash } from "./lib/assets.js";
+import { TEXTURES } from "./public/map-core.js";
+import { STAMPS } from "./lib/worlds.js";
 import { parseSections, isImagesSection } from "./public/sections.js";
 import { CALLOUT_STYLES_NOTE, mergeStyles } from "./public/callout-style.js";
 
@@ -43,7 +49,7 @@ const VAULT_SOURCES = [["--vault", arg("vault")], ["settings", readSettings().va
 const startSource = VAULT_SOURCES.find(([, v]) => v);
 const isFolder = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
-let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, search, importer;
+let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, search, importer, assets, exporter;
 let vaultSource = null, vaultProblem = null, epoch = 0;
 const clients = new Set();
 const version = () => epoch * 1e9 + (vault?.version ?? 0);
@@ -62,7 +68,10 @@ async function openVault(dir, source) {
     worlds = new Worlds(vault, store);
     renamer = new Renamer(vault, store, worlds);
     search = new Search(vault, novels, store);
-    importer = new Importer(vault, store);
+    assets = new Assets(vault, worlds);
+    worlds.assets = assets;
+    exporter = new WorldExport(vault, store, worlds, assets);
+    importer = new Importer(vault, store, worlds, assets);
     novels.sheetHook = (novel, owner, set) => stats.sheetValues(novel, owner, set);
     vault.on("change", broadcast);
     vault.watch();
@@ -70,6 +79,7 @@ async function openVault(dir, source) {
     broadcast([]);
 }
 
+const docs = new Docs(path.join(HERE, "docs"));
 const STATIC = {
     "/": ["public/index.html", "text/html"],
     "/app.js": ["public/app.js", "text/javascript"],
@@ -80,6 +90,7 @@ const STATIC = {
     "/callout-style.js": ["public/callout-style.js", "text/javascript"],
     "/callout-designer.js": ["public/callout-designer.js", "text/javascript"],
     "/importer.js": ["public/importer.js", "text/javascript"],
+    "/docs.js": ["public/docs.js", "text/javascript"],
     "/writer.js": ["public/writer.js", "text/javascript"],
     "/stats-core.js": ["public/stats-core.js", "text/javascript"],
     "/map-core.js": ["public/map-core.js", "text/javascript"],
@@ -125,14 +136,25 @@ function entryOut(novel, ledger, e, placed) {
 }
 
 // routes that work without a vault
-const SETUP_ROUTES = new Set(["GET /api/settings", "POST /api/settings", "GET /api/settings/folders"]);
+const SETUP_ROUTES = new Set(["GET /api/settings", "POST /api/settings", "GET /api/settings/folders", "POST /api/settings/appearance", "GET /api/docs", "GET /api/docs/page", "GET /api/docs/search"]);
 const routes = {
     "GET /api/settings": () => ({
         vault: vault?.root ?? null, source: vaultSource, notes: vault?.notes.size ?? 0, problem: vaultProblem,
         settingsFile: SETTINGS_FILE, overridden: vaultSource === "--vault",
         looksLikeVault: vault ? isFolder(path.join(vault.root, ".obsidian")) : false,
         hasSchema: vault ? vault.notes.has(SCHEMA_NOTE) : false,
+        appearance: readSettings().appearance ?? {},
     }),
+    // how the app looks on this device: default accent, fonts, sizes (kept in settings.json)
+    "POST /api/settings/appearance": async ({ req }) => {
+        const b = await json(req);
+        const keep = {};
+        if (/^#[0-9a-f]{6}$/i.test(b.accent ?? "")) keep.accent = b.accent;
+        for (const k of ["uiFont", "readFont"]) if (typeof b[k] === "string" && b[k].length < 40) keep[k] = b[k];
+        for (const [k, lo, hi] of [["uiScale", 0.8, 1.4], ["writerSize", 13, 28], ["readSize", 12, 22]]) if (Number.isFinite(b[k])) keep[k] = Math.min(hi, Math.max(lo, b[k]));
+        await writeSettings({ appearance: keep });
+        return { appearance: keep };
+    },
     "POST /api/settings": async ({ req }) => {
         const b = await json(req);
         const dir = expand(need(b.vault, "vault"));
@@ -185,8 +207,13 @@ const routes = {
     },
     // dataset import: download and compare, preview a conflict, write
     "POST /api/import/check": async ({ req }) => importer.check((await json(req)).source),
+    "POST /api/import/upload": async ({ req, q }) => importer.checkUpload(await readBody(req, 200 * 1024 * 1024), q.get("filename") ?? "upload.zip"),
     "GET /api/import/preview": ({ q }) => importer.preview(need(q.get("id"), "id"), need(q.get("path"), "path")),
-    "POST /api/import/apply": async ({ req }) => { const b = await json(req); return importer.apply(need(b.id, "id"), { overwrite: b.overwrite ?? [], skipClashes: b.skipClashes !== false }); },
+    "POST /api/import/apply": async ({ req }) => { const b = await json(req); return importer.apply(need(b.id, "id"), { overwrite: b.overwrite ?? [], skip: b.skip ?? [], clashes: b.clashes ?? {}, extractStamps: b.extractStamps !== false, textures: b.textures ?? {} }); },
+    // the app's docs (docs/*.md), readable without a vault
+    "GET /api/docs": () => docs.index(),
+    "GET /api/docs/page": ({ q }) => { const p = docs.page(need(q.get("id"), "id")); return { ...p, plain: undefined }; },
+    "GET /api/docs/search": ({ q }) => ({ results: docs.search(q.get("q") ?? "") }),
     "GET /api/qa": () => ({ ...store.qa(), stats: stats.qa() }),
     "POST /api/render": async ({ req }) => ({ html: renderMarkdown((await json(req)).markdown ?? "", vault) }),
 
@@ -200,6 +227,7 @@ const routes = {
     "POST /api/rename": async ({ req }) => {
         const b = await json(req);
         const r = await renamer.rename({ path: need(b.path, "path"), name: b.name, title: b.title, baseMtime: b.baseMtime });
+        if (r.renamed) await importer.renamed(b.path, r.path); // an imported note: later imports find it under its new name
         await plans.afterPatch(r.path);
         return r;
     },
@@ -378,6 +406,41 @@ const routes = {
         const b = await json(req);
         return worlds.move({ path: need(b.path, "path"), parent: b.parent ?? null, world: b.world, baseMtime: b.baseMtime });
     },
+    // world export: what it holds, as a .zip download, or into a folder (a git repository to push)
+    "GET /api/world/export": ({ q }) => exporter.preview(need(q.get("world"), "world"), { linked: q.get("linked") === "1" }),
+    "GET /api/world/export.zip": async ({ q }) => {
+        const z = await exporter.zip(need(q.get("world"), "world"), { linked: q.get("linked") === "1" });
+        return { __raw: z.data, type: "application/zip", filename: z.filename };
+    },
+    "POST /api/world/export/folder": async ({ req }) => { const b = await json(req); return exporter.folder(need(b.world, "world"), { linked: !!b.linked }, need(b.folder, "folder")); },
+    // map assets: your stamps and derived textures with the maps that use them; delete; export a pack
+    "GET /api/map-assets": async () => {
+        const use = await assets.usage();
+        const tex = worlds.textures().textures;
+        return {
+            builtin: { stamps: assets.builtins().bySrc.size, textures: Object.keys(TEXTURES).length },
+            stamps: assets.ownStamps().map((x) => ({ ...x, uses: [...(use.stamps.get(x.hash) ?? [])] })),
+            textures: Object.entries(tex).map(([id, def]) => ({ id, name: def.name ?? id, from: def.from, hash: textureHash(def), uses: [...(use.textures.get(id) ?? [])] })),
+        };
+    },
+    "DELETE /api/map-assets/stamp": async ({ q }) => {
+        const f = need(q.get("file"), "file");
+        if (!f.startsWith(`${STAMPS}/`) || !vault.files.has(f)) throw fail(404, "Not one of your stamps");
+        const trashed = await trashNote(vault, f);
+        vault.files.delete(f);
+        return { trashed };
+    },
+    "DELETE /api/map-assets/texture": async ({ q }) => {
+        const id = need(q.get("id"), "id");
+        const { textures, mtime } = worlds.textures();
+        if (!textures[id]) throw fail(404, "No such texture");
+        const { [id]: _gone, ...rest } = textures;
+        return worlds.saveTextures(rest, mtime);
+    },
+    "GET /api/map-assets/pack.zip": async ({ q }) => {
+        const z = await exporter.packZip({ stamps: (q.get("stamps") ?? "").split("|").filter(Boolean), textures: (q.get("textures") ?? "").split("|").filter(Boolean), name: q.get("name") || "Map assets" });
+        return { __raw: z.data, type: "application/zip", filename: z.filename };
+    },
     "GET /api/map": ({ q }) => worlds.readMap(need(q.get("location"), "location")),
     "POST /api/map": async ({ req }) => {
         const b = JSON.parse((await readBody(req, 30 * 1024 * 1024)).toString("utf8") || "{}");
@@ -458,6 +521,18 @@ const routes = {
     },
 };
 
+// docs screenshots (docs/img/*.png|jpg|webp|svg)
+async function serveDocImage(res, pathname) {
+    const root = path.join(HERE, "docs", "img");
+    const abs = path.resolve(root, `.${decodeURIComponent(pathname.slice("/docs/img".length))}`);
+    const type = FILE_TYPES[path.extname(abs).slice(1).toLowerCase()];
+    if (!abs.startsWith(root + path.sep) || !type) throw fail(404, "Not found");
+    const st = await fsp.stat(abs).catch(() => null);
+    if (!st?.isFile()) throw fail(404, "Not found");
+    res.writeHead(200, { "content-type": type, "content-length": st.size, "cache-control": "no-cache" });
+    fs.createReadStream(abs).pipe(res);
+}
+
 async function serveFile(res, rel) {
     const ext = path.extname(rel).slice(1).toLowerCase();
     if (!FILE_TYPES[ext]) throw fail(403, "Only images and PDFs are served");
@@ -496,6 +571,7 @@ const server = http.createServer(async (req, res) => {
         }
         if (req.method === "GET" && url.pathname.startsWith("/files/") && vault) return await serveFile(res, decodeURIComponent(url.pathname.slice(7)));
         if (req.method === "GET" && url.pathname.startsWith("/stamps/")) return await serveStamp(req, res, url.pathname);
+        if (req.method === "GET" && url.pathname.startsWith("/docs/img/")) return await serveDocImage(res, url.pathname);
         if (req.method === "GET" && STATIC[url.pathname]) {
             const [file, type] = STATIC[url.pathname];
             return send(res, 200, await fsp.readFile(path.join(HERE, file)), type);
@@ -505,6 +581,11 @@ const server = http.createServer(async (req, res) => {
         if (!vault && !SETUP_ROUTES.has(`${req.method} ${url.pathname}`)) return send(res, 503, { error: "No vault folder chosen yet: open Settings", setup: true });
         if (req.method !== "GET" && req.headers["x-requested-with"] !== "books-meta-viewer") return send(res, 403, { error: "Missing request header" });
         const out = await route({ req, q: url.searchParams });
+        if (out?.__raw) {
+            res.writeHead(200, { "content-type": out.type, "content-length": out.__raw.length, "cache-control": "no-store",
+                "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(out.filename)}` });
+            return res.end(out.__raw);
+        }
         send(res, 200, out ?? {});
     } catch (e) {
         if (!e.status) console.error(e);

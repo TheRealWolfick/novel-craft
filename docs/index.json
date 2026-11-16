@@ -1,0 +1,4 @@
+{
+  "groups": ["Getting started", "Writing", "Novels and characters", "Data store", "World builder", "Tools"],
+  "start": ["choosing-a-vault", "planning", "writing-a-chapter"]
+}

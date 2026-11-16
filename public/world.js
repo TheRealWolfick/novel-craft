@@ -2,7 +2,7 @@
 import { h } from "preact";
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import htm from "htm";
-import { api, useApi, qs, toast, store, go, noteHref, openInDrawer, renameInDrawer, Loading, RenameDialog } from "./app.js";
+import { api, useApi, qs, toast, store, go, noteHref, openInDrawer, renameInDrawer, Loading, RenameDialog, ConfirmButton } from "./app.js";
 
 const html = htm.bind(h);
 
@@ -39,6 +39,7 @@ export function WorldView({ world, params }) {
     useEffect(() => { if (!world && first) location.replace(worldHref(first)); }, [world, first]);
     const { data, error } = useApi(world || first ? `/api/world?${qs({ world: current ?? "" })}` : null);
     const tab = params.get("tab") ?? "outline";
+    const [exporting, setExporting] = useState(false);
     if (!worlds || !data) return html`<${Loading} error=${error} />`;
     return html`<div class="world-page">
         <div class="spread world-head">
@@ -54,12 +55,68 @@ export function WorldView({ world, params }) {
                         ${worlds.unassigned > 0 && html`<option value="-">No world (${worlds.unassigned})</option>`}
                     </select></label>
                 ${current && html`<a class="button-link" href=${noteHref(current)}>World note</a>`}
+                ${current && html`<button onClick=${() => setExporting(true)} title="Share this world: its locations, maps, stamps and textures">Export world</button>`}
             </div>
         </div>
         <div class="tabs">${[["outline", "Outline"], ["atlas", "Atlas"], ["maps", "Maps"]].map(([t, l]) => html`<button class=${tab === t ? "on" : ""} onClick=${() => go(worldHref(current, t))}>${l}</button>`)}</div>
+        ${exporting && html`<${ExportDialog} world=${current} title=${data.title} onClose=${() => setExporting(false)} />`}
         ${tab === "outline" ? html`<${Outline} data=${data} world=${current} worlds=${worlds.worlds} />`
         : tab === "atlas" ? html`<${Atlas} data=${data} />`
         : html`<${MapsList} data=${data} />`}
+    </div>`;
+}
+
+// ------------------------------------------------------------------ export
+
+/**
+ * Export a world as a dataset: into a folder (recommended: a git repository others can import by URL) or as a .zip.
+ * "Linked notes" adds the data store notes the world and its locations link to, one level deep.
+ */
+function ExportDialog({ world, title, onClose }) {
+    const [linked, setLinked] = useState(store.get("exportLinked", false));
+    const [folder, setFolder] = useState(() => store.get(`exportFolder:${world}`, ""));
+    const [busy, setBusy] = useState(false);
+    const [done, setDone] = useState(null);
+    const [err, setErr] = useState("");
+    const { data: pv, error } = useApi(`/api/world/export?${qs({ world, linked: linked ? 1 : "" })}`);
+    const toggle = (v) => { setLinked(v); store.set("exportLinked", v); };
+    const save = async () => {
+        setBusy(true); setErr("");
+        try {
+            const r = await api.send("POST", "/api/world/export/folder", { world, linked, folder: folder.trim() });
+            store.set(`exportFolder:${world}`, folder.trim());
+            setDone(r);
+        } catch (e) { setErr(e.message); }
+        setBusy(false);
+    };
+    const zipHref = `/api/world/export.zip?${qs({ world, linked: linked ? 1 : "" })}`;
+    return html`<div class="modal-back" onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }} onKeyDown=${(e) => { if (e.key === "Escape") onClose(); }}>
+        <div class="modal export-dialog" role="dialog" aria-label=${`Export ${title}`}>
+            <div class="spread"><h2 style="margin:0">Export ${title}</h2><button class="small" onClick=${onClose} aria-label="Close">×</button></div>
+            <p class="muted">A dataset others can bring in with <b>Tools → Import data</b>: the world, its locations, their maps, the stamps and textures the maps use, and images attached to the notes.</p>
+            <label class="row export-linked"><input type="checkbox" style="width:auto" checked=${linked} onChange=${(e) => toggle(e.target.checked)} />
+                <span>Include the notes these link to, one level deep <span class="muted">(data store notes only: factions, races, items, taxonomy…; never chapters, characters, plans or novels)</span></span></label>
+            ${!pv ? html`<${Loading} error=${error} />` : html`<ul class="export-summary">
+                <li><b>${pv.locations}</b> locations, <b>${pv.maps}</b> maps${pv.attachments ? html`, <b>${pv.attachments}</b> attached files` : ""}</li>
+                ${linked && html`<li><b>${pv.linked}</b> linked notes${pv.linked ? html` <span class="muted">(${Object.entries(pv.linkedByCollection).map(([c, n]) => `${n} ${c.replace(/^Taxonomy\//, "")}`).join(", ")})</span>` : ""}</li>`}
+                <li><b>${pv.stamps.own}</b> of your own stamps go with it; <b>${pv.stamps.builtin}</b> built-in stamps are named by their hash (every World Builder has them)</li>
+                ${pv.textures > 0 && html`<li><b>${pv.textures}</b> derived textures</li>`}
+            </ul>`}
+            <section class="export-way recommended">
+                <h3>Save to a folder <span class="badge ok">recommended</span></h3>
+                <p class="muted small-note">Make it a git repository and push it to GitHub: others import it by its URL, and when you export again into the same folder, a later import brings them only what changed.</p>
+                <div class="row"><input class="grow" value=${folder} placeholder="/home/you/worlds/my-world" aria-label="Folder to export into" onInput=${(e) => setFolder(e.target.value)} />
+                    <button class="primary" disabled=${busy || !folder.trim()} onClick=${save}>${busy ? "Exporting…" : "Export"}</button></div>
+                ${done && html`<div class="export-done"><p>Exported ${done.files} files to <code>${done.folder}</code>${done.updated ? " (replacing the earlier export)" : ""}.</p>
+                    <pre>${done.git ? `cd "${done.folder}"\ngit add -A\ngit commit -m "Update ${title}"\ngit push` : `cd "${done.folder}"\ngit init -b main\ngit add -A\ngit commit -m "${title}"\ngit remote add origin https://github.com/<you>/<repository>.git\ngit push -u origin main`}</pre></div>`}
+            </section>
+            <section class="export-way">
+                <h3>Download a .zip</h3>
+                <p class="muted small-note">One file to send or keep. It imports by dropping it on the Import data page.</p>
+                <a class="button" href=${zipHref} download>Download ${title}.zip</a>
+            </section>
+            ${err && html`<p class="error">${err}</p>`}
+        </div>
     </div>`;
 }
 
@@ -347,5 +404,54 @@ function MapsList({ data }) {
                 <span>${n.title} <${ScaleBadge} node=${n} /></span>
                 <a href=${mapHref(n.path)}>${n.map ? "Open map" : "Create map"}</a></div>`)}
         </div>
+    </div>`;
+}
+
+// ------------------------------------------------------------------ map assets (Tools → Map assets)
+
+/**
+ * Your own stamps and derived textures, with the maps that use them: delete (stamps go to the vault's .trash; maps keep
+ * drawing a deleted stamp from their own copy), or export a selection as a pack others import with Import data.
+ * Built-in stamps and textures are the base set every World Builder has.
+ */
+export function MapAssetsView() {
+    const { data, error } = useApi("/api/map-assets");
+    const [picked, setPicked] = useState({ stamps: new Set(), textures: new Set() });
+    const [filter, setFilter] = useState("");
+    const [packName, setPackName] = useState("My stamps and textures");
+    if (!data) return html`<${Loading} error=${error} />`;
+    const f = filter.trim().toLowerCase();
+    const stamps = data.stamps.filter((s) => !f || `${s.name} ${s.set}`.toLowerCase().includes(f));
+    const textures = data.textures.filter((t) => !f || `${t.name} ${t.id} ${t.from}`.toLowerCase().includes(f));
+    const toggle = (kind, k) => { const n = new Set(picked[kind]); if (n.has(k)) n.delete(k); else n.add(k); setPicked({ ...picked, [kind]: n }); };
+    const delStamp = async (s) => { try { await api.send("DELETE", `/api/map-assets/stamp?${qs({ file: s.file })}`); toast(`${s.name} moved to the vault's .trash`); } catch (e) { toast(e.message); } };
+    const delTex = async (t) => { try { await api.send("DELETE", `/api/map-assets/texture?${qs({ id: t.id })}`); toast(`Removed ${t.name}`); } catch (e) { toast(e.message); } };
+    const usedBy = (uses) => (uses.length ? `${uses.length} map${uses.length === 1 ? "" : "s"}` : "unused");
+    const nPicked = picked.stamps.size + picked.textures.size;
+    const packHref = `/api/map-assets/pack.zip?${qs({ stamps: [...picked.stamps].join("|"), textures: [...picked.textures].join("|"), name: packName })}`;
+    return html`<div class="assets-page">
+        <h1>Map assets</h1>
+        <p class="muted" style="margin-top:0">Every stamp and derived texture is known by a hash of its content, so a map finds a stamp you moved or renamed, an import never copies one you already have, and a map keeps drawing a stamp you deleted from its own saved copy.
+            Built-in: <b>${data.builtin.stamps}</b> stamps and <b>${data.builtin.textures}</b> textures (every World Builder has them). Add packs with <a href="#/import">Import data</a>.</p>
+        <div class="row assets-bar">
+            <input class="grow" type="search" placeholder="Filter by name or set" value=${filter} onInput=${(e) => setFilter(e.target.value)} aria-label="Filter assets" />
+            <input value=${packName} onInput=${(e) => setPackName(e.target.value)} aria-label="Pack name" style="width:220px" />
+            ${nPicked ? html`<a class="button primary" href=${packHref} download>Export ${nPicked} as a pack (.zip)</a>` : html`<button disabled>Pick stamps or textures to export</button>`}
+        </div>
+        <h2>Your stamps <span class="muted" style="font-size:14px">${data.stamps.length}</span></h2>
+        ${!stamps.length ? html`<p class="muted">${data.stamps.length ? "None match." : "None yet: paste or drop an image in the map editor's stamp library."}</p>` : html`<div class="asset-grid">${stamps.map((s) => html`<div class=${`asset-card ${picked.stamps.has(s.file) ? "on" : ""}`} key=${s.file}>
+            <label class="asset-pick"><input type="checkbox" checked=${picked.stamps.has(s.file)} onChange=${() => toggle("stamps", s.file)} aria-label=${`Pick ${s.name}`} /></label>
+            <div class="asset-thumb"><img src=${s.src} alt="" loading="lazy" /></div>
+            <b title=${s.name}>${s.name}</b>
+            <span class="muted">${s.set} · ${usedBy(s.uses)}</span>
+            <code class="asset-hash" title="Content hash">${s.hash}</code>
+            <${ConfirmButton} onConfirm=${() => delStamp(s)} title=${s.uses.length ? "Maps using it keep their saved copy" : ""}>Delete<//>
+        </div>`)}</div>`}
+        <h2>Your textures <span class="muted" style="font-size:14px">${data.textures.length}</span></h2>
+        ${!textures.length ? html`<p class="muted">${data.textures.length ? "None match." : "None yet: make one in the map editor's Textures panel (New from this)."}</p>` : html`<table class="asset-table"><tbody>${textures.map((t) => html`<tr key=${t.id}>
+            <td><input type="checkbox" checked=${picked.textures.has(t.id)} onChange=${() => toggle("textures", t.id)} aria-label=${`Pick ${t.name}`} /></td>
+            <td><b>${t.name}</b> <code>${t.id}</code></td><td class="muted">from ${t.from}</td><td class="muted">${usedBy(t.uses)}</td>
+            <td><code class="asset-hash">${t.hash}</code></td>
+            <td><${ConfirmButton} onConfirm=${() => delTex(t)} title=${t.uses.length ? "Maps using it keep their own copy of it" : ""}>Delete<//></td></tr>`)}</tbody></table>`}
     </div>`;
 }

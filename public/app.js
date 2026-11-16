@@ -4,11 +4,12 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "preact/ho
 import htm from "htm";
 import { parseOutline, serializeOutline } from "./outline.js";
 import { MapEditor } from "./map-editor.js";
-import { WorldView, WorldOutline } from "./world.js";
+import { WorldView, WorldOutline, MapAssetsView } from "./world.js";
 import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, BlockEditor } from "./writer.js";
 import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from "./sections.js";
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
 import { ImportView } from "./importer.js";
+import { DocsView, DocArticle } from "./docs.js";
 import { FIELD_TYPES, normalizeTemplates, checkTemplate, checkValue, fromText, toText, parseResource, computeValues, displayValue, defaultKey, fieldId, namesField, fieldNamed } from "./stats-core.js";
 
 const html = htm.bind(h);
@@ -102,6 +103,26 @@ function readableAccent(hex, dark) {
     for (let i = 0; i < 24 && contrast(c, panel) < 4.6; i++) c = mixHex(c, dark ? "#ffffff" : "#000000", 0.08);
     return c;
 }
+// Appearance (Settings): the app's own accent (used where no novel colours the page), fonts and sizes, per device
+const UI_FONTS = { system: ["System", 'system-ui, -apple-system, "Segoe UI", sans-serif'], humanist: ["Humanist sans", '"Cantarell", "Segoe UI", "Noto Sans", system-ui, sans-serif'], serif: ["Serif (Newsreader)", '"Newsreader", Georgia, serif'], rounded: ["Rounded", '"Nunito", "Varela Round", "Quicksand", system-ui, sans-serif'], mono: ["Monospace", "ui-monospace, \"JetBrains Mono\", Menlo, monospace"] };
+const READ_FONTS = { serif: ["Newsreader (serif)", '"Newsreader", "Iowan Old Style", Georgia, serif'], georgia: ["Georgia", 'Georgia, "Times New Roman", serif'], sans: ["Sans serif", 'system-ui, "Segoe UI", sans-serif'], humanist: ["Humanist sans", '"Cantarell", "Segoe UI", "Noto Sans", sans-serif'], mono: ["Monospace (typewriter)", '"Courier Prime", "Courier New", ui-monospace, monospace'] };
+const ACCENTS = ["#6a4fc4", "#2f6fb0", "#3d7a5a", "#b03a5b", "#a6621b", "#2e7f86", "#8a4fb8", "#5e6b78"];
+function applyAppearance(a = {}) {
+    const vars = {};
+    if (a.accent) { vars["--app-accent"] = readableAccent(a.accent, false); vars["--app-accent-dark"] = readableAccent(a.accent, true); }
+    if (UI_FONTS[a.uiFont] && a.uiFont !== "system") vars["--font-ui"] = UI_FONTS[a.uiFont][1];
+    if (READ_FONTS[a.readFont] && a.readFont !== "serif") vars["--font-read"] = READ_FONTS[a.readFont][1];
+    if (a.writerSize) vars["--writer-size"] = `${a.writerSize}px`;
+    if (a.readSize) vars["--read-size"] = `${a.readSize}px`;
+    const st = document.documentElement.style;
+    for (const k of ["--app-accent", "--app-accent-dark", "--font-ui", "--font-read", "--writer-size", "--read-size"]) { if (vars[k]) st.setProperty(k, vars[k]); else st.removeProperty(k); }
+    // interface size: the desktop app zooms the window; a browser page zooms the document
+    const scale = a.uiScale && a.uiScale !== 1 ? a.uiScale : 1;
+    if (typeof window.__wbZoom === "function") window.__wbZoom(scale);
+    else st.zoom = scale === 1 ? "" : String(scale);
+    store.set("appearanceVars", vars);
+}
+
 function applyNovelAccent(hex) {
     const st = document.documentElement.style;
     if (!hex) { st.removeProperty("--novel-accent"); st.removeProperty("--novel-accent-dark"); return; }
@@ -227,6 +248,7 @@ function drawerLabel(href, index) {
     const [name, ...args] = parseDrawerHref(href);
     if (name === "chapter") return `Chapter ${args[1]}`;
     if (name === "newchar") return "New character";
+    if (name === "docs") return `Docs: ${(args[0] ?? "").split("?")[0].replace(/-/g, " ")}`;
     if (name === "c") return collectionLabel(args.join("/"));
     if (name === "new") return `New ${index?.schema.collections[args.join("/")]?.label ?? collectionLabel(args.join("/"))}`;
     const path = args.join("/");
@@ -286,6 +308,7 @@ function DrawerViewer({ index, d }) {
             : name === "c" ? html`<${CollectionView} index=${index} collection=${args.join("/")} novelFilter="" scope="drawer" />`
             : name === "new" ? html`<${NoteForm} index=${index} collection=${args.join("/")} scope="drawer" />`
             : name === "newchar" ? html`<${NoteForm} index=${index} collection="characters" novel=${args[0]} scope="drawer" />`
+            : name === "docs" ? html`<${DocArticle} id=${args[0].split("?")[0]} section=${new URLSearchParams(args[0].split("?")[1] ?? "").get("s")} scope="drawer" />`
             : html`<${NoteView} index=${index} path=${args.join("/")} scope="drawer" />`}</div>`;
 }
 
@@ -748,7 +771,7 @@ function Sidebar({ index, novelFolder }) {
     const [theme, setThemeState] = useState(store.get("theme", "system"));
     const setTheme = (m) => { setThemeState(m); store.set("theme", m); applyTheme(m); };
     if (!index) return html`<nav class="sidebar"><div class="brand">World Builder</div>
-        <div class="side-section"><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a></div></nav>`;
+        <div class="side-section"><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a><a class=${route0() === "docs" ? "active" : ""} href="#/docs"><span>Docs</span></a></div></nav>`;
     const cols = Object.keys(index.schema.collections);
     const main = cols.filter((c) => !c.startsWith("Taxonomy/"));
     const tax = cols.filter((c) => c.startsWith("Taxonomy/"));
@@ -760,7 +783,7 @@ function Sidebar({ index, novelFolder }) {
         <a class=${`side-pill ${route0() === "world" || route0() === "map" ? "active" : ""}`} href="#/world">World builder<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18" /></svg></a>
         ${section("datastore", "Data store", main.map((c) => html`<a class=${active(`#/c/${encodeURIComponent(c)}`)} href=${`#/c/${encodeURIComponent(c)}`}><span>${c}</span><span class="count">${index.counts[c] ?? 0}</span></a>`))}
         ${section("taxonomy", "Taxonomy", tax.map((c) => html`<a class=${active(`#/c/${encodeURIComponent(c)}`)} href=${`#/c/${encodeURIComponent(c)}`}><span>${collectionLabel(c)}</span><span class="count">${index.counts[c] ?? 0}</span></a>`))}
-        ${section("tools", "Tools", html`<a class=${active("#/qa")} href="#/qa"><span>Quality checks</span></a><a class=${active("#/callout-design")} href="#/callout-design"><span>Callout designer</span></a><a class=${active("#/import")} href="#/import"><span>Import data</span></a><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a>`)}
+        ${section("tools", "Tools", html`<a class=${active("#/qa")} href="#/qa"><span>Quality checks</span></a><a class=${active("#/callout-design")} href="#/callout-design"><span>Callout designer</span></a><a class=${active("#/import")} href="#/import"><span>Import data</span></a><a class=${active("#/map-assets")} href="#/map-assets"><span>Map assets</span></a><a class=${route0() === "docs" ? "active" : ""} href="#/docs"><span>Docs</span></a><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a>`)}
         <div class="theme-switch" role="group" aria-label="Theme">${THEMES.map(([m, label]) => html`<button class=${theme === m ? "on" : ""} aria-pressed=${theme === m} onClick=${() => setTheme(m)}>${label}</button>`)}</div>
     </nav>`;
 }
@@ -3001,6 +3024,46 @@ function QAView() {
 // ------------------------------------------------------------------ settings
 
 /** The vault folder: shown, typed or picked from a folder browser; switching reloads the app on the new vault */
+/** Accent, fonts and sizes for this device; each change shows at once and is saved */
+function AppearancePanel({ saved }) {
+    const [a, setA] = useState(saved);
+    const cur = useRef(saved); // the latest values, so quick changes in a row build on each other
+    useEffect(() => { setA(saved); cur.current = saved; }, [JSON.stringify(saved)]);
+    const timer = useRef();
+    const change = (patch) => {
+        const next = { ...cur.current, ...patch };
+        cur.current = next;
+        for (const k of Object.keys(patch)) if (patch[k] == null) delete next[k];
+        setA(next);
+        applyAppearance(next);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => api.send("POST", "/api/settings/appearance", next).catch((e) => toast(e.message)), 300);
+    };
+    const range = (k, min, max, step, def, fmt) => html`<div class="appearance-range">
+        <input type="range" min=${min} max=${max} step=${step} value=${a[k] ?? def} onInput=${(e) => change({ [k]: Number(e.target.value) })} aria-label=${k} />
+        <span>${fmt(a[k] ?? def)}</span>${a[k] != null && a[k] !== def ? html`<button class="small" onClick=${() => change({ [k]: null })}>Default</button>` : ""}</div>`;
+    return html`<div class="panel">
+        <h3>Appearance <span class="muted" style="font-weight:400;font-size:13px">on this device</span></h3>
+        <div class="appearance-grid">
+            <label>App colour</label>
+            <div class="accent-swatches" role="group" aria-label="App colour">
+                ${ACCENTS.map((c) => html`<button type="button" style=${`--sw:${c}`} class=${(a.accent ?? "#6a4fc4").toLowerCase() === c ? "on" : ""} title=${c} aria-label=${`Colour ${c}`} onClick=${() => change({ accent: c === "#6a4fc4" ? null : c })} />`)}
+                <input type="color" value=${a.accent ?? "#6a4fc4"} onInput=${(e) => change({ accent: e.target.value })} aria-label="Pick any colour" />
+                <span class="muted small-note">Selections, buttons and highlights outside a novel (a novel's own colour wins on its pages)</span>
+            </div>
+            <label>Interface font</label>
+            <select value=${a.uiFont ?? "system"} onChange=${(e) => change({ uiFont: e.target.value === "system" ? null : e.target.value })}>${Object.entries(UI_FONTS).map(([k, [l]]) => html`<option value=${k}>${l}</option>`)}</select>
+            <label>Reading and writing font</label>
+            <select value=${a.readFont ?? "serif"} onChange=${(e) => change({ readFont: e.target.value === "serif" ? null : e.target.value })}>${Object.entries(READ_FONTS).map(([k, [l]]) => html`<option value=${k}>${l}</option>`)}</select>
+            <label>Interface size</label>${range("uiScale", 0.8, 1.4, 0.05, 1, (v) => `${Math.round(v * 100)}%`)}
+            <label>Chapter text size</label>${range("writerSize", 13, 28, 1, 18, (v) => `${v}px`)}
+            <label>Notes and docs text size</label>${range("readSize", 12, 22, 0.5, 15, (v) => `${v}px`)}
+        </div>
+        <div class="appearance-preview"><button class="primary">A button</button><span class="chip on">Selected</span><a href="#/settings">A link</a>
+            <span style="font-family: var(--font-read, var(--serif)); font-size: var(--writer-size, 18px)">The quick brown fox in chapter text.</span></div>
+    </div>`;
+}
+
 function SettingsView({ settings }) {
     const [path, setPath] = useState(settings?.vault ?? "");
     const [browse, setBrowse] = useState(settings?.vault ?? "");
@@ -3020,6 +3083,7 @@ function SettingsView({ settings }) {
     const SOURCES = { settings: "chosen here", BOOKS_VAULT: "from the service settings (BOOKS_VAULT)", "--vault": "from the --vault option" };
     return html`<div class="settings">
         <h1>Settings</h1>
+        <${AppearancePanel} saved=${settings.appearance ?? {}} />
         <div class="panel">
             <h3>Vault folder</h3>
             ${settings.vault
@@ -3060,6 +3124,7 @@ function App() {
     const { data: settings } = useApi("/api/settings");
     const noVault = settings && !settings.vault;
     const index = useIndex(!noVault);
+    useEffect(() => { if (settings) applyAppearance(settings.appearance); }, [settings]);
     useCalloutStyles(!!settings && !noVault);
     const [novelFilter, setNovelFilter] = useState(store.get("novelFilter", ""));
     const setNF = (v) => { setNovelFilter(v); store.set("novelFilter", v); };
@@ -3096,21 +3161,23 @@ function App() {
         case "qa": view = html`<${QAView} />`; break;
         case "callout-design": view = html`<${CalloutDesigner} />`; break;
         case "import": view = html`<${ImportView} />`; break;
+        case "map-assets": view = html`<${MapAssetsView} />`; break;
+        case "docs": view = html`<${DocsView} page=${a ?? null} section=${route.params.get("s")} />`; break;
         case "settings": view = html`<${SettingsView} settings=${settings} />`; break;
         case "world": view = html`<${WorldView} key=${a ?? ""} index=${index} world=${a ?? null} params=${route.params} />`; break;
         case "map": view = html`<${MapEditor} key=${a} index=${index} location=${a} />`; break;
         default: view = html`<${Home} index=${index} />`;
     }
     // no vault folder yet: the Settings page is all there is
-    if (noVault) view = html`<${SettingsView} settings=${settings} />`;
+    if (noVault && route.name !== "docs") view = html`<${SettingsView} settings=${settings} />`;
     // the writer sits beside the open drawer; while the writer slides away it keeps the width it had
     const beside = useRef(false);
     if (writer.open) beside.current = d.open;
     return html`<div class=${`layout ${writer.open ? "writing" : ""} ${d.open ? "drawer-open" : ""} ${beside.current ? "writer-beside" : ""}`}>
         <${Sidebar} index=${index} novelFolder=${novelFolder} />
         <main class="main">
-            <div class="topbar"><${Search} index=${index} /><${NovelFilter} index=${index} value=${novelFilter} onChange=${setNF} /></div>
-            <div class=${`view view-${route.name}`} key=${route.name + (a ?? "")}>${view}</div>
+            ${route.name !== "docs" && html`<div class="topbar"><${Search} index=${index} /><${NovelFilter} index=${index} value=${novelFilter} onChange=${setNF} /></div>`}
+            <div class=${`view view-${route.name}`} key=${route.name === "docs" ? "docs" : route.name + (a ?? "")}>${view}</div>
         </main>
         ${!noVault && html`<div class=${`drawer-backdrop ${d.open || writer.open ? "on" : ""}`} onClick=${() => { collapseDrawer(); collapseWriter(); }} />
         <${WriterDrawer} index=${index} />

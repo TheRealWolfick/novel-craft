@@ -10,7 +10,9 @@
     "app": "sh scripts/electron.sh .",
     "package:arch": "sh packaging/arch/build.sh",
     "test": "sh test/run.sh",
-    "scaffold": "node scripts/scaffold.js"
+    "scaffold": "node scripts/scaffold.js",
+    "demo": "node scripts/demo-vault.js",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
     "htm": "3.1.1",

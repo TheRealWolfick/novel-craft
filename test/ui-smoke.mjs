@@ -54,7 +54,7 @@ const routes = [
     `#/edit/${enc(firstOf("Items"))}`, "#/new/Items", `#/newchar/${enc(novel.folder)}`,
     `#/novel/${enc(novel.folder)}`, owner && `#/owner/${enc(novel.folder)}/${enc(owner)}`,
     `#/chapter/${enc(novel.folder)}/${novel.latestChapter}`, `#/entry/${enc(novel.folder)}?owner=${enc(owner ?? "")}&type=Inventory`,
-    `#/callouts/${enc(novel.folder)}`, "#/qa", "#/callout-design", "#/settings",
+    `#/callouts/${enc(novel.folder)}`, "#/qa", "#/callout-design", "#/import", "#/map-assets", "#/docs", "#/docs/import-reference", "#/settings",
 ].filter(Boolean);
 
 let failed = 0;
@@ -801,13 +801,42 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     src.value = ds; fire(src, "input"); await wait(50);
     btn("Check").click(); await wait(1500);
     const counts = [...doc.querySelectorAll(".import-counts .chip")].map((c) => c.textContent);
-    check(counts.join("|") === "1 new|2 identical (skipped)|1 different|1 name already used", "the import check sorts files into new, identical, different and name clashes", counts.join("|"));
-    check(!!doc.querySelector(".import-diff .diff") && btn("Import").disabled, "a different file shows both versions and must be decided before importing");
+    check(counts.join("|") === "1 new|2 identical (skipped)|1 to decide|1 name already used", "the import check sorts files into new, identical, different and name clashes", counts.join("|"));
+    const importBtn = () => [...doc.querySelectorAll("main .savebar button")].find((b) => /^Import \d/.test(b.textContent.trim()));
+    check(!!doc.querySelector(".import-diff .diff") && importBtn().disabled, "a different file shows both versions and must be decided before importing");
     btn("Overwrite").click(); await wait(200);
-    btn("Import").click(); await wait(1200);
+    importBtn().click(); await wait(1200);
     check(fs.readFileSync(`${COPY}/${diff}`, "utf8").endsWith("Incoming change.\n") && fs.existsSync(`${COPY}/80. Global Data Store/Items/Smoke Imported Item.md`)
         && !fs.existsSync(`${COPY}/80. Global Data Store/Materials/${clashName}.md`) && !fs.existsSync(`${COPY}/README.md`) && !!doc.querySelector(".import-done"),
         "importing writes new files and chosen overwrites, skipping name clashes and repository files");
+
+    // importing the same dataset again: the record tells updates from local edits, and remembers clash choices
+    const send = (method, p, body) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: body && JSON.stringify(body) }).then(async (r) => ({ status: r.status, ...(await r.json()) }));
+    const imported = "80. Global Data Store/Items/Smoke Imported Item.md";
+    put(imported, "---\ntitle: Smoke Imported Item\ndescription: Upstream change\n---\n");     // changed in the dataset only
+    fs.appendFileSync(`${COPY}/${diff}`, "Local edit.\n");                                     // changed in the vault only
+    // a new note whose name is taken, a note linking to it, and a link to nothing
+    const taken = items[4].name;
+    put(`80. Global Data Store/Materials/${taken}.md`, "---\ntitle: incoming\n---\nIncoming twin.\n");
+    put("80. Global Data Store/Items/Smoke Linker.md", `---\ntitle: Smoke Linker\nmade-from: "[[${taken}]]"\n---\nSee [[${taken}]] and [[Nowhere Smoke Note]].\n`);
+    const r2 = await send("POST", "/api/import/check", { source: ds });
+    const st = (rel) => r2.files.find((f) => f.path === rel)?.status;
+    check(st(imported) === "update" && st(diff) === "local" && st(`80. Global Data Store/Materials/${clashName}.md`) === "kept" && st(`80. Global Data Store/Materials/${taken}.md`) === "new"
+        && r2.unresolved.some((u) => u.target === "Nowhere Smoke Note"),
+        "a second import finds updates, your own edits, earlier clash choices and links to nothing", JSON.stringify(r2.counts));
+    const clashFile = r2.files.find((f) => f.path === `80. Global Data Store/Materials/${taken}.md`);
+    const a2 = await send("POST", "/api/import/apply", { id: r2.id, clashes: { [clashFile.path]: "rename" } });
+    const renamedRel = `80. Global Data Store/Materials/${clashFile.renameTo}.md`;
+    const linker = fs.readFileSync(`${COPY}/80. Global Data Store/Items/Smoke Linker.md`, "utf8");
+    check(a2.renamed === 1 && fs.existsSync(`${COPY}/${renamedRel}`) && linker.includes(`[[${clashFile.renameTo}|${taken}]]`) && linker.includes(`made-from: "[[${clashFile.renameTo}|${taken}]]"`)
+        && fs.readFileSync(`${COPY}/${imported}`, "utf8").includes("Upstream change") && fs.readFileSync(`${COPY}/${diff}`, "utf8").endsWith("Local edit.\n"),
+        "a clash imported under a new name takes the links with it; updates are written and local edits kept", linker);
+    // rename the renamed note in the app: the record follows, so the next import finds it identical
+    const rn = await send("POST", "/api/rename", { path: renamedRel, name: `${clashFile.renameTo} Moved` });
+    const r3 = await send("POST", "/api/import/check", { source: ds });
+    const f3 = r3.files.find((f) => f.path === clashFile.path);
+    check(rn.renamed && f3?.status === "same" && f3.target.endsWith(`${clashFile.renameTo} Moved.md`) && r3.counts.clash === 0,
+        "renaming an imported note keeps later imports pointing at it", JSON.stringify({ f3, counts: r3.counts }));
 }
 // a new vault has no data until a dataset is imported (the starter data repository, when it is on this machine)
 const STARTER = `${process.env.HOME}/Projects/world-builder-data`;
@@ -825,6 +854,24 @@ if (process.env.SETTINGS_DIR && fs.existsSync(STARTER)) {
     const again = await send("POST", "/api/import/check", { source: STARTER });
     check(again.counts.same === c.counts.new && again.counts.new === 0 && again.counts.conflict === 0, "importing the same data again finds every file identical");
     await send("POST", "/api/settings", { vault: COPY });
+}
+// docs: grouped contents with the open page's sections, search with guides / references, reference links in the drawer
+{
+    const doc = w.document;
+    w.location.hash = "#/docs"; await wait(900);
+    check(doc.querySelectorAll(".doc-home .doc-card").length >= 2 && !!doc.querySelector(".docs-nav .docs-group-head") && !doc.querySelector(".topbar"), "the docs home lists the pages by group, without the data store search bar");
+    w.location.hash = "#/docs/importing-data"; await wait(900);
+    check(!!doc.querySelector(".docs-page.on") && doc.querySelectorAll(".docs-sections a").length >= 3 && !!doc.querySelector(".doc-prose h1"), "a docs page shows with its sections under it in the contents");
+    const q = doc.querySelector(".docs-search input");
+    q.value = "rename"; q.dispatchEvent(new w.Event("input", { bubbles: true })); await wait(900);
+    const hits = () => [...doc.querySelectorAll(".docs-hit")];
+    const guides = hits().length;
+    [...doc.querySelectorAll(".docs-kinds button")].find((b) => b.textContent === "Reference").click(); await wait(100);
+    check(guides >= 1 && hits().length >= 1 && !!doc.querySelector(".docs-hit mark"), "docs search lists matches with snippets, split into guides and references");
+    q.value = ""; q.dispatchEvent(new w.Event("input", { bubbles: true })); await wait(400);
+    doc.querySelector(".doc-prose .ref-link").dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true })); await wait(900);
+    check(w.location.hash.startsWith("#/docs/importing-data") && !!doc.querySelector(".drawer-wrap.open .drawer-pane:not([hidden]) .doc-prose.in-drawer"), "a reference link opens beside the page, in the drawer");
+    doc.querySelector(".drawer-tabs button[title^='Collapse']").click(); await wait(300);
 }
 // callout designer: styles saved to the vault, callout metadata rendered
 {
@@ -844,6 +891,101 @@ if (process.env.SETTINGS_DIR && fs.existsSync(STARTER)) {
     await wait(1000);
     const note = `${COPY}/90. Templater/Callout Styles.md`;
     check(fs.existsSync(note) && /callout-styles:\s*\n\s+journal:\s*\n\s+width: 70/.test(fs.readFileSync(note, "utf8")), "saving writes only the changes to Callout Styles.md", fs.existsSync(note) ? fs.readFileSync(note, "utf8").slice(0, 300) : "no note");
+}
+// world export and import: maps carry stamp hashes; stamps you have are reused, missing ones come from the maps
+if (process.env.SETTINGS_DIR) {
+    const send = (method, p, body, raw) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", ...(raw ? {} : { "content-type": "application/json" }) }, body: raw ?? (body && JSON.stringify(body)) }).then(async (r) => ({ status: r.status, ...(await r.json()) }));
+    const { newMap } = await import("../public/map-core.js");
+    const ws = await get("/api/worlds");
+    const world = ws.worlds.find((x) => x.count > 0) ?? ws.worlds[0];
+    const wd = await get(`/api/world?world=${enc(world.path)}`);
+    const loc = wd.locations[0];
+    // an own stamp, a derived texture, a built-in stamp
+    // a stamp image of its own (a copy of a built-in would rightly be recognised as that built-in)
+    const crate = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#8a5a2b"/><text y="8">smoke ${Date.now()}</text></svg>`);
+    const own = await send("POST", "/api/stamps?filename=smoke-crate.svg&set=Smoke", null, crate);
+    const builtin = JSON.parse(fs.readFileSync(new URL("../public/stamps/manifest.json", import.meta.url))).stamps[0];
+    const tex = await get("/api/textures");
+    await send("POST", "/api/textures", { textures: { ...tex.textures, "smoke-moss": { name: "Smoke moss", from: "grass", age: 0.5 } }, baseMtime: tex.mtime });
+    const doc = newMap("grid", { cols: 6, rows: 4 });
+    doc.layers[0].floor = { "1,1": "smoke-moss" };
+    doc.textures = { "smoke-moss": { name: "Smoke moss", from: "grass", age: 0.5 } };
+    doc.layers[0].objects.push({ id: "a", type: "stamp", src: own.src, x: 64, y: 64, w: 64, h: 64 }, { id: "b", type: "stamp", src: `/stamps/${builtin.file}`, x: 128, y: 64, w: 64, h: 64 });
+    const saved = await send("POST", "/api/map", { location: loc.path, doc });
+    const svg = fs.readFileSync(`${COPY}/${saved.file}`, "utf8");
+    check(/"hash":"[0-9a-f]{16}"/.test(svg) && svg.includes('"assets"'), "a saved map records its stamps' and textures' hashes");
+
+    const pv = await get(`/api/world/export?world=${enc(world.path)}&linked=1`);
+    const zipRes = await realFetch(new URL(`/api/world/export.zip?world=${enc(world.path)}&linked=1`, BASE));
+    const zipBuf = Buffer.from(await zipRes.arrayBuffer());
+    const { readZip } = await import("../lib/zip.js");
+    const names = readZip(zipBuf).map((e) => e.name);
+    const manifest = JSON.parse(readZip(zipBuf).find((e) => e.name === "world-builder.json").data.toString());
+    check(zipRes.headers.get("content-type") === "application/zip" && names.includes(`vault/${saved.file}`) && names.some((n) => n.endsWith("smoke-crate.svg"))
+        && !names.some((n) => /Taxonomy\/Novels\/|\/Chapters\/|\/Characters\/|\/Plan\//.test(n)) && manifest.kind === "world" && manifest.assets.stamps.some((x) => x.builtin) && manifest.assets.textures["smoke-moss"]
+        && pv.maps >= 1, "a world exports as a zip with its maps, your stamps and textures, and only data store notes", JSON.stringify({ pv, n: names.length }));
+    const outDir = `${process.env.SETTINGS_DIR}/exported-world`;
+    const fold = await send("POST", "/api/world/export/folder", { world: world.path, linked: true, folder: outDir });
+    check(fold.files > 1 && fs.existsSync(`${outDir}/world-builder.json`) && fs.existsSync(`${outDir}/vault/${saved.file}`) && fs.existsSync(`${outDir}/README.md`), "a world exports into a folder ready for git");
+    const again = await send("POST", "/api/world/export/folder", { world: world.path, linked: false, folder: outDir });
+    check(again.updated === true, "exporting into the same folder again replaces the earlier export");
+
+    // map assets: your stamp with the maps using it; a pack of it exports and imports elsewhere without duplicates
+    const ma = await get("/api/map-assets");
+    const mine = ma.stamps.find((x) => x.src === own.src);
+    check(mine?.uses.length >= 1 && ma.textures.some((t) => t.id === "smoke-moss" && t.uses.length >= 1) && ma.builtin.stamps > 100, "map assets list your stamps and textures with the maps using them", JSON.stringify(mine));
+    const packRes = await realFetch(new URL(`/api/map-assets/pack.zip?stamps=${enc(mine.file)}&textures=smoke-moss&name=Smoke%20pack`, BASE));
+    const packBuf = Buffer.from(await packRes.arrayBuffer());
+
+    // into an empty vault, from the zip
+    const empty = `${process.env.SETTINGS_DIR}/World Target`;
+    fs.mkdirSync(`${empty}/.obsidian`, { recursive: true });
+    await send("POST", "/api/settings", { vault: empty });
+    const up = await send("POST", "/api/import/upload?filename=world.zip", null, zipBuf);
+    const ap = await send("POST", "/api/import/apply", { id: up.id });
+    const m1 = await get(`/api/map?location=${enc(loc.path)}`);
+    const tx1 = await get("/api/textures");
+    check(up.kind === "world" && ap.added > 0 && m1.doc && m1.missingStamps.length === 0 && m1.doc.layers[0].objects.some((o) => o.src === own.src) && tx1.textures["smoke-moss"],
+        "a zipped world imports with its maps, stamps and textures", JSON.stringify({ added: ap.added, missing: m1.missingStamps, a: up.assets }));
+
+    // the pack again into the same vault: the stamp is already there (same image), the texture too
+    const pk = await send("POST", "/api/import/upload?filename=pack.zip", null, packBuf);
+    check(pk.kind === "assets" && (pk.counts.same + pk.counts.library) >= 1 && pk.counts.new === 0 && pk.assets.textures.every((t) => t.status === "same"), "a pack of things you already have imports nothing new", JSON.stringify(pk.counts));
+
+    // a copy whose stamp file is missing: the stamp is taken from the map itself, into Map Stamps/Imported
+    const empty2 = `${process.env.SETTINGS_DIR}/World Target 2`;
+    fs.mkdirSync(`${empty2}/.obsidian`, { recursive: true });
+    fs.rmSync(`${outDir}/vault/${decodeURIComponent(own.src.slice(7))}`);
+    await send("POST", "/api/settings", { vault: empty2 });
+    // a texture with the same id but another look is already there
+    await send("POST", "/api/textures", { textures: { "smoke-moss": { name: "Other moss", from: "grass", age: 0.1 } } });
+    const c2 = await send("POST", "/api/import/check", { source: outDir });
+    const tc = c2.assets?.textures.find((t) => t.id === "smoke-moss");
+    const a2 = await send("POST", "/api/import/apply", { id: c2.id });
+    const m2 = await get(`/api/map?location=${enc(loc.path)}`);
+    const st2 = m2.doc?.layers[0].objects.find((o) => o.id === "a");
+    const tx2 = await get("/api/textures");
+    check(c2.assets?.embedded.length === 1 && a2.stamps === 1 && st2?.src.includes("Map%20Stamps/Imported") && m2.missingStamps.length === 0,
+        "a stamp only the map carries is added to the library and the map points at it", JSON.stringify({ embedded: c2.assets?.embedded, st2: st2?.src }));
+    check(tc?.status === "conflict" && tx2.textures[tc.newId] && tx2.textures["smoke-moss"].name === "Other moss" && JSON.stringify(m2.doc.layers[0].floor).includes(tc.newId),
+        "a texture whose id is taken by another look imports under a new id and the map follows", JSON.stringify({ tc, keys: Object.keys(tx2.textures) }));
+    await send("POST", "/api/settings", { vault: COPY });
+}
+// appearance: the app colour, fonts and sizes show at once and are saved for this device
+if (process.env.SETTINGS_DIR) {
+    const doc = w.document;
+    w.location.hash = "#/settings"; await wait(900);
+    const sw = [...doc.querySelectorAll(".accent-swatches button")].find((b) => b.title === "#2f6fb0");
+    sw.click(); await wait(100);
+    const size = [...doc.querySelectorAll(".appearance-range input")].find((i) => i.getAttribute("aria-label") === "writerSize");
+    size.value = "21"; size.dispatchEvent(new w.Event("input", { bubbles: true }));
+    await wait(800);
+    const st = doc.documentElement.style;
+    const saved = JSON.parse(fs.readFileSync(`${process.env.SETTINGS_DIR}/books-meta-viewer/settings.json`, "utf8"));
+    check(st.getPropertyValue("--app-accent").startsWith("#") && st.getPropertyValue("--writer-size") === "21px" && saved.appearance?.accent === "#2f6fb0" && saved.appearance?.writerSize === 21,
+        "appearance changes show at once and are saved in settings.json", JSON.stringify(saved.appearance));
+    [...doc.querySelectorAll(".appearance-range button")].forEach((b) => b.click());
+    [...doc.querySelectorAll(".accent-swatches button")][0].click(); await wait(600);
 }
 // settings: the vault folder can be browsed and switched (the test server keeps its settings in SETTINGS_DIR)
 if (process.env.SETTINGS_DIR) {

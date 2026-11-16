@@ -1,59 +1,138 @@
 # World Builder
 
-A local web app for writing novels in an [Obsidian](https://obsidian.md) vault. It browses and edits a shared worldbuilding database (items, materials, creatures, factions, locations…), tracks each novel's characters through chapter-based ledgers (inventory, journal, stats, relationships) whose entries you paste into chapters as callouts, plans books chapter by chapter, and builds worlds and maps.
+**A companion app for novelists who write in [Obsidian](https://obsidian.md).** Write chapters beside their plan, keep a shared encyclopedia of your worlds (items, creatures, factions, places…), track what every character carries and knows chapter by chapter, and draw the maps, all in the same vault you already use.
 
-All data stays in the vault as markdown. There is no database: the app reads the notes, watches them for changes, and writes back frontmatter in the same shape Obsidian, Dataview, Bases and Templater expect. Everything it makes can be read and edited in Obsidian too.
+Everything stays in your vault as ordinary markdown notes. There is no database and no account: World Builder reads your notes, notices when you change them in Obsidian, and writes back in the same shape Obsidian, Dataview, Bases and Templater expect.
 
-## Features
+![The chapter writer beside the chapter's plan](docs/img/writer.png)
 
-- **Data store**: every collection as a filterable table or cards, grouping, resizable columns, search, editable note pages with typed fields and link pickers, a side drawer, images, backlinks, quality checks.
-- **Blueprints**: hierarchical recipes with a build tree, bill of materials and where-used.
-- **Novels and ledgers**: per character (or any owner) ledgers of inventory, journal, stats and relationships, viewable at any chapter; an entry editor with live callout preview; transfers mirrored between owners; copy callouts into chapters and see which are already pasted.
-- **Plans**: volumes, chapter plans with an outline editor, graded plot ideas.
-- **Stats**: per-novel stat templates with formulas, checks and stat panels.
-- **World builder**: locations of each world as an editable outline (add, drag to move, Move to…), a nested atlas, and maps.
-- **Map builder**: freeform fantasy maps and square-grid battle maps with layers, ~600 stamps (fantasy relief, settlements, monsters, steampunk furniture, machinery, vehicles, pipework…), lines, curved tracks and roads, procedural floor and roof textures, rooms with walls, doors and their own grid, pins for sub-locations and text notes. Maps are saved as SVGs that Obsidian displays.
+## What you can do with it
 
-## Requirements
+### Write chapters next to their plan
 
-- [Node.js](https://nodejs.org) 20 or newer (the vault watcher needs recursive `fs.watch`).
-- An Obsidian vault, existing or new (see [Vault structure](#vault-structure) and [Importing data](#importing-data)). Obsidian itself is optional; the plugins Templater, Dataview and Bases are optional and only matter for working in Obsidian.
-- Linux with systemd if you want it as a background service; otherwise any OS that runs Node.
+The writer opens a chapter on the left while its plan and ledger entries stay on the right. Paragraphs show formatted (bold, italic, callouts, scene breaks) until you click them, find highlights every match, and saving changes only what you edited.
 
-## Installation
+| Light | Dark |
+| --- | --- |
+| ![Writer, light](docs/img/writer.png) | ![Writer, dark](docs/img/writer-dark.png) |
+
+### Plan books, volumes and chapters
+
+A grand plan per novel: volumes with their main plot and subplots, every chapter's outline, plot ideas graded on a board, and a scratchpad for loose ideas.
+
+| Grand plan | Plot board |
+| --- | --- |
+| ![Grand plan, dark](docs/img/novel-plan-dark.png) | ![Plots](docs/img/novel-plots.png) |
+
+### Track characters through the story
+
+Ledgers record what a character gains, loses and learns in each chapter: inventory, journal, stats and relationships. Look at anyone at any chapter, and copy entries into the text as callouts styled the way you design them.
+
+| A character's ledgers | Writing an entry |
+| --- | --- |
+| ![Owner page](docs/img/owner.png) | ![Entry editor](docs/img/entry-editor.png) |
+
+### Keep your world's encyclopedia
+
+Every collection (items, materials, recipes, creatures, races, factions, locations…) as filterable tables, with notes you edit in place, blocks of information you can add and reorder, and crafting blueprints with their bill of materials.
+
+| Collections | A note in the side drawer |
+| --- | --- |
+| ![Items](docs/img/collection-items.png) | ![Drawer, dark](docs/img/drawer-note.png) |
+
+### Look anything up without losing your place
+
+The side drawer keeps a note, a lookup across everything (notes, taxonomy, chapter text), the whole data store and the novel you're in one click away while you write.
+
+![Lookup in the side drawer](docs/img/drawer-lookup.png)
+
+### Build worlds and draw their maps
+
+Each world's places as an outline you rearrange by dragging, and a map for any of them: fantasy region maps or square-grid floor plans with rooms, walls, doors, textures and hundreds of stamps. Maps are saved as images Obsidian shows.
+
+| A floor plan | A region map |
+| --- | --- |
+| ![Floor plan](docs/img/map-floor.png) | ![Region map](docs/img/map-region.png) |
+| ![World outline](docs/img/world-outline.png) | ![Floor plan, dark](docs/img/map-floor-dark.png) |
+
+### Share worlds and datasets
+
+Export a world (its places, maps, stamps and textures, and optionally the notes they link to) as a git repository or a zip. Anyone can import it, or any other dataset, from a GitHub link: files you already have are skipped, differences are yours to decide, and later imports bring only what changed.
+
+| Exporting a world | Importing a dataset |
+| --- | --- |
+| ![Export](docs/img/world-export.png) | ![Import](docs/img/import-check.png) |
+
+### Make it yours
+
+Design how each kind of callout looks, pick the app's colour, fonts and text sizes, and read the built-in docs (Tools → Docs) whenever you need them.
+
+| Callout designer | Settings |
+| --- | --- |
+| ![Callout designer](docs/img/callout-designer.png) | ![Settings](docs/img/settings.png) |
+
+## Install
+
+World Builder runs on your own computer; nothing is sent anywhere. You need **[Node.js](https://nodejs.org) 20 or newer** and **[git](https://git-scm.com)**. It is developed and tested on Linux; macOS and Windows should work with the browser or `npx electron` options below.
+
+### 1. Get it
 
 ```sh
 git clone https://github.com/TheRealWolfick/world-builder.git
 cd world-builder
 npm install
-
-# run it, then open http://127.0.0.1:4321 and choose your vault folder on the Settings page
-node server.js
-# or as a desktop app with the system's Electron
-npm run app
 ```
 
-A new vault starts empty. Import a dataset (Tools → Import data) to add the data store schema, ledger types and a basic taxonomy: the [World Builder starter data](https://github.com/TheRealWolfick/world-builder-data), or anyone else's.
+### 2. Start it
 
-The vault folder is set on the app's **Settings** page (sidebar → Tools → Settings): type the path or browse to it; folders Obsidian has opened are marked "vault". The app switches to it at once and remembers it in `~/.config/books-meta-viewer/settings.json`. Until a folder is chosen the app shows only that page.
+Pick one:
 
-Options: `--vault <folder>` (wins over the Settings page), `--port <n>` (default 4321), `--host <address>` (default 127.0.0.1). The environment variables `BOOKS_VAULT` (used when nothing is chosen on the Settings page), `PORT` and `BOOKS_HOST` do the same.
+- **As a desktop app (Arch Linux).** Builds a local package that uses your system's Electron and adds World Builder to your app launcher:
+  ```sh
+  sudo pacman -S electron43        # once, if you don't have it
+  sh packaging/arch/build.sh       # builds and installs; run it again after updating
+  world-builder
+  ```
+- **As a desktop app (any system).** Runs the checkout with Electron (downloaded the first time):
+  ```sh
+  npx electron .
+  ```
+  On Linux with a system Electron installed, `npm run app` does the same without the download.
+- **In your browser.** Start the server and open <http://127.0.0.1:4321>:
+  ```sh
+  npm start
+  ```
+  To keep it running in the background on Linux, install it as a systemd user service: `sh scripts/install-service.sh --vault ~/path/to/vault`.
 
-### As a service (Linux, systemd user unit)
+### 3. First steps
+
+1. **Choose your vault.** On first start the app shows its Settings page: type the path of your Obsidian vault or browse to it (folders Obsidian has opened are marked "vault").
+2. **Import the starter data.** Open **Tools → Import data** and press **Use the World Builder starter data**, then **Check** and **Import**. This adds the data store schema, ledger types and a basic taxonomy ([world-builder-data](https://github.com/TheRealWolfick/world-builder-data)). Nothing you already have is overwritten without asking.
+3. **Add a novel** (a folder named like `1. My Novel` with a `config.md`), with Templater's novel script if you use it, or:
+   ```sh
+   npm run scaffold -- ~/path/to/vault --novel "My Novel" --world "My World"
+   ```
+4. **Open Tools → Docs** for guides to every part of the app.
+
+### Just looking?
+
+Make a demo vault with two invented novels (the one in the screenshots) and open it on the Settings page:
 
 ```sh
-sh scripts/install-service.sh [--vault ~/Documents/Obsidian/books] [--port 4321] [--host 127.0.0.1]
+npm run demo -- ~/World-Builder-Demo
 ```
 
-This installs `~/.config/systemd/user/books-meta-viewer.service` with the port and host (and the vault folder, if you give one) as its settings, plus this checkout's location and your `node`, then enables and starts it. Each device keeps its own settings, so after cloning onto another machine you run the script and choose that machine's vault on the Settings page (or pass `--vault`). Run it again to change a setting (the others keep their values); `--dry-run` shows the unit without installing it.
+### Updating
 
 ```sh
-systemctl --user status books-meta-viewer
-journalctl --user -u books-meta-viewer -f
-systemctl --user restart books-meta-viewer   # after pulling server changes; front-end changes only need a browser reload
+git pull && npm install
 ```
 
-> The server has no login. It listens on localhost only; don't expose it to a network without putting authentication in front of it.
+Then restart the app (or rerun `sh packaging/arch/build.sh` for the Arch package, or `systemctl --user restart books-meta-viewer` for the service).
+
+## How it fits with Obsidian
+
+Keep using Obsidian for writing notes freely; open World Builder when you want structure: a chapter beside its plan, a character's inventory at chapter 12, a table of every rare item, a map. Both edit the same files, and each notices the other's changes straight away. If you use Obsidian Bases, Dataview or Templater, the app keeps to their conventions (flat collection folders, links for categories, frontmatter fields), so your bases and scripts keep working.
 
 ## Vault structure
 
@@ -103,31 +182,14 @@ stat-templates: {}            # stat templates (made on the novel's Stats tab)
 
 Folder names inside a novel can be changed with `characters-folder`, `chapters-folder`, `ledgers-folder`, `volumes-folder`, `chapter-plans-folder`, `plots-folder` and `creatures-folder`.
 
-### Importing data
-
-**Tools → Import data** adds a dataset from any GitHub repository: paste its URL (`https://github.com/<owner>/<repo>`, or `…/tree/<branch>/<folder>`; a folder on this computer works too). The app downloads it and compares every file with the vault:
-
-- files you already have with the same content are skipped (notes count as the same when only their created date or the way empty fields are written differ);
-- for files that differ it shows both versions side by side: Overwrite or Skip, one at a time or all remaining at once;
-- new notes whose name another note already uses are listed (Obsidian links by name) and skipped unless you untick that.
-
-Afterwards every collection in the schema gets its folder. A dataset is a repository with the files at their vault paths, in `vault/` (or the folder `world-builder.json` names as `root`, or the repository itself without README, LICENSE and dot files). The [starter data](https://github.com/TheRealWolfick/world-builder-data) is an example.
-
-To add a novel and a world to a vault that has a schema:
-
-```sh
-npm run scaffold -- <vault folder> [--novel "Name"] [--number 3] [--world "Name"] [--dry-run]
-```
-
 ## Development
 
 ```sh
-npm test
+npm test                 # runs against a throwaway copy of a vault; the real one is never written
+npm run screenshots      # retakes docs/img from the demo vault (scripts/demo-vault.js), never a real vault
 ```
 
-The tests copy the vault (the one given as an argument, `BOOKS_VAULT`, or the installed service's) to a temporary folder, run the server against the copy, render every page in jsdom and exercise the editors and the map builder. The real vault is never written.
-
-The code has no build step: `server.js` (node:http) with modules in `lib/`, and a Preact + htm front end in `public/` served as-is. `CLAUDE.md` describes the conventions, the API and the internals in detail. `node scripts/build-stamps.js` regenerates the stamp library in `public/stamps/`.
+The code has no build step: `server.js` (node:http) with modules in `lib/`, and a Preact + htm front end in `public/` served as-is; `electron/` wraps it as a desktop app. The in-app docs are markdown in `docs/`. `CLAUDE.md` describes the conventions, the API and the internals in detail. `node scripts/build-stamps.js` regenerates the stamp library in `public/stamps/`.
 
 ## Licence
 

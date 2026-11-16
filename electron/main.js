@@ -28,10 +28,12 @@ function createWindow(url) {
         x: s.x, y: s.y, width: s.width ?? 1600, height: s.height ?? 1000, minWidth: 700, minHeight: 500,
         title: "World Builder", backgroundColor: "#17161a", autoHideMenuBar: true, show: false,
         icon: path.join(HERE, "icon.svg"),
-        webPreferences: { preload: path.join(HERE, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true },
+        // hidden (screenshots): rendered off screen, so frames are still painted
+        webPreferences: { preload: path.join(HERE, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true, ...(process.env.WB_HIDDEN ? { offscreen: true } : {}) },
     });
     if (s.maximized) win.maximize();
-    win.once("ready-to-show", () => win.show());
+    // WB_HIDDEN: no window on screen (scripts/screenshots.mjs drives it through the debugging port)
+    if (!process.env.WB_HIDDEN) win.once("ready-to-show", () => win.show());
     win.on("close", saveState);
     win.on("closed", () => { win = null; });
     // the page asks before leaving with unsaved edits (beforeunload); Electron needs the question asked here
