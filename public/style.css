@@ -1076,8 +1076,8 @@ html.covered { overflow: hidden; }
 .term-close { position: absolute; top: 10px; right: 18px; z-index: 6; border-radius: 999px; padding: 5px 14px; background: var(--accent); color: var(--on-accent, #fff); border: 0; box-shadow: 0 2px 8px rgba(0,0,0,.25); font-weight: 600; }
 .term-close:hover { filter: brightness(1.08); }
 /* Claude Code's own input area is covered (you type in the box below); its questions become a card */
-.term-cover { position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); }
-.term-card { position: absolute; left: 0; right: 0; bottom: 0; overflow-y: auto; background: var(--panel); border-top: 2px solid var(--accent); padding: 12px 16px 10px; pointer-events: auto; font-family: var(--font-ui, system-ui, sans-serif); font-size: 14px; line-height: 1.45; color: var(--text); box-sizing: border-box; }
+.term-cover { position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); pointer-events: auto; }
+.term-card { position: absolute; left: 0; right: 0; bottom: 0; max-height: 100%; overflow-y: auto; background: var(--panel); box-shadow: 0 -6px 16px rgba(0,0,0,.18); border-top: 2px solid var(--accent); padding: 12px 16px 10px; pointer-events: auto; font-family: var(--font-ui, system-ui, sans-serif); font-size: 14px; line-height: 1.45; color: var(--text); box-sizing: border-box; }
 .term-q { margin: 0 0 8px; color: var(--muted); }
 .term-q.strong, .term-card > .term-q:only-of-type { color: var(--text); font-weight: 600; }
 .term-choices { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }

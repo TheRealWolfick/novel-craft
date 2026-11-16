@@ -47,7 +47,8 @@ export function readScreen(rows) {
         let cur = -1, col = -1;
         for (let r = footer - 1; r >= Math.max(0, footer - 40) && cur < 0; r--) {
             const m = /^([\s│┃]*)❯/.exec(rows[r].text);
-            if (m && !rows[r].bg) { cur = r; col = m[1].length + 2; }
+            // the marked choice: indented (your sent messages start at the first column), highlighted or not
+            if (m && (m[1].length > 0 || !rows[r].bg)) { cur = r; col = m[1].length + 2; }
         }
         if (cur >= 0) {
             const inside = (r) => r >= 0 && r < footer && rows[r].text.trim() && (r === cur || (indent(rows[r].text) >= col && !/❯/.test(rows[r].text.slice(0, col))));
@@ -110,6 +111,14 @@ function overlay(t, on) {
     if (!screen) return;
     const layer = Object.assign(document.createElement("div"), { className: "term-bubbles" });
     screen.append(layer);
+    // the mouse over the card and the cover stays there: Claude Code follows the mouse (hovering would move its
+    // selection and redraw under the card), and the terminal would take the focus or start a selection
+    const keepMouse = (node) => {
+        for (const ev of ["mousedown", "mouseup", "mousemove", "click", "dblclick", "wheel", "contextmenu"]) node.addEventListener(ev, (e) => {
+            e.stopPropagation();
+            if (ev === "mousedown" && e.target.closest("button")) e.preventDefault();
+        });
+    };
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     let last = "";
     const draw = () => {
@@ -142,14 +151,15 @@ function overlay(t, on) {
         if (sc.cover != null) {
             const cover = el("div", "term-cover");
             cover.style.top = `${sc.cover * rowH}px`;
+            keepMouse(cover);
             parts.push(cover);
         }
         const p = sc.prompt;
         if (p) {
             const card = el("div", "term-card");
-            card.style.top = `${p.top * rowH}px`;
-            // clicks stay on the card (the terminal underneath would take the focus and start a selection)
-            card.addEventListener("mousedown", (e) => { e.stopPropagation(); if (e.target.closest("button")) e.preventDefault(); });
+            // at least the rows of Claude Code's own menu, more (upwards, to the whole terminal) when the card needs it
+            card.style.minHeight = `${(t.rows - p.top) * rowH}px`;
+            keepMouse(card);
             for (const q of p.question) card.append(el("p", p.question.length > 1 && q === p.question.at(-1) ? "term-q strong" : "term-q", q));
             const list = el("div", "term-choices");
             p.options.forEach((o, i) => {
