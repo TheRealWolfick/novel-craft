@@ -1110,6 +1110,9 @@ if (process.env.SETTINGS_DIR) {
         ctrl.abort();
         check(started.running && got.includes("hello terminal"), "the terminal runs, takes keys and streams what it shows", got.slice(0, 200));
         check((await send("POST", "/api/terminal/resize", { cols: 120, rows: 30 })).ok, "the terminal can be resized");
+        const someItem = v.inFolder("80. Global Data Store/Items")[0];
+        check((await get(`/api/resolve?link=${enc(`[[${someItem.name}]]`)}`)).path === someItem.path && (await get(`/api/resolve?link=${enc(someItem.path)}`)).path === someItem.path && (await get("/api/resolve?link=No%20such%20note%20xyz")).path === null,
+            "a [[link]] or path clicked in the terminal finds its note");
         const ws = `${process.env.SETTINGS_DIR}/data/world-builder/claude-code`;
         const cfg = JSON.parse(fs.readFileSync(`${ws}/.claude/settings.json`, "utf8"));
         const mcpCfg = JSON.parse(fs.readFileSync(`${ws}/mcp.json`, "utf8"));

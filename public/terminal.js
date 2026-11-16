@@ -4,7 +4,7 @@
 import { h } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
-import { api } from "./app.js";
+import { api, toast, openInDrawer } from "./app.js";
 import { screenView, ago } from "./ai.js";
 
 const html = htm.bind(h);
@@ -24,11 +24,82 @@ function loadXterm() {
 // Claude Code itself; World Builder never reads your sign-in)
 const COMMANDS = [["/usage", "Usage", "Your plan's usage limits and how much is left (/usage)"], ["/context", "Context", "How full this conversation's context is (/context)"],
     ["/compact", "Compact", "Summarise the conversation so far to free up context (/compact)"], ["/model", "Model", "Choose the model (/model)"], ["/effort", "Effort", "How hard it thinks (/effort)"]];
+/**
+ * Your messages as speech bubbles. Claude Code draws a sent message as rows that start with "❯ " on a coloured
+ * background (the prompt you type into has none). It runs full screen and scrolls by itself, so after every redraw
+ * (next animation frame) the visible rows are scanned and a layer over the terminal puts a bubble on each such block.
+ * Earlier messages of a resumed conversation get bubbles too.
+ */
+const norm = (x) => x.replace(/\s+/g, " ").trim();
+function bubbles(t, sent, onMenu) {
+    const screen = t.element?.querySelector(".xterm-screen");
+    if (!screen) return;
+    const layer = Object.assign(document.createElement("div"), { className: "term-bubbles" });
+    screen.append(layer);
+    const hasBg = (line) => { const c = line?.getCell(0); return !!c && !c.isBgDefault(); };
+    let last = "";
+    const draw = () => {
+        const buf = t.buffer.active;
+        const top = buf.viewportY, rowH = screen.offsetHeight / t.rows;
+        const blocks = [];
+        // a screen Escape closes (/usage, /model, /context…): Claude Code says so in its last rows
+        let menu = false;
+        for (let r = Math.max(0, t.rows - 8); r < t.rows && !menu; r++) menu = /\bEsc to (cancel|close|exit|go back|dismiss)\b/i.test(buf.getLine(top + r)?.translateToString(true) ?? "");
+        onMenu(menu);
+        for (let r = 0; r < t.rows; r++) {
+            const line = buf.getLine(top + r);
+            const first = line?.translateToString(true) ?? "";
+            if (!first.startsWith("❯ ") || !hasBg(line)) continue;
+            const rows = [first.slice(2)];
+            let n = 1;
+            while (r + n < t.rows) {
+                const next = buf.getLine(top + r + n);
+                if (!hasBg(next) || (next.translateToString(true) ?? "").startsWith("❯ ")) break;
+                rows.push(next.translateToString(true));
+                n++;
+            }
+            // rows Claude Code wrapped are one paragraph; a message sent from the box shows as typed (its line breaks)
+            const joined = norm(rows.join(" "));
+            if (joined) blocks.push({ r, n, text: sent().find((m) => norm(m) === joined) ?? joined });
+            r += n - 1;
+        }
+        const key = `${rowH}|${JSON.stringify(blocks)}`;
+        if (key === last) return;
+        last = key;
+        layer.replaceChildren(...blocks.map((b) => {
+            const row = Object.assign(document.createElement("div"), { className: "term-bubble-row" });
+            Object.assign(row.style, { top: `${b.r * rowH}px`, height: `${b.n * rowH}px` });
+            const bubble = Object.assign(document.createElement("div"), { className: "term-bubble", textContent: b.text });
+            // one line of text per terminal row at most, so it never spills onto Claude Code's answer
+            Object.assign(bubble.style, { lineHeight: `${rowH}px`, maxHeight: `${b.n * rowH}px`, fontSize: `${Math.min(14, Math.round(rowH * 0.78))}px` });
+            row.append(bubble);
+            return row;
+        }));
+    };
+    let queued = false;
+    const soon = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; draw(); }); } };
+    t.onWriteParsed(soon);
+    t.onScroll(soon);
+    t.onResize(soon);
+    t.onRender(soon);
+}
+
+/** A clicked [[link]] or path: the note in the drawer's viewer */
+async function openLink(target) {
+    try {
+        const { path } = await api.get(`/api/resolve?link=${encodeURIComponent(target)}`);
+        if (path) openInDrawer(`#/note/${path}`); else toast(`No note "${target}" yet`);
+    } catch (e) { toast(e.message); }
+}
 const cssVar = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 const themeNow = () => ({ background: cssVar("--panel", "#1f1e23"), foreground: cssVar("--text", "#e6e3ea"), cursor: cssVar("--accent", "#b07cf0"), selectionBackground: `${cssVar("--accent", "#b07cf0")}55` });
 
 export function ClaudeTerminal({ active }) {
     const host = useRef(null);
+    const box = useRef(null);                         // the text box under the terminal
+    const sent = useRef([]);
+    const [menu, setMenu] = useState(false);          // one of Claude Code's screens that Escape closes is showing                          // messages sent from it (their bubbles keep the line breaks)
+    const [text, setText] = useState("");
     const term = useRef(null);
     const fit = useRef(null);
     const [status, setStatus] = useState(null);       // {claude, running, exit}
@@ -61,19 +132,34 @@ export function ClaudeTerminal({ active }) {
         let gone = false, es = null, ro = null, timer = null;
         loadXterm().then(([{ Terminal }, { FitAddon }]) => {
             if (gone) return;
-            const t = new Terminal({ fontFamily: cssVar("--mono", "monospace"), fontSize: 13, lineHeight: 1.15, cursorBlink: true, scrollback: 5000, allowProposedApi: false, theme: themeNow(), macOptionIsMeta: true });
+            const t = new Terminal({ fontFamily: cssVar("--mono", "monospace"), fontSize: 13.5, lineHeight: 1.3, cursorBlink: false, cursorStyle: "bar", cursorInactiveStyle: "none", scrollback: 8000, allowProposedApi: false, theme: themeNow(), macOptionIsMeta: true, rightClickSelectsWord: false });
             const f = new FitAddon();
             t.loadAddon(f);
             t.open(host.current);
             term.current = t; fit.current = f;
             try { f.fit(); } catch { /* hidden */ }
             t.onData(type);
-            // Ctrl+Shift+C / Ctrl+Shift+V copy and paste (plain Ctrl+C stays an interrupt for Claude Code)
+            // copy and paste like anywhere else: Ctrl+C copies the selection (with nothing selected it still stops Claude
+            // Code), Ctrl+V pastes; Ctrl+Shift+C / V too
             t.attachCustomKeyEventHandler((e) => {
-                if (e.type !== "keydown" || !e.ctrlKey || !e.shiftKey) return true;
-                if (e.code === "KeyC") { const s = t.getSelection(); if (s) navigator.clipboard?.writeText(s); return false; }
-                if (e.code === "KeyV") { navigator.clipboard?.readText().then((s) => s && t.paste(s)); return false; }
+                if (e.type !== "keydown" || !e.ctrlKey || e.altKey || e.metaKey) return true;
+                if (e.code === "KeyC" && (e.shiftKey || t.hasSelection())) { const sel = t.getSelection(); if (sel) { navigator.clipboard?.writeText(sel); t.clearSelection(); } return false; }
+                if (e.code === "KeyV") { navigator.clipboard?.readText().then((txt) => txt && t.paste(txt)); return false; }
                 return true;
+            });
+            bubbles(t, () => sent.current, (m) => setMenu((was) => (was === m ? was : m)));
+            // [[links]] and vault paths (…/Note.md) in Claude Code's answers open the note in the viewer
+            t.registerLinkProvider({
+                provideLinks(y, done) {
+                    const line = t.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+                    const links = [];
+                    for (const m of line.matchAll(/\[\[([^\]\n]+?)\]\]|((?:\d+\. [^/\n]+|80\. Global Data Store)(?:\/[^/\n]+)+\.md)/g)) {
+                        const target = m[1] ?? m[2];
+                        links.push({ text: m[0], range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } }, decorations: { underline: true, pointerCursor: true },
+                            activate: () => openLink(target) });
+                    }
+                    done(links.length ? links : undefined);
+                },
             });
             const resize = () => {
                 clearTimeout(timer);
@@ -105,7 +191,7 @@ export function ClaudeTerminal({ active }) {
     // shown again: fit to the pane and take the keyboard
     useEffect(() => {
         if (!active || !term.current) return;
-        requestAnimationFrame(() => { try { fit.current.fit(); } catch { /* hidden */ } term.current?.focus(); });
+        requestAnimationFrame(() => { try { fit.current.fit(); } catch { /* hidden */ } (box.current ?? term.current)?.focus(); });
     }, [active, ready, running]);
 
     // while it runs, the server knows what World Builder shows (Claude Code's current_view tool)
@@ -133,6 +219,26 @@ export function ClaudeTerminal({ active }) {
         setTimeout(() => { starting.current = false; }, 300);
     };
     const stop = () => api.send("POST", "/api/terminal/stop").catch((e) => setError(e.message));
+    // the text box: an ordinary text field (select, delete, undo…) whose message goes into Claude Code as one paste,
+    // so line breaks stay in it, followed by Enter; an empty Enter presses Enter in the terminal (menus, confirmations)
+    const sendText = (value = text) => {
+        const msg = value.replace(/\s+$/, "");
+        if (msg) sent.current = [...sent.current.slice(-50), msg];
+        type(msg ? `\x1b[200~${msg}\x1b[201~\r` : "\r");
+        setText("");
+        box.current?.focus();
+    };
+    const onBoxKey = (e) => {
+        // Shift+Enter (or Ctrl+Enter) sends the whole message at once; Enter is a new line, or with an empty box
+        // presses Enter in Claude Code
+        if (e.key === "Enter" && !e.isComposing && (e.shiftKey || e.ctrlKey || !text.trim())) { e.preventDefault(); sendText(); }
+        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); type("\x1b"); }   // stops Claude Code / closes its menus
+        else if (!text && ["ArrowUp", "ArrowDown", "Tab"].includes(e.key) && !e.shiftKey) {
+            // with an empty box these steer Claude Code's menus and choices
+            e.preventDefault(); type({ ArrowUp: "\x1b[A", ArrowDown: "\x1b[B", Tab: "\t" }[e.key]);
+        }
+    };
+
     // a Claude Code command typed for the user (Claude Code shows the answer itself, in the terminal)
     const run = (cmd) => { setHistory(null); type(`${cmd}\r`); term.current?.focus(); };
     const openHistory = async () => {
@@ -168,7 +274,15 @@ export function ClaudeTerminal({ active }) {
                 <span class="muted small">${ago(h.updated)} · ${h.messages} messages${h.prompt && h.prompt !== h.title ? ` · ${h.prompt.slice(0, 90)}` : ""}</span>
             </button>`)}
         </div>`}
-        <div class="term-host" ref=${host} />
+        <div class="term-wrap">
+            <div class="term-host" ref=${host} />
+            ${running && menu && html`<button class="term-close" title="Close this screen (Escape)" onClick=${() => { type("\x1b"); setMenu(false); box.current?.focus(); }}>✕ Close</button>`}
+        </div>
+        ${running && html`<div class="ai-input term-input">
+            <textarea ref=${box} rows="1" placeholder="Message Claude Code… (Shift+Enter sends · Enter: new line · Esc stops it)" value=${text}
+                onInput=${(e) => setText(e.target.value)} onKeyDown=${onBoxKey} />
+            <button class="primary" onClick=${() => sendText()} title="Send (Shift+Enter)">Send</button>
+        </div>`}
         ${!running && html`<div class="term-start">
             <p>${exit ? "Claude Code has ended." : "Start Claude Code to talk about your novels and worlds."}</p>
             <div class="row">${status.sessions?.length ? html`<button class="primary" onClick=${() => start("last")}>Continue “${status.sessions[0].title}”</button><button onClick=${() => start(false)}>New conversation</button><button onClick=${openHistory}>Earlier conversations…</button>`

@@ -27,9 +27,13 @@ What it can and can't do:
 - It can't read or edit the vault's files directly, and can't run commands: its workspace refuses both. Every change goes through the review panel (see [Reviewing changes](docs:ai-assistant#reviewing-changes)), which opens beside it.
 - It runs in its own folder in the app's data, connected to World Builder and no other MCP servers, and ends when you quit the app.
 
-The bar above the terminal has Claude Code's own commands one click away: **Usage** (your plan's limits and how much is left), **Context**, **Compact**, **Model** and **Effort**. **History** lists your earlier conversations with their titles; pick one to carry on with it. **New** starts a fresh one, **End** closes Claude Code.
+The bar above the terminal has Claude Code's own commands one click away: **Usage** (your plan's limits and how much is left), **Context**, **Compact**, **Model** and **Effort**; a **Close** button appears over screens like these (Escape closes them too). **History** lists your earlier conversations with their titles; pick one to carry on with it. **New** starts a fresh one, **End** closes Claude Code.
 
-Type `/world-builder` in it for ready-made prompts: summarise a chapter, review a chapter (with edits to review), brainstorm, draft a data store entry, check a character's continuity. Copy and paste with Ctrl+Shift+C and Ctrl+Shift+V.
+Write your messages in the text box under it: an ordinary text field, where you can select, delete and paste as anywhere else. **Shift+Enter** (or **Send**) sends the whole message at once; Enter starts a new line. With the box empty, Enter, the arrow keys and Tab go to Claude Code (for its menus and questions), and Escape stops it. You can also click into the terminal and type there directly.
+
+Your messages show as bubbles in the novel's colour (the app's colour outside a novel), earlier ones in a resumed conversation too. It's still Claude Code underneath, so a sent message can't be edited or deleted. `[[Note]]` links and note paths in its answers are clickable: they open the note in the viewer. Ctrl+C copies what you've selected (with nothing selected it stops Claude Code, as in any terminal), Ctrl+V pastes.
+
+Type `/world-builder` for ready-made prompts: summarise a chapter, review a chapter (with edits to review), brainstorm, draft a data store entry, check a character's continuity.
 
 > [!note] Your sign-in stays with Claude Code
 > World Builder never sees or stores your Claude sign-in: it starts the `claude` you installed, unchanged, and only connects it to its tools. That's also why usage is shown by Claude Code itself.

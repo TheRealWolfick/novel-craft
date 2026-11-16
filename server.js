@@ -265,6 +265,12 @@ const routes = {
     "GET /api/docs/page": ({ q }) => { const p = docs.page(need(q.get("id"), "id")); return { ...p, plain: undefined }; },
     "GET /api/docs/search": ({ q }) => ({ results: docs.search(q.get("q") ?? "") }),
     "GET /api/qa": () => ({ ...store.qa(), stats: stats.qa() }),
+    // a [[link]] or vault path clicked in the Claude Code terminal -> the note it means (null when there is none)
+    "GET /api/resolve": ({ q }) => {
+        const raw = need(q.get("link"), "link").trim().replace(/^\[\[|\]\]$/g, "").split("|")[0].split("#")[0].trim();
+        const p = vault.notes.has(raw) ? raw : vault.notes.has(`${raw}.md`) ? `${raw}.md` : vault.resolve(`[[${raw}]]`);
+        return { path: p && vault.notes.has(p) ? p : null };
+    },
     "POST /api/render": async ({ req }) => ({ html: renderMarkdown((await json(req)).markdown ?? "", vault) }),
 
     "POST /api/note": async ({ req }) => {
