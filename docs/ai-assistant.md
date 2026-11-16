@@ -22,11 +22,23 @@ Either way, what the assistant does is billed to your Anthropic API account. **T
 
 Click the robot button at the top right to open the AI tab (click it again to close the drawer). Type a question and press Enter; Shift+Enter starts a new line, Escape stops a reply. **New** starts a fresh conversation.
 
+Suggestions sit under the chat as buttons: openers that fit the page you're on when the conversation is empty, then follow-ups after each reply. Click one to send it.
+
 While it works you see each step it takes ("Searched 'lantern' · 9 results", "Read chapter 3"); when the reply is finished the steps fold away under "N steps". Note names in replies are links that open in the viewer.
 
 The assistant knows which page you're on, which chapter is in the writer and what the drawer shows. Select some text first and say "this" or "the selection" to ask about it.
 
 The running cost of the conversation (an estimate) shows at the top of the tab.
 
+## Reviewing changes
+
+Ask it to create or change something (a new item, a character, field values, a rewrite of a passage) and it prepares the changes instead of writing them. They open in the drawer's viewer for review:
+
+- each change on its own card: a new note with its fields and text, field changes as *now → after*, text edits with the removed words struck through and the new ones highlighted, in their paragraph;
+- **Apply** or **Reject** on each card, or **Apply all** / **Reject all** at the top;
+- **Back to the conversation** returns to the AI tab, where a card for the proposal opens it again.
+
+Nothing is written until you apply it, and each change is checked again first (a passage you've edited in the meantime is refused, not overwritten). The assistant hears what you applied and rejected with your next message. Ledger entries and novel settings can't be changed this way.
+
 > [!note] What it can read
-> Only your novel folders and the data store, nothing else in the vault (not your Templater notes, not `.obsidian`). It reads a little at a time: overviews, search results, the parts of a note or chapter it needs. It can't change anything yet; when you ask for an entry or a rewrite it gives you the text to paste.
+> Only your novel folders and the data store, nothing else in the vault (not your Templater notes, not `.obsidian`). It reads a little at a time: overviews, search results, the parts of a note or chapter it needs.

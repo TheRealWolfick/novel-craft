@@ -4,7 +4,7 @@
 import { h } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
-import { api, toast, Html, ConfirmButton } from "./app.js";
+import { api, toast, Html, ConfirmButton, openInDrawer, openDrawerTab, useApi } from "./app.js";
 import { writerNow } from "./writer.js";
 
 const html = htm.bind(h);
@@ -43,7 +43,27 @@ let chat = { id: null, items: [], usage: null };
 const chatListeners = new Set();
 const setChat = (c) => { chat = c; chatListeners.forEach((f) => f(c)); };
 
-const TOOL_LABELS = { search: "Searching", novel_overview: "Reading the novel overview", read_chapter: "Reading a chapter", read_note: "Reading a note", query_collection: "Listing a collection", schema: "Reading the fields", character_state: "Checking ledgers", world_tree: "Reading the world outline", taxonomy: "Reading taxonomy values", current_view: "Looking at the screen" };
+/** The reply's text without its trailing <replies>[…]</replies> line (also while it streams in), and the replies */
+export function splitReplies(text) {
+    const at = text.indexOf("<replies");
+    if (at < 0) return { text, replies: [] };
+    let replies = [];
+    const m = /<replies>([\s\S]*?)<\/replies>/.exec(text.slice(at));
+    if (m) try { replies = JSON.parse(m[1]).filter((r) => typeof r === "string" && r.trim()).slice(0, 4); } catch { /* not finished or not JSON */ }
+    return { text: text.slice(0, at).replace(/\s+$/, ""), replies };
+}
+/** Openers for an empty conversation, from what is on screen */
+function starters(v) {
+    const ch = v.writer && /^chapter (\S+)/.exec(v.writer)?.[1];
+    if (ch) return [`Summarise chapter ${ch}`, `Review chapter ${ch}'s pacing and prose`, `Does chapter ${ch} follow its plan?`];
+    const note = v.drawer && !/ tab$/.test(v.drawer) ? v.drawer.split("/").pop().replace(/\.md$/, "") : null;
+    if (note && !/^(chapter|c|new|docs|proposal)$/.test(v.drawer.split("/")[0])) return [`Summarise ${note}`, `Where is ${note} mentioned in my chapters?`, `Suggest details to fill in for ${note}`];
+    return ["Summarise the latest chapter", "What does the main character carry right now?", "Brainstorm three complications for the next chapter"];
+}
+const placeholderFor = (v, followUp) => (followUp ? "Reply, or ask a follow-up… (Enter sends)"
+    : v.writer ? `Ask about ${v.writer.replace(/ of \d+\.\s*/, " of ")}… (Enter sends)` : "Ask about your novels and worlds… (Enter sends, Shift+Enter: new line)");
+
+const TOOL_LABELS = { search: "Searching", novel_overview: "Reading the novel overview", read_chapter: "Reading a chapter", read_note: "Reading a note", query_collection: "Listing a collection", schema: "Reading the fields", character_state: "Checking ledgers", world_tree: "Reading the world outline", taxonomy: "Reading taxonomy values", current_view: "Looking at the screen", propose_changes: "Preparing changes for review" };
 const money = (n) => (n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
 
 export function AiPane({ active }) {
@@ -52,12 +72,13 @@ export function AiPane({ active }) {
     const [status, setStatus] = useState(null);
     const [text, setText] = useState("");
     const [busy, setBusy] = useState(false);
+    const [view, setView] = useState(() => screenView());
     const stopper = useRef(null);
     const list = useRef(null);
     const box = useRef(null);
     const stick = useRef(true);
     useEffect(() => { if (active) api.get("/api/ai/status").then(setStatus).catch(() => setStatus({ ready: false })); }, [active]);
-    useEffect(() => { if (active) box.current?.focus(); }, [active]);
+    useEffect(() => { if (active) { box.current?.focus(); setView(screenView()); } }, [active]);
     useEffect(() => { const el = list.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [c]);
 
     const update = (fn) => setChat(fn(chat));
@@ -92,7 +113,7 @@ export function AiPane({ active }) {
                     else if (ev.t === "text") addText(ev.d);
                     else if (ev.t === "thinking") patchReply((r2) => ({ ...r2, thinking: true }));
                     else if (ev.t === "tool") patchReply((r2) => ({ ...r2, thinking: false, parts: [...r2.parts, { kind: "tool", id: ev.id, name: ev.name, label: TOOL_LABELS[ev.name] ?? ev.name, running: true }] }));
-                    else if (ev.t === "tool_done") patchReply((r2) => ({ ...r2, parts: r2.parts.map((p) => (p.id === ev.id ? { ...p, running: false, label: ev.summary, error: ev.error } : p)) }));
+                    else if (ev.t === "tool_done") patchReply((r2) => ({ ...r2, parts: [...r2.parts.map((p) => (p.id === ev.id ? { ...p, running: false, label: ev.summary, error: ev.error } : p)), ...(ev.proposal ? [{ kind: "proposal", ...ev.proposal }] : [])] }));
                     else if (ev.t === "done") update((s) => ({ ...s, usage: ev.usage }));
                     else if (ev.t === "error") { patchReply((r2) => ({ ...r2, error: ev.message })); if (ev.usage) update((s) => ({ ...s, usage: ev.usage })); }
                 }
@@ -104,6 +125,10 @@ export function AiPane({ active }) {
             setBusy(false);
             patchReply((r2) => ({ ...r2, streaming: false, thinking: false }));
             renderReply(chat.items.length - 1);
+            setView(screenView());
+            // changes it proposed open in the viewer for review (the card in the chat opens them again)
+            const prop = chat.items.at(-1)?.parts?.find((p) => p.kind === "proposal");
+            if (prop) openInDrawer(`#/proposal/${prop.id}`);
         }
     };
     const stop = () => stopper.current?.abort();
@@ -132,23 +157,29 @@ export function AiPane({ active }) {
         </div>
         <div class="ai-list" ref=${list} onScroll=${onScroll} data-drawer>
             ${!c.items.length && html`<div class="ai-empty muted">
-                <p>Ask about your novels and worlds: what happened in a chapter, who holds what, where a place is, ideas for what comes next.</p>
-                <div class="ai-starters">${["Summarise the chapter I'm on", "What does the main character carry right now?", "Brainstorm three complications for the next chapter"].map((s) => html`<button class="small" onClick=${() => send(s)}>${s}</button>`)}</div>
+                <p>Ask about your novels and worlds: what happened in a chapter, who holds what, where a place is, ideas for what comes next. Ask it to create or change something and it prepares the changes for you to review first.</p>
             </div>`}
             ${c.items.map((it, i) => (it.role === "user"
                 ? html`<div class="ai-msg user" key=${i}>${it.text}</div>`
                 : html`<div class="ai-msg bot" key=${i}>
-                    ${it.html ? html`<${Html} html=${it.html} />` : it.parts.map((p, j) => (p.kind === "tool"
+                    ${it.html ? html`<${Html} html=${it.html} />` : it.parts.filter((p) => p.kind !== "proposal").map((p, j) => (p.kind === "tool"
                         ? html`<div class=${`ai-tool ${p.running ? "running" : ""} ${p.error ? "error" : ""}`} key=${j}>${p.running ? "⋯ " : p.error ? "⚠ " : "✓ "}${p.label}</div>`
-                        : html`<div class="ai-text" key=${j}>${p.text}</div>`))}
+                        : html`<div class="ai-text" key=${j}>${splitReplies(p.text).text}</div>`))}
+                    ${it.parts.filter((p) => p.kind === "proposal").map((p) => html`<button class="ai-proposal" key=${p.id} onClick=${() => openInDrawer(`#/proposal/${p.id}`)}>
+                        <span class="ai-proposal-title">${p.title}</span><span class="muted small">${p.count} change${p.count === 1 ? "" : "s"} to review →</span></button>`)}
                     ${it.html && it.parts.some((p) => p.kind === "tool") && html`<details class="ai-steps"><summary>${((n) => `${n} step${n === 1 ? "" : "s"}`)(it.parts.filter((p) => p.kind === "tool").length)}</summary>${it.parts.filter((p) => p.kind === "tool").map((p, j) => html`<div class=${`ai-tool ${p.error ? "error" : ""}`} key=${j}>${p.error ? "⚠ " : "✓ "}${p.label}</div>`)}</details>`}
                     ${it.thinking && html`<div class="ai-tool running">⋯ Thinking</div>`}
                     ${it.streaming && !it.thinking && !it.parts.length && html`<div class="ai-tool running">⋯</div>`}
                     ${it.error && html`<p class="error small">${it.error}</p>`}
                 </div>`))}
         </div>
+        ${!busy && (() => {
+            const last = c.items.at(-1);
+            const chips = !c.items.length ? starters(view) : last?.role === "assistant" && !last.error ? splitReplies(last.parts.filter((p) => p.kind === "text").map((p) => p.text).join("")).replies : [];
+            return chips.length ? html`<div class="ai-chips">${chips.map((r) => html`<button class="small" key=${r} onClick=${() => send(r)}>${r}</button>`)}</div>` : null;
+        })()}
         <div class="ai-input">
-            <textarea ref=${box} rows="2" placeholder="Ask about your novels… (Enter sends, Shift+Enter: new line)" value=${text} onInput=${(e) => setText(e.target.value)} onKeyDown=${onKey} />
+            <textarea ref=${box} rows="2" placeholder=${placeholderFor(view, c.items.length > 0)} value=${text} onInput=${(e) => setText(e.target.value)} onKeyDown=${onKey} />
             ${busy ? html`<button onClick=${stop} title="Stop (Escape)">Stop</button>` : html`<button class="primary" onClick=${() => send(text)} disabled=${!text.trim()}>Send</button>`}
         </div>
     </div>`;
@@ -157,7 +188,7 @@ export function AiPane({ active }) {
 /** A finished reply's text as rendered markdown ([[links]] open in the viewer); tool notes fold into "N steps" */
 async function renderReply(i) {
     const it = chat.items[i];
-    const md = it?.parts?.filter((p) => p.kind === "text").map((p) => p.text).join("\n\n").trim();
+    const md = splitReplies(it?.parts?.filter((p) => p.kind === "text").map((p) => p.text).join("\n\n") ?? "").text.trim();
     if (!md) return;
     try {
         const { html: out } = await api.send("POST", "/api/render", { markdown: md });
@@ -229,5 +260,98 @@ export function AiSettingsPanel() {
             ${test && !test.busy && (test.ok ? html`<span class="ok">Connected (${test.model})</span>` : html`<span class="error">${test.error}</span>`)}
         </div>
         ${error && html`<p class="error">${error}</p>`}
+    </div>`;
+}
+
+// ---------------------------------------------------------------- reviewing proposed changes
+
+/** Word-level differences: [{t: "same"|"del"|"add", s}] (falls back to delete-all/add-all for very long passages) */
+export function wordDiff(a, b) {
+    const tok = (s) => s.match(/\s+|\w+|[^\s\w]/g) ?? [];
+    const x = tok(a), y = tok(b);
+    if (x.length * y.length > 4e6) return [{ t: "del", s: a }, { t: "add", s: b }];
+    const n = x.length, m = y.length;
+    const L = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    const out = [];
+    const push = (t, s) => { const last = out.at(-1); if (last?.t === t) last.s += s; else out.push({ t, s }); };
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+        if (x[i] === y[j]) { push("same", x[i]); i++; j++; }
+        else if (L[i + 1][j] >= L[i][j + 1]) push("del", x[i++]);
+        else push("add", y[j++]);
+    }
+    while (i < n) push("del", x[i++]);
+    while (j < m) push("add", y[j++]);
+    // readable runs: a changed stretch (small unchanged bits like spaces or single words inside it included) shows
+    // as one deletion followed by one insertion, not interleaved fragments
+    const runs = [];
+    for (let k = 0; k < out.length; k++) {
+        const d = out[k];
+        const trivial = d.t === "same" && (/^[\s\W]*$/.test(d.s) || d.s.trim().split(/\s+/).length === 1) && k > 0 && k < out.length - 1;
+        const last = runs.at(-1);
+        if (d.t === "same" && !trivial) { runs.push({ t: "same", s: d.s }); continue; }
+        const run = last?.t === "change" ? last : (runs.push({ t: "change", del: "", add: "" }), runs.at(-1));
+        if (d.t !== "add") run.del += d.s;
+        if (d.t !== "del") run.add += d.s;
+    }
+    return runs.flatMap((r) => (r.t === "same" ? [r] : [r.del && { t: "del", s: r.del }, r.add && { t: "add", s: r.add }].filter(Boolean)));
+}
+
+const STATUS = { pending: "Waiting", applied: "Applied", rejected: "Rejected", failed: "Failed" };
+
+/** The review panel: every proposed change with what it would do, Apply / Reject each, or all */
+export function ProposalView({ id }) {
+    const { data, error } = useApi(`/api/ai/proposal?id=${encodeURIComponent(id)}`);
+    const [p, setP] = useState(null);
+    const [busy, setBusy] = useState(false);
+    useEffect(() => { if (data) setP(data); }, [data]);
+    if (!p) return error ? html`<p class="error">${error}</p>` : html`<p class="muted">Loading…</p>`;
+    const act = async (verb, which) => {
+        setBusy(true);
+        try {
+            const next = await api.send("POST", `/api/ai/proposal/${verb}`, { id, which });
+            setP(next);
+            const failed = next.changes.filter((c) => c.status === "failed" && c.error);
+            if (failed.length) toast(`Couldn't apply: ${failed.map((c) => c.error).join("; ")}`);
+        } catch (e) { toast(e.message); }
+        setBusy(false);
+    };
+    const pending = p.changes.filter((c) => c.status === "pending").length;
+    return html`<div class="proposal">
+        <div class="proposal-head">
+            <div><h2>${p.title}</h2><p class="muted small">Proposed by the assistant · ${p.changes.length} change${p.changes.length === 1 ? "" : "s"}${pending && pending < p.changes.length ? `, ${pending} waiting` : ""}. Nothing is written until you apply it.</p></div>
+            <div class="row">
+                <button class="small" onClick=${() => openDrawerTab("ai")}>Back to the conversation</button>
+                ${pending > 0 && html`<button disabled=${busy} onClick=${() => act("reject", "all")}>Reject all</button>
+                    <button class="primary" disabled=${busy} onClick=${() => act("apply", "all")}>Apply ${pending === p.changes.length ? "all" : `the ${pending} left`}</button>`}
+            </div>
+        </div>
+        ${p.changes.map((c) => html`<${ChangeCard} key=${c.i} c=${c} busy=${busy} act=${act} />`)}
+    </div>`;
+}
+
+function ChangeCard({ c, busy, act }) {
+    const head = c.action === "create_note" ? html`New ${c.kind === "character" ? "character" : `entry in ${c.collection}`}: <b>${c.name}</b>${c.renamed ? html` <span class="muted small">(name taken, so renamed)</span>` : ""}`
+        : c.action === "edit_fields" ? html`Fields of <b>${c.name}</b>`
+        : c.action === "edit_text" ? html`Text of <b>${c.name}</b>` : html`Add to <b>${c.name}</b>`;
+    return html`<div class=${`change ${c.status}`}>
+        <div class="change-head">
+            <span class="change-n">${c.i + 1}</span><span class="grow">${head}</span>
+            <span class=${`badge ${c.status === "applied" ? "ok" : c.status === "failed" ? "bad" : c.status === "rejected" ? "" : "warn"}`}>${STATUS[c.status]}</span>
+            ${c.status === "pending" && html`<button class="small" disabled=${busy} onClick=${() => act("reject", c.i)}>Reject</button><button class="small primary" disabled=${busy} onClick=${() => act("apply", c.i)}>Apply</button>`}
+            ${c.status === "applied" && c.path && html`<button class="small" onClick=${() => openInDrawer(`#/note/${c.path}`)}>Open</button>`}
+        </div>
+        ${c.error && html`<p class="error small">${c.error}</p>`}
+        <div class="change-body">
+            ${c.action === "create_note" && html`
+                ${Object.keys(c.fields ?? {}).length > 0 && html`<table class="change-fields"><tbody>${Object.entries(c.fields).map(([k, v]) => html`<tr><th>${k}</th><td class="ins">${Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v)}</td></tr>`)}</tbody></table>`}
+                ${c.text && html`<div class="change-text"><ins>${c.text}</ins></div>`}
+                <p class="muted small">${c.path}</p>`}
+            ${c.action === "edit_fields" && html`<table class="change-fields"><thead><tr><th>Field</th><th>Now</th><th>After</th></tr></thead><tbody>
+                ${c.rows.map((r) => html`<tr><th>${r.key}</th><td class="del">${r.before || html`<span class="muted">empty</span>`}</td><td class="ins">${r.removed ? html`<span class="muted">removed</span>` : r.after || html`<span class="muted">empty</span>`}</td></tr>`)}</tbody></table>`}
+            ${c.action === "edit_text" && html`<div class="change-text"><span class="ctx">${c.context.before}</span>${wordDiff(c.find, c.replace).map((d, k) => (d.t === "same" ? d.s : d.t === "del" ? html`<del key=${k}>${d.s}</del>` : html`<ins key=${k}>${d.s}</ins>`))}<span class="ctx">${c.context.after}</span></div>`}
+            ${c.action === "add_text" && html`<div class="change-text">${c.after ? html`<span class="ctx">${c.context.before}${c.after}${c.context.after}</span>` : html`<span class="ctx">…${c.context}</span>`}${"\n\n"}<ins>${c.text}</ins></div>`}
+        </div>
     </div>`;
 }

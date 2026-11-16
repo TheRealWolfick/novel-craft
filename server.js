@@ -49,7 +49,7 @@ async function writeSettings(patch) {
 const VAULT_SOURCES = [["--vault", arg("vault")], ["settings", readSettings().vault], ["BOOKS_VAULT", process.env.BOOKS_VAULT]];
 const startSource = VAULT_SOURCES.find(([, v]) => v);
 // the AI assistant: its tools read the open vault's services
-const assistant = new Assistant({ settingsFile: SETTINGS_FILE, readSettings, writeSettings, ctx: () => ({ vault, novels, store, plans, worlds, search }) });
+const assistant = new Assistant({ settingsFile: SETTINGS_FILE, readSettings, writeSettings, ctx: () => ({ vault, novels, store, plans, worlds, search, stats }) });
 const isFolder = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
 let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, search, importer, assets, exporter;
@@ -149,6 +149,10 @@ const routes = {
     "POST /api/ai/signout": () => assistant.signOut(),
     "POST /api/ai/test": () => assistant.test(),
     "DELETE /api/ai/conversation": ({ q }) => assistant.forget(q.get("id")),
+    // proposals: reviewed in the drawer, applied or rejected one by one ("which": an index) or all at once ("all")
+    "GET /api/ai/proposal": ({ q }) => assistant.proposals.get(need(q.get("id"), "id")),
+    "POST /api/ai/proposal/apply": async ({ req }) => { const b = await json(req); return assistant.proposals.apply(need(b.id, "id"), b.which ?? "all"); },
+    "POST /api/ai/proposal/reject": async ({ req }) => { const b = await json(req); return assistant.proposals.reject(need(b.id, "id"), b.which ?? "all"); },
     "GET /api/settings": () => ({
         vault: vault?.root ?? null, source: vaultSource, notes: vault?.notes.size ?? 0, problem: vaultProblem,
         settingsFile: SETTINGS_FILE, overridden: vaultSource === "--vault",

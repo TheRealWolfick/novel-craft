@@ -1,6 +1,6 @@
 // World Builder as a desktop app: runs the server in this process on a free local port and shows it in a window
 // without browser controls. Start with `npm run app` (system Electron) or the installed `world-builder` command.
-import { app, BrowserWindow, Menu, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,7 +48,40 @@ function createWindow(url) {
         return { action: "deny" };
     });
     win.webContents.on("will-navigate", (e, to) => { if (!to.startsWith(origin)) { e.preventDefault(); if (/^https?:/.test(to)) shell.openExternal(to); } });
+    contextMenu(win);
     win.loadURL(url);
+}
+
+/**
+ * Right-click menu (Electron has none of its own): spelling suggestions and "Add to dictionary" on a misspelt word,
+ * cut / copy / paste in text fields, copy for selected text and links. Places that have their own menu (the map editor,
+ * blueprint lists) cancel the browser's menu, so this one doesn't appear there.
+ */
+function contextMenu(w) {
+    const ses = w.webContents.session;
+    // spell check in the system's language when there is a dictionary for it (else English)
+    const have = ses.availableSpellCheckerLanguages ?? [];
+    const want = [...(app.getPreferredSystemLanguages?.() ?? []), app.getLocale()].map((l) => have.find((h) => h.toLowerCase() === l.toLowerCase()) ?? have.find((h) => h.toLowerCase() === l.split("-")[0].toLowerCase())).filter(Boolean);
+    if (have.length) try { ses.setSpellCheckerLanguages([...new Set(want.length ? want : ["en-US"])]); } catch { /* not on this platform */ }
+    w.webContents.on("context-menu", (_e, p) => {
+        const items = [];
+        const f = p.editFlags;
+        if (p.misspelledWord) {
+            for (const s of p.dictionarySuggestions.slice(0, 6)) items.push({ label: s, click: () => w.webContents.replaceMisspelling(s) });
+            if (!p.dictionarySuggestions.length) items.push({ label: "No suggestions", enabled: false });
+            items.push({ label: "Add to dictionary", click: () => ses.addWordToSpellCheckerDictionary(p.misspelledWord) }, { type: "separator" });
+        }
+        if (p.isEditable) {
+            items.push({ role: "undo", enabled: f.canUndo }, { role: "redo", enabled: f.canRedo }, { type: "separator" },
+                { role: "cut", enabled: f.canCut }, { role: "copy", enabled: f.canCopy }, { role: "paste", enabled: f.canPaste },
+                { role: "pasteAndMatchStyle", label: "Paste as plain text", enabled: f.canPaste }, { type: "separator" }, { role: "selectAll" });
+        } else if (p.selectionText.trim()) items.push({ role: "copy" });
+        if (p.linkURL && !p.linkURL.startsWith(origin)) items.push({ type: "separator" }, { label: "Open link in browser", click: () => shell.openExternal(p.linkURL) }, { label: "Copy link", click: () => clipboard.writeText(p.linkURL) });
+        if (p.mediaType === "image" && p.srcURL) items.push({ type: "separator" }, { label: "Copy image", click: () => w.webContents.copyImageAt(p.x, p.y) });
+        while (items[0]?.type === "separator") items.shift();
+        while (items.at(-1)?.type === "separator") items.pop();
+        if (items.length) Menu.buildFromTemplate(items).popup({ window: w });
+    });
 }
 
 // window.prompt() is not built into Electron: the preload asks here and waits for a small dialog window

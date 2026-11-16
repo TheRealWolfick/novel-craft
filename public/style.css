@@ -1024,3 +1024,27 @@ kbd { font: 500 11.5px var(--mono); padding: 1px 6px; border: 1px solid var(--li
 .ai-settings input[type=password] { flex: 1; min-width: 220px; }
 .ai-status { font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px; white-space: pre-wrap; max-height: 160px; overflow: auto; }
 .ok { color: var(--ok); }
+html.covered { overflow: hidden; }
+.ai-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 0; }
+.ai-chips button { border-radius: 999px; text-align: left; white-space: normal; }
+.ai-proposal { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; margin: 8px 0 2px; padding: 10px 12px; border: 1px solid var(--accent); border-left-width: 4px; border-radius: var(--radius); background: var(--panel); text-align: left; }
+.ai-proposal-title { font-weight: 600; color: var(--text); }
+.proposal { padding: 4px 0 24px; }
+.proposal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.proposal-head h2 { margin: 0 0 2px; }
+.change { border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 12px; background: var(--panel); }
+.change.applied { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
+.change.rejected { opacity: .6; }
+.change.failed { border-color: var(--bad); }
+.change-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.change-n { display: inline-grid; place-items: center; min-width: 22px; height: 22px; border-radius: 999px; background: var(--panel-2); font-size: 12px; color: var(--muted); }
+.change-body { padding: 10px 12px; }
+.change-body > .error { margin: 0 0 8px; }
+.change-text { white-space: pre-wrap; font-family: var(--font-read, Georgia, serif); font-size: var(--read-size, 15px); line-height: 1.6; }
+.change-text .ctx { color: var(--muted); }
+.change del, .change td.del { background: color-mix(in srgb, var(--bad) 16%, transparent); color: inherit; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--bad) 70%, transparent); }
+.change ins, .change td.ins { background: color-mix(in srgb, var(--ok) 18%, transparent); text-decoration: none; }
+.change td.del, .change td.ins { text-decoration: none; }
+.change-fields { width: 100%; border-collapse: collapse; font-size: 13px; }
+.change-fields th, .change-fields td { text-align: left; vertical-align: top; padding: 4px 8px; border-bottom: 1px solid var(--line); word-break: break-word; }
+.change-fields th { width: 22%; color: var(--muted); font-weight: 500; }

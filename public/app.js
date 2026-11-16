@@ -10,7 +10,7 @@ import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
 import { ImportView } from "./importer.js";
 import { DocsView, DocArticle } from "./docs.js";
-import { AiPane, AiSettingsPanel, BotIcon } from "./ai.js";
+import { AiPane, AiSettingsPanel, BotIcon, ProposalView } from "./ai.js";
 import { FIELD_TYPES, normalizeTemplates, checkTemplate, checkValue, fromText, toText, parseResource, computeValues, displayValue, defaultKey, fieldId, namesField, fieldNamed } from "./stats-core.js";
 
 const html = htm.bind(h);
@@ -253,6 +253,7 @@ function drawerLabel(href, index) {
     const [name, ...args] = parseDrawerHref(href);
     if (name === "chapter") return `Chapter ${args[1]}`;
     if (name === "newchar") return "New character";
+    if (name === "proposal") return "Review changes";
     if (name === "docs") return `Docs: ${(args[0] ?? "").split("?")[0].replace(/-/g, " ")}`;
     if (name === "c") return collectionLabel(args.join("/"));
     if (name === "new") return `New ${index?.schema.collections[args.join("/")]?.label ?? collectionLabel(args.join("/"))}`;
@@ -314,6 +315,7 @@ function DrawerViewer({ index, d }) {
             : name === "c" ? html`<${CollectionView} index=${index} collection=${args.join("/")} novelFilter="" scope="drawer" />`
             : name === "new" ? html`<${NoteForm} index=${index} collection=${args.join("/")} scope="drawer" />`
             : name === "newchar" ? html`<${NoteForm} index=${index} collection="characters" novel=${args[0]} scope="drawer" />`
+            : name === "proposal" ? html`<${ProposalView} id=${args[0]} />`
             : name === "docs" ? html`<${DocArticle} id=${args[0].split("?")[0]} section=${new URLSearchParams(args[0].split("?")[1] ?? "").get("s")} scope="drawer" />`
             : html`<${NoteView} index=${index} path=${args.join("/")} scope="drawer" />`}</div>`;
 }
@@ -3185,6 +3187,7 @@ function App() {
         case "callout-design": view = html`<${CalloutDesigner} />`; break;
         case "import": view = html`<${ImportView} />`; break;
         case "map-assets": view = html`<${MapAssetsView} />`; break;
+        case "proposal": view = html`<${ProposalView} id=${a} />`; break;
         case "docs": view = html`<${DocsView} page=${a ?? null} section=${route.params.get("s")} />`; break;
         case "settings": view = html`<${SettingsView} settings=${settings} />`; break;
         case "world": view = html`<${WorldView} key=${a ?? ""} index=${index} world=${a ?? null} params=${route.params} />`; break;
@@ -3196,6 +3199,8 @@ function App() {
     // the writer sits beside the open drawer; while the writer slides away it keeps the width it had
     const beside = useRef(false);
     if (writer.open) beside.current = d.open;
+    // while a drawer covers the page, the page behind it doesn't scroll (its scrollbar would move nothing you can see)
+    useEffect(() => { document.documentElement.classList.toggle("covered", d.open || writer.open); }, [d.open, writer.open]);
     return html`<div class=${`layout ${writer.open ? "writing" : ""} ${d.open ? "drawer-open" : ""} ${beside.current ? "writer-beside" : ""}`}>
         <${Sidebar} index=${index} novelFolder=${novelFolder} />
         <main class="main">
@@ -3211,4 +3216,4 @@ function App() {
 render(html`<${App} />`, document.getElementById("app"));
 
 // shared with world.js and map-editor.js (used only inside components, so the import cycle is safe)
-export { api, useApi, qs, toast, store, go, noteHref, linkLabel, isLink, asList, openInDrawer, renameInDrawer, ConfirmButton, markDirty, confirmDiscard, Loading, useRoute, RenameDialog, Html, fieldInput, useNovelLinks };
+export { api, useApi, qs, toast, store, go, noteHref, linkLabel, isLink, asList, openInDrawer, openDrawerTab, renameInDrawer, ConfirmButton, markDirty, confirmDiscard, Loading, useRoute, RenameDialog, Html, fieldInput, useNovelLinks };

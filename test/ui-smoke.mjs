@@ -1041,6 +1041,47 @@ if (process.env.SETTINGS_DIR) {
     doc.querySelector(".ai-input button.primary").click();
     for (let i = 0; i < 40 && !doc.querySelector(".ai-steps"); i++) await wait(100);
     check(doc.querySelector(".ai-msg.user")?.textContent === "search: Mara" && /Tool said/.test(doc.querySelector(".ai-msg.bot")?.textContent ?? "") && /1 step$/.test(doc.querySelector(".ai-steps summary")?.textContent ?? ""), "a message in the AI tab gets a rendered reply with its steps", doc.querySelector(".ai-list")?.textContent);
+    check(/Tell me more/.test(doc.querySelector(".ai-chips")?.textContent ?? "") && !/<replies>/.test(doc.querySelector(".ai-msg.bot")?.textContent ?? "") && /follow-up/.test(doc.querySelector(".ai-input textarea")?.placeholder ?? ""),
+        "suggested replies show as chips under the chat (not in the text) and the hint asks for a follow-up", doc.querySelector(".ai-chips")?.textContent);
+    // proposals: nothing is written until approved, one by one or all
+    const written = pl.chapters(novel).find((c) => c.written && v.notes.get(c.notePath)?.body.split(/\n{2,}/).some((p) => p.length > 80));
+    const bodyOf = (p) => fs.readFileSync(`${COPY}/${p}`, "utf8");
+    const para = written && v.notes.get(written.notePath).body.split(/\n{2,}/).map((p) => p.trim()).find((p) => p.length > 80 && !/[[\]*_>#%!]/.test(p) && v.notes.get(written.notePath).body.split(p).length === 2);
+    const item = v.inFolder("80. Global Data Store/Items")[0];
+    if (para && item) {
+        const find = para.slice(0, 60);
+        const changes = [
+            { action: "edit_text", note: written.notePath, find, replace: "WB-EDIT " + find },
+            { action: "edit_fields", note: item.path, set: { description: "WB-REJECT" } },
+            { action: "create_note", collection: "Items", name: "WB Test Goggles", fields: { description: "Smoked glass." }, text: "Issued to couriers." },
+        ];
+        const bad = await send("POST", "/api/ai/chat", { message: "propose: " + JSON.stringify({ title: "Bad", changes: [{ action: "edit_text", note: written.notePath, find: "no such text anywhere 123", replace: "x" }] }) });
+        check(/occurs 0 times/.test(await bad.text()), "a text edit whose passage isn't there is refused with a reason the model can use");
+        const cfg = await send("POST", "/api/ai/chat", { message: "propose: " + JSON.stringify({ title: "Cfg", changes: [{ action: "edit_fields", note: novel.configPath, set: { accent: "#000000" } }] }) });
+        check(/settings note/.test(await cfg.text()), "a novel's settings note can't be changed through proposals");
+        doc.querySelector(".bot-button").click(); await wait(300);
+        const ta2 = doc.querySelector(".ai-input textarea");
+        ta2.value = "propose: " + JSON.stringify({ title: "Test changes", changes }); ta2.dispatchEvent(new w.Event("input", { bubbles: true })); await wait(50);
+        doc.querySelector(".ai-input button.primary").click();
+        for (let i = 0; i < 40 && !doc.querySelector(".proposal .change"); i++) await wait(100);
+        check(doc.querySelectorAll(".proposal .change").length === 3 && !!doc.querySelector(".proposal ins") && bodyOf(written.notePath).includes(find) && !bodyOf(written.notePath).includes("WB-EDIT"),
+            "proposed changes open for review in the drawer, and nothing is written yet");
+        const pid = JSON.parse(w.localStorage.getItem("drawerState")).recent[0].split("/").pop();
+        const json = (r) => r.json();
+        await send("POST", "/api/ai/proposal/apply", { id: pid, which: 0 }).then(json);
+        await send("POST", "/api/ai/proposal/reject", { id: pid, which: 1 }).then(json);
+        const done = await send("POST", "/api/ai/proposal/apply", { id: pid, which: "all" }).then(json);
+        check(done.changes.map((c) => c.status).join() === "applied,rejected,applied" && bodyOf(written.notePath).includes("WB-EDIT " + find) && !bodyOf(item.path).includes("WB-REJECT") && /Smoked glass/.test(bodyOf("80. Global Data Store/Items/WB Test Goggles.md")),
+            "applying one, rejecting one and applying the rest writes exactly the approved changes", JSON.stringify(done.changes.map((c) => [c.status, c.error])));
+        const conv2 = (await send("POST", "/api/ai/chat", { message: "hi" }).then((r) => r.text())).split("\n")[0];
+        const follow = await send("POST", "/api/ai/chat", { conversation: JSON.parse(conv2).conversation, message: "hi" }).then((r) => r.text());
+        check(!/heard/.test(follow), "review notes go only to the conversation that proposed the changes");
+        const cid = done.conversation;
+        const told = (await send("POST", "/api/ai/chat", { conversation: cid, message: "and now?" }).then((r) => r.text())).trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.t === "text").map((e) => e.d).join("");
+        check(/heard: Review of "Test changes": applied: 1, 3; rejected: 2/.test(told), "the assistant hears what was applied and rejected with the next message", told);
+        // put the chapter back for the tests after this
+        fs.writeFileSync(`${COPY}/${written.notePath}`, bodyOf(written.notePath).replace("WB-EDIT " + find, find));
+    }
     doc.querySelector(".drawer-tabs button[title^='Collapse']").click(); await wait(300);
     // the API key: checked, kept owner-only in secrets.json, never sent back whole
     if (process.env.SETTINGS_DIR) {
