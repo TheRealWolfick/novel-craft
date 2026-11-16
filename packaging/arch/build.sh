@@ -13,4 +13,6 @@ PKG="$(ls -t world-builder-*.pkg.tar.* | head -1)"
 mv "$PKG" "$HERE/"
 cd "$HERE" && rm -rf .build
 echo "Built packaging/arch/$PKG"
+# the package must hold everything the app loads (a missing folder is caught here, not after installing)
+node "$HERE/check.mjs" "$HERE/$PKG"
 [ "$1" = "--no-install" ] || sudo pacman -U "$PKG"

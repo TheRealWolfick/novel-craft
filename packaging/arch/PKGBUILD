@@ -22,6 +22,9 @@ package() {
     local app="$pkgdir/usr/lib/$pkgname"
     install -d "$app/node_modules"
     cp -r "$_repo"/{server.js,package.json,lib,public,electron} "$app/"
+    # the in-app docs: pages, index and screenshots (shots.json only drives scripts/screenshots.mjs)
+    install -d "$app/docs"
+    cp -r "$_repo"/docs/{*.md,index.json,img} "$app/docs/"
     # runtime dependencies only (pinned in package.json)
     for m in yaml marked preact htm; do cp -r "$_repo/node_modules/$m" "$app/node_modules/"; done
     [ -f "$_repo/LICENSE" ] && install -Dm644 "$_repo/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
