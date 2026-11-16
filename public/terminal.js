@@ -65,10 +65,13 @@ export function readScreen(rows) {
                 if (r === cur) curIndex = options.length;
                 options.push({ label: label.trim(), desc: rest.join("  ").trim(), row: r });
             }
-            // the question: from the rule above (or the top) down to the choices, in paragraphs
+            // the question: from the boundary above down to the choices, in paragraphs. The boundary is the rule Claude
+            // Code draws above its menu, even a scrap of one sharing a row while it redraws, or anything that is plainly
+            // conversation or status (a sent message "❯ …" at the first column, a reply "⎿ …", the effort line)
+            const boundary = (t) => /[─━═▔▁]{3,}/.test(t) || /^❯/.test(t) || /^\s*⎿/.test(t) || /^\s*[◐◑◒◓○●]\s.*·\s*\/effort/.test(t);
             let top = a - 1;
-            while (top > 0 && !RULE.test(rows[top].text) && a - top < 30) top--;
-            const start = RULE.test(rows[top]?.text ?? "") ? top + 1 : Math.max(0, top);
+            while (top > 0 && !boundary(rows[top].text) && a - top < 30) top--;
+            const start = boundary(rows[top]?.text ?? "") ? top + 1 : Math.max(0, top);
             const paras = [];
             let para = [];
             for (let r = start; r < a; r++) {
