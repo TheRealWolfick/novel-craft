@@ -1065,7 +1065,7 @@ html.covered { overflow: hidden; }
 .term-session-title { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-rules { margin: 6px 0 0; padding-left: 18px; }
 .ai-rules li { margin: 3px 0; }
-.term-input { border-top: 1px solid var(--line); background: var(--panel); }
+.term-input { position: absolute; left: 0; right: 0; bottom: 0; z-index: 10; border-top: 1px solid var(--line); background: var(--panel); box-shadow: 0 -4px 12px rgba(0,0,0,.12); }
 .term-input textarea { font: inherit; font-size: var(--read-size, 15px); line-height: 1.45; min-height: 44px; max-height: 40vh; }
 .term-host .xterm .xterm-screen { cursor: text; }
 /* your messages in the Claude Code terminal, as bubbles over the rows Claude Code drew for them */
@@ -1077,7 +1077,7 @@ html.covered { overflow: hidden; }
 .term-close:hover { filter: brightness(1.08); }
 /* Claude Code's own input area is covered (you type in the box below); its questions become a card */
 .term-cover { position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); pointer-events: auto; }
-.term-card { position: absolute; left: 0; right: 0; bottom: 0; max-height: 100%; overflow-y: auto; background: var(--panel); box-shadow: 0 -6px 16px rgba(0,0,0,.18); border-top: 2px solid var(--accent); padding: 12px 16px 10px; pointer-events: auto; font-family: var(--font-ui, system-ui, sans-serif); font-size: 14px; line-height: 1.45; color: var(--text); box-sizing: border-box; }
+.term-card { position: absolute; left: 0; right: 0; bottom: var(--term-box-h, 0px); max-height: calc(100% - var(--term-box-h, 0px)); overflow-y: auto; background: var(--panel); box-shadow: 0 -6px 16px rgba(0,0,0,.18); border-top: 2px solid var(--accent); padding: 12px 16px 10px; pointer-events: auto; font-family: var(--font-ui, system-ui, sans-serif); font-size: 14px; line-height: 1.45; color: var(--text); box-sizing: border-box; }
 .term-q { margin: 0 0 8px; color: var(--muted); }
 .term-q.strong, .term-card > .term-q:only-of-type { color: var(--text); font-weight: 600; }
 .term-choices { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
@@ -1089,3 +1089,7 @@ html.covered { overflow: hidden; }
 .term-choice-desc { font-size: 12.5px; color: var(--muted); }
 .term-note { margin: 2px 0; font-size: 12.5px; color: var(--muted); }
 .term-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; }
+.term-inner { height: 100%; }
+.term-linkrow { position: absolute; background: var(--panel); color: var(--text); font-family: var(--mono, monospace); font-size: 13.5px; white-space: pre; overflow: hidden; pointer-events: auto; }
+.term-link { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; }
+.term-link:hover { text-decoration-thickness: 2px; }

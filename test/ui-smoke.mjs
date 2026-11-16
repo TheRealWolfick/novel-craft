@@ -1109,6 +1109,9 @@ if (process.env.SETTINGS_DIR) {
         const redraw = readScreen(mk(16, [[2, "❯ /effort", true], [3, "  ⎿  Set effort level to medium"], [4, "❯ /model", true], [5, "  ⎿  Kept model as Opus 5.5"], [6, "◐ medium · /effort ▔"], [7, "   Select model"], [8, "   Switch between Claude models."], [10, "   ❯ 1.  Default (recommended)  Opus 5.5"], [11, "     2.  Opus 5.5 ✔               For complex work"], [13, "   Enter to set as default · Esc to cancel"]]));
         check(redraw.prompt?.top === 6 && redraw.prompt.question.join(" ") === "Select model Switch between Claude models." && redraw.bubbles.length === 2,
             "a menu's question stops at a scrap of its rule or the conversation, even while Claude Code redraws", JSON.stringify(redraw.prompt?.question));
+        const linked = readScreen(mk(10, [[2, "  Wade is in [[Wade Ptolemy]] and [[Lantern Cross|the Cross]]."], [4, "❯ ask about [[X]]", true]]));
+        check(JSON.stringify(linked.links.map((l) => [l.r, l.c, l.len, l.target, l.label])) === JSON.stringify([[2, 13, 16, "Wade Ptolemy", "Wade Ptolemy"], [2, 34, 27, "Lantern Cross", "the Cross"]]),
+            "[[links]] in Claude Code's text are found to draw as links (not inside your own messages)", JSON.stringify(linked.links));
         const idle = readScreen(mk(53, [[10, "❯ hello there", true], [11, "  and more", true], [12, "  Claude's answer"], [49, rule], [50, '❯ Try "create a util logging.py that..."'], [51, rule], [52, "  ⏵⏵ auto mode on"]]));
         check(idle.cover === 49 && !idle.prompt && idle.bubbles.length === 1 && idle.bubbles[0].n === 2, "Claude Code's own input area is covered and your messages become bubbles", JSON.stringify(idle));
     }

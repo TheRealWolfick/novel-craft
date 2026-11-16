@@ -32,12 +32,13 @@ const COMMANDS = [["/usage", "Usage", "Your plan's usage limits and how much is 
  *   to cancel", the choice marked "❯", the other choices at the same indent (deeper rows are their descriptions), the
  *   question between a rule (──── or ▔▔▔▔) and the choices, anything between the choices and the footer as notes;
  * - cover: where its own input area starts (the rule above the bottom "❯" row), when there is no prompt;
- * - menu: a screen that Escape closes ("Esc to cancel / close…" in its last rows).
+ * - menu: a screen that Escape closes ("Esc to cancel / close…" in its last rows);
+ * - links: [[Note]] / [[Note|label]] in Claude Code's text (row, column, length in cells), drawn as links over it.
  */
 const RULE = /^[\s│]*[─━═▔▁]{8,}[\s│]*$/;
 export function readScreen(rows) {
     const n = rows.length;
-    const out = { bubbles: [], prompt: null, cover: null, menu: false };
+    const out = { bubbles: [], prompt: null, cover: null, menu: false, links: [] };
     for (let r = Math.max(0, n - 10); r < n; r++) if (/\bEsc to (cancel|close|exit|go back|dismiss)\b/i.test(rows[r].text)) out.menu = true;
     const plain = (t) => t.replace(/[│┃]/g, " ");
     const indent = (t) => plain(t).search(/\S/);
@@ -98,6 +99,12 @@ export function readScreen(rows) {
         out.bubbles.push({ r, n: k, lines });
         r += k - 1;
     }
+    const inBubble = (r) => out.bubbles.some((b) => r >= b.r && r < b.r + b.n);
+    for (let r = 0; r < end; r++) {
+        // one character per cell: rows with wide characters (CJK, emoji) would put the link in the wrong place
+        if (inBubble(r) || /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]|\p{Extended_Pictographic}/u.test(rows[r].text)) continue;
+        for (const m of rows[r].text.matchAll(/\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g)) out.links.push({ r, c: m.index, len: m[0].length, target: m[1].trim(), label: (m[2] ?? m[1]).trim() });
+    }
     return out;
 }
 
@@ -151,6 +158,29 @@ function overlay(t, on) {
             row.append(bubble);
             return row;
         });
+        // [[links]] as links: from a row's first link to its end the row is drawn again with each link as the note's
+        // name (or label) in the accent colour, so the text closes up where the brackets were; clicking opens the note
+        const cellW = screen.offsetWidth / t.cols;
+        const byRow = new Map();
+        for (const l of sc.links) { if (!byRow.has(l.r)) byRow.set(l.r, []); byRow.get(l.r).push(l); }
+        for (const [r, ls] of byRow) {
+            const text = rows[r].text, c0 = ls[0].c;
+            const line = el("div", "term-linkrow");
+            Object.assign(line.style, { left: `${c0 * cellW}px`, top: `${r * rowH}px`, width: `${(text.length - c0) * cellW}px`, height: `${rowH}px`, lineHeight: `${rowH}px` });
+            keepMouse(line);
+            let at = c0;
+            for (const l of ls) {
+                if (l.c > at) line.append(document.createTextNode(text.slice(at, l.c)));
+                const a = el("a", "term-link", l.label);
+                a.title = `Open ${l.target}`;
+                a.href = "#";
+                a.addEventListener("click", (e) => { e.preventDefault(); on.link(l.target); });
+                line.append(a);
+                at = l.c + l.len;
+            }
+            if (at < text.length) line.append(document.createTextNode(text.slice(at)));
+            parts.push(line);
+        }
         if (sc.cover != null) {
             const cover = el("div", "term-cover");
             cover.style.top = `${sc.cover * rowH}px`;
@@ -204,112 +234,162 @@ async function openLink(target) {
 const cssVar = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 const themeNow = () => ({ background: cssVar("--panel", "#1f1e23"), foreground: cssVar("--text", "#e6e3ea"), cursor: cssVar("--accent", "#b07cf0"), selectionBackground: `${cssVar("--accent", "#b07cf0")}55` });
 
+// The terminal, its stream and what was sent live as long as the app (not the tab): switching tabs, opening a note or a
+// re-render puts the same terminal back, so the conversation only changes with New, History, End or closing the app.
+const T = { term: null, fit: null, inner: null, es: null, id: null, received: 0, sent: [], autoTried: false, starting: false, ui: {}, queue: { pending: "", busy: false } };
+async function flushKeys() {
+    const qd = T.queue;
+    if (qd.busy || !qd.pending) return;
+    qd.busy = true;
+    const data = qd.pending; qd.pending = "";
+    try { await api.send("POST", "/api/terminal/input", { data }); } catch { /* the stream shows it ended */ }
+    qd.busy = false;
+    flushKeys();
+}
+/** Keys go to the server one batch at a time, in order */
+const typeKeys = (d) => { T.queue.pending += d; flushKeys(); };
+
+/** The stream of Claude Code's output; on a dropped connection it reconnects for just what it missed */
+function connect() {
+    const t = T.term;
+    const es = new EventSource(`/api/terminal/stream${T.id ? `?id=${T.id}&from=${T.received}` : ""}`);
+    T.es = es;
+    es.addEventListener("hello", (e) => {
+        const s = JSON.parse(e.data);
+        if (!s.resume) t.reset();
+        T.id = s.id; T.received = s.from;
+        T.ui.setRunning?.(s.running); T.ui.setExit?.(s.exit);
+    });
+    es.addEventListener("start", (e) => { T.id = JSON.parse(e.data).id; T.received = 0; t.reset(); });
+    es.onmessage = (e) => {
+        const bin = atob(e.data); const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        T.received += bytes.length;
+        t.write(bytes);
+    };
+    es.addEventListener("exit", (e) => {
+        if (T.starting) return;
+        T.ui.setRunning?.(false); T.ui.setExit?.(JSON.parse(e.data));
+        api.get("/api/terminal/status").then((st) => T.ui.setStatus?.(st)).catch(() => { });   // the conversation just ended joins the list
+    });
+    es.onerror = () => { es.close(); if (T.es === es) setTimeout(connect, 1000); };
+}
+
+/** Make the terminal once (into a container that later mounts of the tab move into their place) */
+async function makeTerminal(host) {
+    if (T.term) return T.term;
+    const [{ Terminal }, { FitAddon }] = await loadXterm();
+    if (T.term) return T.term;
+    T.inner = Object.assign(document.createElement("div"), { className: "term-inner" });
+    host.append(T.inner);
+    const t = new Terminal({ fontFamily: cssVar("--mono", "monospace"), fontSize: 13.5, lineHeight: 1.3, cursorBlink: false, cursorStyle: "bar", cursorInactiveStyle: "none", scrollback: 8000, allowProposedApi: false, theme: themeNow(), macOptionIsMeta: true, rightClickSelectsWord: false });
+    const f = new FitAddon();
+    t.loadAddon(f);
+    t.open(T.inner);
+    T.term = t; T.fit = f;
+    try { f.fit(); } catch { /* hidden */ }
+    t.onData(typeKeys);
+    // copy and paste like anywhere else: Ctrl+C copies the selection (with nothing selected it still stops Claude
+    // Code), Ctrl+V pastes; Ctrl+Shift+C / V too
+    t.attachCustomKeyEventHandler((e) => {
+        if (e.type !== "keydown" || !e.ctrlKey || e.altKey || e.metaKey) return true;
+        if (e.code === "KeyC" && (e.shiftKey || t.hasSelection())) { const sel = t.getSelection(); if (sel) { navigator.clipboard?.writeText(sel); t.clearSelection(); } return false; }
+        if (e.code === "KeyV") { navigator.clipboard?.readText().then((txt) => txt && t.paste(txt)); return false; }
+        return true;
+    });
+    overlay(t, {
+        sent: () => T.sent,
+        state: (st) => T.ui.state?.(st),
+        choose: (i, p) => { const d = i - p.cur; typeKeys((d > 0 ? "\x1b[B" : "\x1b[A").repeat(Math.abs(d)) + "\r"); T.ui.focus?.(); },
+        answer: (i) => T.ui.answer?.(i),
+        cancel: () => { typeKeys("\x1b"); T.ui.focus?.(); },
+        link: (target) => openLink(target),
+    });
+    // vault paths (…/Note.md) in Claude Code's answers open the note in the viewer ([[links]] are drawn as links by the overlay)
+    t.registerLinkProvider({
+        provideLinks(y, done) {
+            const line = t.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+            const links = [];
+            for (const m of line.matchAll(/(?:\d+\. [^/\n[\]]+|80\. Global Data Store)(?:\/[^/\n[\]]+)+\.md/g)) {
+                links.push({ text: m[0], range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } }, decorations: { underline: true, pointerCursor: true }, activate: () => openLink(m[0]) });
+            }
+            done(links.length ? links : undefined);
+        },
+    });
+    // follow the app's light / dark theme
+    new MutationObserver(() => { t.options.theme = themeNow(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
+    connect();
+    return t;
+}
+
 export function ClaudeTerminal({ active }) {
     const host = useRef(null);
+    // the text box floats over the bottom of the terminal (so the terminal keeps its size as the box grows); its
+    // height goes to --term-box-h, which keeps question cards above it
+    const wrap = useRef(null);
+    const inputBar = useRef(null);
     const box = useRef(null);                         // the text box under the terminal
-    const sent = useRef([]);                          // messages sent from it (their bubbles keep the line breaks)
     const [menu, setMenu] = useState(false);          // one of Claude Code's screens that Escape closes is showing
     const [prompt, setPrompt] = useState(null);       // a question from Claude Code with choices (shown as a card)
     const promptRef = useRef(null);
     const [answering, setAnswering] = useState(null); // the "Type something" choice the box's text goes to
     const [text, setText] = useState("");
-    const term = useRef(null);
-    const fit = useRef(null);
+    const term = { get current() { return T.term; } };
+    const fit = { get current() { return T.fit; } };
     const [status, setStatus] = useState(null);       // {claude, running, exit}
     const [running, setRunning] = useState(false);
     const [exit, setExit] = useState(null);
     const [error, setError] = useState(null);
-    const [ready, setReady] = useState(false);
+    const [ready, setReady] = useState(!!T.term);
+    useEffect(() => {
+        const bar = inputBar.current;
+        if (!bar || !wrap.current) return;
+        const set = () => wrap.current?.style.setProperty("--term-box-h", `${bar.offsetHeight}px`);
+        set();
+        const ro = new ResizeObserver(set);
+        ro.observe(bar);
+        return () => ro.disconnect();
+    }, [running]);
     const [history, setHistory] = useState(null);     // the History list, while open
     const [session, setSession] = useState(null);     // the conversation running ("last", an id, or null for a new one)
-    const autoTried = useRef(false);
-    const starting = useRef(false);                   // switching conversations: the old one's exit doesn't count
     useEffect(() => { api.get("/api/terminal/status").then((s) => { setStatus(s); setRunning(s.running); setExit(s.exit); setSession(s.session); }).catch((e) => setError(e.message)); }, []);
-
-    // keys go to the server one batch at a time, in order
-    const queue = useRef({ pending: "", busy: false });
-    const flush = async () => {
-        const qd = queue.current;
-        if (qd.busy || !qd.pending) return;
-        qd.busy = true;
-        const data = qd.pending; qd.pending = "";
-        try { await api.send("POST", "/api/terminal/input", { data }); } catch { /* the stream shows it ended */ }
-        qd.busy = false;
-        flush();
+    const type = typeKeys;
+    const sent = { get current() { return T.sent; }, set current(v) { T.sent = v; } };
+    // what the app-level terminal tells this tab
+    T.ui = {
+        setRunning, setExit, setStatus,
+        state: ({ menu: m, prompt: p }) => {
+            setMenu((was) => (was === m ? was : m));
+            promptRef.current = p;
+            setPrompt((was) => (!!was === !!p ? was : p));
+            if (!p) setAnswering(null);
+        },
+        answer: (i) => { setAnswering(i); box.current?.focus(); },
+        focus: () => box.current?.focus(),
     };
-    const type = (d) => { queue.current.pending += d; flush(); };
 
-    // the terminal itself, once there is a place for it
+    // put the terminal here (made the first time, moved here after that)
     useEffect(() => {
-        if (!status?.claude || term.current || !host.current) return;
-        let gone = false, es = null, ro = null, timer = null;
-        loadXterm().then(([{ Terminal }, { FitAddon }]) => {
+        if (!status?.claude || !host.current) return;
+        let gone = false, ro = null, timer = null;
+        makeTerminal(host.current).then((t) => {
             if (gone) return;
-            const t = new Terminal({ fontFamily: cssVar("--mono", "monospace"), fontSize: 13.5, lineHeight: 1.3, cursorBlink: false, cursorStyle: "bar", cursorInactiveStyle: "none", scrollback: 8000, allowProposedApi: false, theme: themeNow(), macOptionIsMeta: true, rightClickSelectsWord: false });
-            const f = new FitAddon();
-            t.loadAddon(f);
-            t.open(host.current);
-            term.current = t; fit.current = f;
-            try { f.fit(); } catch { /* hidden */ }
-            t.onData(type);
-            // copy and paste like anywhere else: Ctrl+C copies the selection (with nothing selected it still stops Claude
-            // Code), Ctrl+V pastes; Ctrl+Shift+C / V too
-            t.attachCustomKeyEventHandler((e) => {
-                if (e.type !== "keydown" || !e.ctrlKey || e.altKey || e.metaKey) return true;
-                if (e.code === "KeyC" && (e.shiftKey || t.hasSelection())) { const sel = t.getSelection(); if (sel) { navigator.clipboard?.writeText(sel); t.clearSelection(); } return false; }
-                if (e.code === "KeyV") { navigator.clipboard?.readText().then((txt) => txt && t.paste(txt)); return false; }
-                return true;
-            });
-            overlay(t, {
-                sent: () => sent.current,
-                state: ({ menu: m, prompt: p }) => {
-                    setMenu((was) => (was === m ? was : m));
-                    promptRef.current = p;
-                    setPrompt((was) => (!!was === !!p ? was : p));
-                    if (!p) setAnswering(null);
-                },
-                choose: (i, p) => { const d = i - p.cur; type((d > 0 ? "\x1b[B" : "\x1b[A").repeat(Math.abs(d)) + "\r"); box.current?.focus(); },
-                answer: (i) => { setAnswering(i); box.current?.focus(); },
-                cancel: () => { type("\x1b"); box.current?.focus(); },
-            });
-            // [[links]] and vault paths (…/Note.md) in Claude Code's answers open the note in the viewer
-            t.registerLinkProvider({
-                provideLinks(y, done) {
-                    const line = t.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
-                    const links = [];
-                    for (const m of line.matchAll(/\[\[([^\]\n]+?)\]\]|((?:\d+\. [^/\n]+|80\. Global Data Store)(?:\/[^/\n]+)+\.md)/g)) {
-                        const target = m[1] ?? m[2];
-                        links.push({ text: m[0], range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } }, decorations: { underline: true, pointerCursor: true },
-                            activate: () => openLink(target) });
-                    }
-                    done(links.length ? links : undefined);
-                },
-            });
+            if (T.inner.parentElement !== host.current) host.current.append(T.inner);
             const resize = () => {
                 clearTimeout(timer);
                 timer = setTimeout(() => {
                     if (!host.current?.offsetWidth) return;
-                    try { f.fit(); } catch { return; }
+                    try { T.fit.fit(); } catch { return; }
+                    t.refresh(0, t.rows - 1);
                     api.send("POST", "/api/terminal/resize", { cols: t.cols, rows: t.rows }).catch(() => { });
                 }, 120);
             };
             ro = new ResizeObserver(resize);
             ro.observe(host.current);
-            es = new EventSource("/api/terminal/stream");
-            es.addEventListener("hello", (e) => { const s = JSON.parse(e.data); setRunning(s.running); setExit(s.exit); t.reset(); });
-            es.onmessage = (e) => { const bin = atob(e.data); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); t.write(bytes); };
-            es.addEventListener("exit", (e) => {
-                if (starting.current) return;
-                setRunning(false); setExit(JSON.parse(e.data));
-                api.get("/api/terminal/status").then(setStatus).catch(() => { });   // the conversation just ended joins the list
-            });
-            // follow the app's light / dark theme
-            const mo = new MutationObserver(() => { t.options.theme = themeNow(); });
-            mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style"] });
-            term.current._mo = mo;
+            resize();
             setReady(true);
         }).catch((e) => setError(`The terminal couldn't load: ${e.message}`));
-        return () => { gone = true; es?.close(); ro?.disconnect(); clearTimeout(timer); term.current?._mo?.disconnect(); term.current?.dispose(); term.current = null; };
+        return () => { gone = true; ro?.disconnect(); clearTimeout(timer); };   // the terminal itself stays
     }, [status?.claude]);
 
     // shown again: fit to the pane and take the keyboard
@@ -331,16 +411,15 @@ export function ClaudeTerminal({ active }) {
     // resume: false (a new conversation), "last", or a conversation id; a running one is ended first
     const start = async (resume) => {
         setError(null); setHistory(null);
-        starting.current = true;
+        T.starting = true;
         try {
             const t = term.current;
             try { fit.current?.fit(); } catch { /* hidden */ }
             await api.send("POST", "/api/terminal/start", { cols: t?.cols ?? 100, rows: t?.rows ?? 30, resume, restart: running });
-            t?.reset();
             setRunning(true); setExit(null); setSession(resume || null);
             t?.focus();
         } catch (e) { setError(e.message); }
-        setTimeout(() => { starting.current = false; }, 300);
+        setTimeout(() => { T.starting = false; }, 300);
     };
     const stop = () => api.send("POST", "/api/terminal/stop").catch((e) => setError(e.message));
     // the text box: an ordinary text field (select, delete, undo…) whose message goes into Claude Code as one paste,
@@ -381,8 +460,8 @@ export function ClaudeTerminal({ active }) {
     };
     // after a restart of the app the last conversation carries on by itself
     useEffect(() => {
-        if (!ready || !active || running || exit || autoTried.current || !status?.sessions?.length) return;
-        autoTried.current = true;
+        if (!ready || !active || running || exit || T.autoTried || !status?.sessions?.length) return;
+        T.autoTried = true;
         start("last");
     }, [ready, active, running, exit, status]);
 
@@ -408,15 +487,15 @@ export function ClaudeTerminal({ active }) {
                 <span class="muted small">${ago(h.updated)} · ${h.messages} messages${h.prompt && h.prompt !== h.title ? ` · ${h.prompt.slice(0, 90)}` : ""}</span>
             </button>`)}
         </div>`}
-        <div class="term-wrap">
+        <div class="term-wrap" ref=${wrap}>
             <div class="term-host" ref=${host} />
             ${running && menu && html`<button class="term-close" title="Close this screen (Escape)" onClick=${() => { type("\x1b"); setMenu(false); box.current?.focus(); }}>✕ Close</button>`}
+            ${running && html`<div class="ai-input term-input" ref=${inputBar}>
+                <textarea ref=${box} rows="1" placeholder=${answering != null ? "Write your answer… (Shift+Enter sends it)" : prompt ? "Answer above, or write something here… (Enter chooses · ↑↓ move · Esc cancels)" : "Message Claude Code… (Shift+Enter sends · Enter: new line · Esc stops it)"} value=${text}
+                    onInput=${(e) => setText(e.target.value)} onKeyDown=${onBoxKey} />
+                <button class="primary" onClick=${() => sendText()} title="Send (Shift+Enter)">Send</button>
+            </div>`}
         </div>
-        ${running && html`<div class="ai-input term-input">
-            <textarea ref=${box} rows="1" placeholder=${answering != null ? "Write your answer… (Shift+Enter sends it)" : prompt ? "Answer above, or write something here… (Enter chooses · ↑↓ move · Esc cancels)" : "Message Claude Code… (Shift+Enter sends · Enter: new line · Esc stops it)"} value=${text}
-                onInput=${(e) => setText(e.target.value)} onKeyDown=${onBoxKey} />
-            <button class="primary" onClick=${() => sendText()} title="Send (Shift+Enter)">Send</button>
-        </div>`}
         ${!running && html`<div class="term-start">
             <p>${exit ? "Claude Code has ended." : "Start Claude Code to talk about your novels and worlds."}</p>
             <div class="row">${status.sessions?.length ? html`<button class="primary" onClick=${() => start("last")}>Continue “${status.sessions[0].title}”</button><button onClick=${() => start(false)}>New conversation</button><button onClick=${openHistory}>Earlier conversations…</button>`

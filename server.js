@@ -642,10 +642,13 @@ async function mcpRequest(req, res) {
 /** The terminal's output as server-sent events (base64): what was shown so far, then everything new, then its exit */
 function terminalStream(req, res) {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-    const backlog = terminal.backlog();
-    res.write(`event: hello\ndata: ${JSON.stringify({ running: terminal.running, exit: terminal.exit })}\n\n`);
-    if (backlog.length) res.write(`data: ${backlog.toString("base64")}\n\n`);
-    const f = (ev) => res.write(ev.data ? `data: ${ev.data.toString("base64")}\n\n` : `event: exit\ndata: ${JSON.stringify(ev.exit)}\n\n`);
+    // a page that reconnects says what it already has (?id=&from=): it gets only the rest, else everything kept
+    const q = new URL(req.url, "http://localhost").searchParams;
+    const rest = q.get("id") ? terminal.since(q.get("id"), Number(q.get("from"))) : null;
+    const data = rest ?? terminal.backlog();
+    res.write(`event: hello\ndata: ${JSON.stringify({ running: terminal.running, exit: terminal.exit, id: terminal.id, from: rest ? Number(q.get("from")) : terminal.total - terminal.size, resume: !!rest })}\n\n`);
+    if (data.length) res.write(`data: ${data.toString("base64")}\n\n`);
+    const f = (ev) => res.write(ev.data ? `data: ${ev.data.toString("base64")}\n\n` : ev.start ? `event: start\ndata: ${JSON.stringify(ev.start)}\n\n` : `event: exit\ndata: ${JSON.stringify(ev.exit)}\n\n`);
     terminal.listeners.add(f);
     req.on("close", () => terminal.listeners.delete(f));
 }
