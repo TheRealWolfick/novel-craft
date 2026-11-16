@@ -34,10 +34,17 @@ const qs = (o) => Object.entries(o).filter(([, v]) => v != null && v !== "").map
 
 let vaultVersion = 0;
 const versionListeners = new Set();
-new EventSource("/api/events").onmessage = (e) => {
+const events = new EventSource("/api/events");
+events.onmessage = (e) => {
     vaultVersion = JSON.parse(e.data).version;
     versionListeners.forEach((f) => f(vaultVersion));
 };
+// Claude Code (through World Builder's MCP server) proposed changes: open them for review in the drawer
+events.addEventListener?.("proposal", (e) => {
+    const p = JSON.parse(e.data);
+    openInDrawer(`#/proposal/${p.id}`);
+    toast(`Claude proposed ${p.count} change${p.count === 1 ? "" : "s"} for review`);
+});
 function useVersion() {
     const [v, setV] = useState(vaultVersion);
     useEffect(() => { versionListeners.add(setV); return () => versionListeners.delete(setV); }, []);
@@ -216,11 +223,12 @@ document.addEventListener("click", (e) => {
 // Ctrl+[ opens / closes the writer (left), Ctrl+] the drawer (right), from anywhere
 addEventListener("keydown", (e) => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || (e.key !== "[" && e.key !== "]")) return;
+    if (e.key === "[" && e.target.closest?.(".xterm")) return;   // Ctrl+[ is Escape in a terminal
     e.preventDefault();
     if (e.key === "[") toggleWriter();
     else setDrawer({ ...drawer, open: !drawer.open });
 });
-addEventListener("keydown", (e) => { if (e.key === "Escape" && drawer.open && !document.querySelector(".lightbox") && !e.target.closest?.(".writer, .block-editor, .nblock.moving")) collapseDrawer(); });
+addEventListener("keydown", (e) => { if (e.key === "Escape" && drawer.open && !document.querySelector(".lightbox") && !e.target.closest?.(".writer, .block-editor, .nblock.moving, .xterm")) collapseDrawer(); });
 
 // a renamed note's drawer page follows it
 function renameInDrawer(from, to) { if (drawer.recent.includes(from)) setDrawer({ ...drawer, recent: drawer.recent.map((h) => (h === from ? to : h)) }); }

@@ -14,7 +14,8 @@ CONF="$(mktemp -d)"   # the test server's own settings, so the real ones are nev
 trap 'kill $PID 2>/dev/null; rm -rf "$COPY" "$CONF"' EXIT
 (cd "$VAULT" && tar --exclude=./.git --exclude=./.obsidian -cf - .) | (cd "$COPY" && tar -xf -)
 node scripts/migrate-plans.js "$COPY" --write > /dev/null
-WB_AI_MOCK=1 XDG_CONFIG_HOME="$CONF" node server.js --vault "$COPY" --port 4398 > "$COPY/.server.log" 2>&1 &
+# the terminal runs `cat` instead of Claude Code, and the workspace and saved conversations stay in $CONF
+WB_TERMINAL_CMD="exec cat" XDG_DATA_HOME="$CONF/data" WB_AI_MOCK=1 XDG_CONFIG_HOME="$CONF" node server.js --vault "$COPY" --port 4398 > "$COPY/.server.log" 2>&1 &
 PID=$!
 sleep 2
 BASE=http://127.0.0.1:4398 VAULT_COPY="$COPY" SETTINGS_DIR="$CONF" node test/ui-smoke.mjs

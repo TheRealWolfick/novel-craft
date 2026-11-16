@@ -1002,6 +1002,7 @@ if (process.env.SETTINGS_DIR) {
 {
     const doc = w.document;
     const send = (method, p, body) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: body && JSON.stringify(body) });
+    await send("POST", "/api/ai/settings", { auth: "key" });   // these tests use the API chat (the default is Claude Code)
     const st = await get("/api/ai/status");
     check(st.mock && st.ready && st.model === "claude-opus-5-5", "the assistant is ready in test mode with Opus 5.5 by default", JSON.stringify(st));
     // a chat turn streams JSON lines: text, a tool call with its result, the reply after it
@@ -1083,6 +1084,65 @@ if (process.env.SETTINGS_DIR) {
         fs.writeFileSync(`${COPY}/${written.notePath}`, bodyOf(written.notePath).replace("WB-EDIT " + find, find));
     }
     doc.querySelector(".drawer-tabs button[title^='Collapse']").click(); await wait(300);
+    // API chat conversations are saved and listed (History), and can be deleted
+    {
+        const saved = (await get("/api/ai/conversations")).conversations;
+        const one = saved.find((x) => x.title.startsWith("search: Mara"));
+        const shownC = one && await get(`/api/ai/conversation?id=${one.id}`);
+        check(!!one && shownC.display[0]?.text === "search: Mara" && shownC.display[1]?.parts?.some((p) => p.kind === "tool"), "API chat conversations are saved with what was shown, and listed", JSON.stringify(saved.slice(0, 3)));
+        check(fs.readdirSync(`${process.env.SETTINGS_DIR}/data/world-builder/conversations`).length === saved.length, "saved conversations live in the app's data folder");
+        await send("DELETE", `/api/ai/conversation?id=${one.id}`);
+        check(!(await get("/api/ai/conversations")).conversations.some((x) => x.id === one.id), "a conversation can be deleted from History");
+    }
+    // Claude Code: the terminal (here `cat`), its workspace, and World Builder's MCP server
+    if (process.env.SETTINGS_DIR) {
+        const ts = await get("/api/terminal/status");
+        const started = await (await send("POST", "/api/terminal/start", { cols: 90, rows: 20 })).json();
+        await send("POST", "/api/terminal/input", { data: "hello terminal\r" });
+        await wait(400);
+        const ctrl = new AbortController();
+        const sse = await realFetch(new URL("/api/terminal/stream", BASE), { signal: ctrl.signal });
+        const reader = sse.body.getReader(); let got = "";
+        for (let i = 0; i < 10 && !got.includes("hello terminal"); i++) {
+            const { value } = await Promise.race([reader.read(), wait(500).then(() => ({}))]);
+            if (value) got += new TextDecoder().decode(value).split("\n").filter((l) => l.startsWith("data: ")).map((l) => Buffer.from(l.slice(6), "base64").toString()).join("");
+        }
+        ctrl.abort();
+        check(started.running && got.includes("hello terminal"), "the terminal runs, takes keys and streams what it shows", got.slice(0, 200));
+        check((await send("POST", "/api/terminal/resize", { cols: 120, rows: 30 })).ok, "the terminal can be resized");
+        const ws = `${process.env.SETTINGS_DIR}/data/world-builder/claude-code`;
+        const cfg = JSON.parse(fs.readFileSync(`${ws}/.claude/settings.json`, "utf8"));
+        const mcpCfg = JSON.parse(fs.readFileSync(`${ws}/mcp.json`, "utf8"));
+        const token = mcpCfg.mcpServers["world-builder"].headers.Authorization.slice(7);
+        check(ts.workspace === ws && cfg.permissions.allow.includes("mcp__world-builder") && cfg.permissions.deny.includes(`Read(/${COPY}/**)`) && cfg.permissions.deny.includes(`Edit(/${COPY}/**)`) && cfg.permissions.deny.includes("Bash")
+            && /127\.0\.0\.1:\d+\/mcp$/.test(mcpCfg.mcpServers["world-builder"].url) && (fs.statSync(`${ws}/mcp.json`).mode & 0o777) === 0o600 && /Never read, search or edit the vault's files/.test(fs.readFileSync(`${ws}/CLAUDE.md`, "utf8")),
+            "the workspace allows World Builder's tools and refuses the vault's files and shell commands", JSON.stringify(cfg));
+        await send("POST", "/api/terminal/stop");
+        check(!(await get("/api/terminal/status")).running, "the session can be ended");
+        // the MCP server
+        const rpc = (body, headers = {}) => realFetch(new URL("/mcp", BASE), { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...headers }, body: JSON.stringify(body) });
+        const call = async (method, params, id = 1) => (await (await rpc({ jsonrpc: "2.0", id, method, params })).json()).result;
+        check((await realFetch(new URL("/mcp", BASE), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status === 401 && (await rpc({}, { origin: "https://example.com" })).status === 403,
+            "the MCP server needs the workspace's token and refuses web pages");
+        const init = await call("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } });
+        check(init.serverInfo.name === "world-builder" && init.protocolVersion === "2025-06-18" && /Never read, search or edit the vault's files/.test(init.instructions) && /propose_changes/.test(init.instructions), "MCP initialize gives the rules and the vault's conventions as instructions");
+        check((await rpc({ jsonrpc: "2.0", method: "notifications/initialized" })).status === 202, "MCP notifications are accepted");
+        const tl = (await call("tools/list")).tools;
+        check(["search", "read_chapter", "character_state", "propose_changes", "proposal_status", "current_view"].every((n) => tl.some((t) => t.name === n)) && tl.find((t) => t.name === "search").annotations.readOnlyHint, "MCP lists the tools, read-only ones marked so");
+        check((await call("prompts/list")).prompts.some((p) => p.name === "review-chapter") && /propose_changes/.test((await call("prompts/get", { name: "review-chapter", arguments: { novel: "X", chapter: "3" } })).messages[0].content.text), "MCP offers prompts (slash commands in Claude Code)");
+        const sr = await call("tools/call", { name: "read_note", arguments: { note: "90. Templater/Data Store Schema.md" } });
+        check(sr.isError && /outside the novels/.test(sr.content[0].text), "MCP tools keep to the novels and the data store");
+        await send("POST", "/api/ai/view", { view: { page: "Test page", selection: "picked words" } });
+        check(/picked words/.test((await call("tools/call", { name: "current_view", arguments: {} })).content[0].text), "current_view over MCP reports what the page shows");
+        const item2 = v.inFolder("80. Global Data Store/Items")[0];
+        const pr = await call("tools/call", { name: "propose_changes", arguments: { title: "MCP test", changes: [{ action: "edit_fields", note: item2.path, set: { description: "WB-MCP" } }] } });
+        const pid2 = /Proposal id: (\w+)/.exec(pr.content[0].text)?.[1];
+        check(!!pid2 && /waiting/.test((await call("tools/call", { name: "proposal_status", arguments: { id: pid2 } })).content[0].text), "a proposal over MCP waits for review");
+        const waiting = call("tools/call", { name: "proposal_status", arguments: { id: pid2, wait_seconds: 10 } });
+        await wait(300);
+        await send("POST", "/api/ai/proposal/reject", { id: pid2, which: "all" });
+        check(/1\. rejected[\s\S]*decided on every change/.test((await waiting).content[0].text) && !fs.readFileSync(`${COPY}/${item2.path}`, "utf8").includes("WB-MCP"), "proposal_status waits for the decision and reports it");
+    }
     // the API key: checked, kept owner-only in secrets.json, never sent back whole
     if (process.env.SETTINGS_DIR) {
         check((await send("POST", "/api/ai/settings", { apiKey: "not-a-key" })).status === 400, "something that isn't an API key is refused");

@@ -3,24 +3,40 @@ title: The AI assistant
 group: Tools
 kind: guide
 order: 2
-blurb: Ask Claude about your novels and worlds from the side drawer. It reads only what each question needs.
+blurb: Claude Code (with your own subscription) or the API, in the side drawer, reading only what each question needs and proposing changes for you to review.
 ---
 The assistant is Claude, in the side drawer's **AI** tab. Ask it what happened in a chapter, what a character carries at a given point, where a place sits in your world, or for ideas about what comes next.
 
 ## Connecting
 
-Open [Settings](app:#/settings?s=ai) and find **AI assistant**. There are two ways to connect:
+Open [Settings](app:#/settings?s=ai) and find **AI assistant**. There are three ways to connect:
 
-- **Sign in with Anthropic.** This uses Anthropic's `ant` command-line tool: the button opens your browser, you sign in to your Anthropic API account, and the app uses that sign-in from then on. Install `ant` first if the panel says it's missing.
+- **Claude Code (your subscription)**, the default. The AI tab runs your own Claude Code in a terminal, signed in with your own Claude plan, so it counts against your plan rather than API billing. Install Claude Code and sign in to it once (run `claude` in a terminal) first.
+- **Sign in with Anthropic (API).** Uses Anthropic's `ant` command-line tool: the button opens your browser, you sign in to your Anthropic API account, and the app uses that sign-in from then on.
 - **API key.** Create a key in the Claude Console and paste it in. The key stays on this computer, in a file only you can read, and the page never shows it again (only its last four characters).
 
-Either way, what the assistant does is billed to your Anthropic API account. **Test the connection** sends one tiny request to check everything works.
+The two API ways are billed to your Anthropic API account; they use the chat described under [Asking](docs:ai-assistant#asking), where **Model** and **Effort** choose which Claude answers and how hard it thinks, and **Test the connection** sends one tiny request to check everything works.
 
-**Model** picks which Claude answers (Opus 5.5 is the default; Sonnet and Haiku are faster and cheaper). **Effort** sets how hard it thinks before answering: Medium suits most questions, High suits chapter reviews and tricky continuity.
+## Claude Code in the AI tab
+
+Click the robot button at the top right, then **Start Claude Code** (after the first time it carries on with your last conversation by itself, also after restarting the app). The first time, Claude Code asks whether to trust its workspace folder; it lists the one permission the workspace gives it, World Builder's tools.
+
+What it can and can't do:
+
+- It works through World Builder's tools: search, novel overviews, chapters a page at a time, notes by section, collections, characters' ledgers at a chapter, world outlines, taxonomy, and what you have on screen. They reach your novels and the data store, nothing else.
+- It can't read or edit the vault's files directly, and can't run commands: its workspace refuses both. Every change goes through the review panel (see [Reviewing changes](docs:ai-assistant#reviewing-changes)), which opens beside it.
+- It runs in its own folder in the app's data, connected to World Builder and no other MCP servers, and ends when you quit the app.
+
+The bar above the terminal has Claude Code's own commands one click away: **Usage** (your plan's limits and how much is left), **Context**, **Compact**, **Model** and **Effort**. **History** lists your earlier conversations with their titles; pick one to carry on with it. **New** starts a fresh one, **End** closes Claude Code.
+
+Type `/world-builder` in it for ready-made prompts: summarise a chapter, review a chapter (with edits to review), brainstorm, draft a data store entry, check a character's continuity. Copy and paste with Ctrl+Shift+C and Ctrl+Shift+V.
+
+> [!note] Your sign-in stays with Claude Code
+> World Builder never sees or stores your Claude sign-in: it starts the `claude` you installed, unchanged, and only connects it to its tools. That's also why usage is shown by Claude Code itself.
 
 ## Asking
 
-Click the robot button at the top right to open the AI tab (click it again to close the drawer). Type a question and press Enter; Shift+Enter starts a new line, Escape stops a reply. **New** starts a fresh conversation.
+With an API connection, the AI tab is a chat. Click the robot button at the top right to open it (click it again to close the drawer). Type a question and press Enter; Shift+Enter starts a new line, Escape stops a reply. **New** starts a fresh conversation.
 
 Suggestions sit under the chat as buttons: openers that fit the page you're on when the conversation is empty, then follow-ups after each reply. Click one to send it.
 
@@ -28,7 +44,7 @@ While it works you see each step it takes ("Searched 'lantern' · 9 results", "R
 
 The assistant knows which page you're on, which chapter is in the writer and what the drawer shows. Select some text first and say "this" or "the selection" to ask about it.
 
-The running cost of the conversation (an estimate) shows at the top of the tab.
+The running cost of the conversation (an estimate) shows at the top of the tab. Conversations are saved in the app's data folder: the one you had open comes back when you reopen the app, **History** lists the others (pick one to carry on, or delete it), and **New** starts a fresh one.
 
 ## Reviewing changes
 

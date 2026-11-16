@@ -1048,3 +1048,20 @@ html.covered { overflow: hidden; }
 .change-fields { width: 100%; border-collapse: collapse; font-size: 13px; }
 .change-fields th, .change-fields td { text-align: left; vertical-align: top; padding: 4px 8px; border-bottom: 1px solid var(--line); word-break: break-word; }
 .change-fields th { width: 22%; color: var(--muted); font-weight: 500; }
+/* Claude Code terminal (public/terminal.js) */
+.ai-term { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ai-term .ai-head { flex-wrap: wrap; row-gap: 6px; }
+.term-commands { display: inline-flex; gap: 4px; flex-wrap: wrap; padding-right: 6px; margin-right: 2px; border-right: 1px solid var(--line); }
+.term-host { flex: 1; min-height: 0; padding: 8px 6px 6px 12px; background: var(--panel); }
+.term-host .xterm { height: 100%; }
+.term-host .xterm-viewport { background: transparent !important; }
+.term-start { position: absolute; inset: 44px 0 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; background: color-mix(in srgb, var(--bg) 92%, transparent); }
+.term-start > p:first-child { font-size: 16px; color: var(--text); margin: 0; }
+.term-start .muted { max-width: 560px; }
+.term-history { max-height: 45%; overflow-y: auto; border-bottom: 1px solid var(--line); background: var(--panel-2); padding: 6px; display: flex; flex-direction: column; gap: 4px; position: relative; z-index: 2; }
+.term-session { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; text-align: left; padding: 7px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; cursor: pointer; }
+.term-session:hover { background: var(--panel); border-color: var(--line); }
+.term-session.current { border-color: var(--accent); background: var(--panel); }
+.term-session-title { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-rules { margin: 6px 0 0; padding-left: 18px; }
+.ai-rules li { margin: 3px 0; }

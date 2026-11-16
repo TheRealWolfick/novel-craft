@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
 import { api, toast, Html, ConfirmButton, openInDrawer, openDrawerTab, useApi } from "./app.js";
 import { writerNow } from "./writer.js";
+import { ClaudeTerminal } from "./terminal.js";
 
 const html = htm.bind(h);
 
@@ -18,7 +19,7 @@ export const BotIcon = ({ size = 18 }) => html`<svg width=${size} height=${size}
 // ---------------------------------------------------------------- what is on screen
 
 /** A short description of the screen for the assistant: page, drawer page, writer chapter, selected text */
-function screenView() {
+export function screenView() {
     const head = (sel) => document.querySelector(sel)?.textContent?.trim().replace(/\s+/g, " ").slice(0, 140) || null;
     const route = decodeURIComponent(location.hash.replace(/^#\/?/, "")) || "home";
     const title = head(".content h1, main h1, .settings h1");
@@ -41,7 +42,25 @@ function screenView() {
 // the conversation lives at module level, so it survives the pane being hidden or the route changing
 let chat = { id: null, items: [], usage: null };
 const chatListeners = new Set();
-const setChat = (c) => { chat = c; chatListeners.forEach((f) => f(c)); };
+const setChat = (c) => {
+    chat = c; chatListeners.forEach((f) => f(c));
+    try { if (c.id) localStorage.setItem("aiConversation", c.id); else localStorage.removeItem("aiConversation"); } catch { /* private window */ }
+};
+/** Open a saved conversation (its replies rendered as markdown again) */
+async function loadConversation(id) {
+    const c = await api.get(`/api/ai/conversation?id=${encodeURIComponent(id)}`);
+    setChat({ id: c.id, items: c.display.map((it) => (it.role === "assistant" ? { ...it, streaming: false } : it)), usage: c.usage });
+    chat.items.forEach((it, i) => { if (it.role === "assistant") renderReply(i); });
+}
+// the conversation open when the app last closed comes back with it
+let restored = false;
+function restoreConversation() {
+    if (restored || chat.id) return;
+    restored = true;
+    let id = null;
+    try { id = localStorage.getItem("aiConversation"); } catch { /* none */ }
+    if (id) loadConversation(id).catch(() => { try { localStorage.removeItem("aiConversation"); } catch { /* none */ } });
+}
 
 /** The reply's text without its trailing <replies>[…]</replies> line (also while it streams in), and the replies */
 export function splitReplies(text) {
@@ -63,6 +82,16 @@ function starters(v) {
 const placeholderFor = (v, followUp) => (followUp ? "Reply, or ask a follow-up… (Enter sends)"
     : v.writer ? `Ask about ${v.writer.replace(/ of \d+\.\s*/, " of ")}… (Enter sends)` : "Ask about your novels and worlds… (Enter sends, Shift+Enter: new line)");
 
+/** "5 min ago", "yesterday", "12 Nov" */
+export function ago(t) {
+    const s = (Date.now() - t) / 1000;
+    if (s < 90) return "just now";
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+    if (s < 172800) return "yesterday";
+    return new Date(t).toLocaleDateString(undefined, { day: "numeric", month: "short", year: new Date(t).getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+}
+
 const TOOL_LABELS = { search: "Searching", novel_overview: "Reading the novel overview", read_chapter: "Reading a chapter", read_note: "Reading a note", query_collection: "Listing a collection", schema: "Reading the fields", character_state: "Checking ledgers", world_tree: "Reading the world outline", taxonomy: "Reading taxonomy values", current_view: "Looking at the screen", propose_changes: "Preparing changes for review" };
 const money = (n) => (n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
 
@@ -77,7 +106,18 @@ export function AiPane({ active }) {
     const list = useRef(null);
     const box = useRef(null);
     const stick = useRef(true);
-    useEffect(() => { if (active) api.get("/api/ai/status").then(setStatus).catch(() => setStatus({ ready: false })); }, [active]);
+    useEffect(() => { if (active) api.get("/api/ai/status").then((s) => { setStatus(s); if (s.auth !== "claude-code") restoreConversation(); }).catch(() => setStatus({ ready: false })); }, [active]);
+    const [history, setHistory] = useState(null);
+    const openHistory = async () => {
+        if (history) return setHistory(null);
+        try { setHistory((await api.get("/api/ai/conversations")).conversations); } catch (e) { toast(e.message); }
+    };
+    const pick = async (id) => { setHistory(null); try { await loadConversation(id); } catch (e) { toast(e.message); } };
+    const remove = async (id) => {
+        await api.send("DELETE", `/api/ai/conversation?id=${encodeURIComponent(id)}`).catch(() => { });
+        if (chat.id === id) setChat({ id: null, items: [], usage: null });
+        setHistory((h) => h?.filter((x) => x.id !== id));
+    };
     useEffect(() => { if (active) { box.current?.focus(); setView(screenView()); } }, [active]);
     useEffect(() => { const el = list.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [c]);
 
@@ -132,9 +172,10 @@ export function AiPane({ active }) {
         }
     };
     const stop = () => stopper.current?.abort();
+    // a new conversation; the old one stays in History
     const fresh = () => {
-        if (chat.id) api.send("DELETE", `/api/ai/conversation?id=${encodeURIComponent(chat.id)}`).catch(() => { });
         setChat({ id: null, items: [], usage: null });
+        setHistory(null);
         box.current?.focus();
     };
     const onKey = (e) => {
@@ -143,6 +184,7 @@ export function AiPane({ active }) {
     };
     const onScroll = () => { const el = list.current; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; };
 
+    if (status?.auth === "claude-code") return html`<${ClaudeTerminal} active=${active} />`;
     if (status && !status.ready) return html`<div class="drawer-body ai-pane"><div class="ai-setup">
         <${BotIcon} size=${40} />
         <h3>Connect the assistant</h3>
@@ -153,8 +195,16 @@ export function AiPane({ active }) {
             <span class="muted small">${status ? status.models.find((m) => m.id === status.model)?.label ?? status.model : ""}${status?.mock ? " (test mode)" : ""}</span>
             <span class="grow" />
             ${c.usage && html`<span class="muted small" title=${`${c.usage.input.toLocaleString()} tokens in, ${c.usage.cacheRead.toLocaleString()} from the cache, ${c.usage.output.toLocaleString()} out (estimate)`}>${money(c.usage.cost)}</span>`}
-            <button class="small" onClick=${fresh} disabled=${busy || !c.items.length} title="Start a new conversation">New</button>
+            <button class=${`small ${history ? "on" : ""}`} onClick=${openHistory} disabled=${busy} title="Earlier conversations">History</button>
+            <button class="small" onClick=${fresh} disabled=${busy || !c.items.length} title="Start a new conversation (this one stays in History)">New</button>
         </div>
+        ${history && html`<div class="term-history">
+            ${!history.length ? html`<p class="muted small">No saved conversations yet.</p>` : history.map((h) => html`<div key=${h.id} class=${`term-session ${c.id === h.id ? "current" : ""}`} role="button" tabIndex="0" onClick=${() => pick(h.id)} onKeyDown=${(e) => e.key === "Enter" && pick(h.id)}>
+                <span class="term-session-title">${h.title}</span>
+                <span class="row"><span class="muted small grow">${ago(h.updated)} · ${Math.ceil(h.messages / 2)} question${h.messages > 2 ? "s" : ""} · ${money(h.cost)}</span>
+                    <span onClick=${(e) => e.stopPropagation()}><${ConfirmButton} class="small" onConfirm=${() => remove(h.id)}>Delete</${ConfirmButton}></span></span>
+            </div>`)}
+        </div>`}
         <div class="ai-list" ref=${list} onScroll=${onScroll} data-drawer>
             ${!c.items.length && html`<div class="ai-empty muted">
                 <p>Ask about your novels and worlds: what happened in a chapter, who holds what, where a place is, ideas for what comes next. Ask it to create or change something and it prepares the changes for you to review first.</p>
@@ -221,14 +271,24 @@ export function AiSettingsPanel() {
     if (!s) return html`<div class="panel" id="ai-settings"><h3>AI assistant</h3>${error ? html`<p class="error">${error}</p>` : html`<p class="muted">Loading…</p>`}</div>`;
     return html`<div class="panel ai-settings" id="ai-settings">
         <h3><${BotIcon} /> AI assistant</h3>
-        <p class="muted">Claude answers questions about your novels and worlds in the side drawer's AI tab (the robot button at the top right). It reads only your novel folders and the data store, a little at a time, and can't change anything.</p>
+        <p class="muted">Claude helps with your novels and worlds in the side drawer's AI tab (the robot button at the top right). It reads only your novel folders and the data store, a little at a time, and every change it proposes opens for your review before anything is written.</p>
         <div class="field"><label>Connect with</label>
-            <div class="seg" role="group">
-                <button class=${s.auth === "signin" ? "on" : ""} onClick=${() => save({ auth: "signin" })}>Sign in with Anthropic</button>
+            <div class="seg wrap" role="group">
+                <button class=${s.auth === "claude-code" ? "on" : ""} onClick=${() => save({ auth: "claude-code" })}>Claude Code (your subscription)</button>
+                <button class=${s.auth === "signin" ? "on" : ""} onClick=${() => save({ auth: "signin" })}>Sign in with Anthropic (API)</button>
                 <button class=${s.auth === "key" ? "on" : ""} onClick=${() => save({ auth: "key" })}>API key</button>
             </div>
         </div>
-        ${s.auth === "signin" ? html`<div class="ai-signin">
+        ${s.auth === "claude-code" ? html`<div class="ai-cc">
+            ${s.claude ? html`<p>Claude Code found: <code>${s.claude}</code></p>` : html`<p class="error">Claude Code isn't installed (no <code>claude</code> command found). Install it from <a href="https://code.claude.com/docs" target="_blank" rel="noopener">Anthropic's Claude Code docs</a> and sign in once by running <code>claude</code> in a terminal.</p>`}
+            <p class="muted small">The AI tab runs your own Claude Code in a terminal, signed in with your own Claude subscription (or however you have set Claude Code up), so its use counts against your plan rather than API billing. World Builder only connects it to its tools; your sign-in stays with Claude Code.</p>
+            <ul class="muted small ai-rules">
+                <li>It runs in its own workspace folder, <code>${s.workspace}</code>, connected to World Builder's tools and no other MCP servers.</li>
+                <li>Allowed without asking: World Builder's tools (search, overviews, chapters, notes, collections, ledgers, worlds, taxonomy, what is on screen, proposing changes).</li>
+                <li>Refused: reading or editing the vault's files directly, and shell commands. Changes go through the review panel, where you apply or reject each one.</li>
+                <li>Type <code>/world-builder</code> in it for ready-made prompts: summarise or review a chapter, brainstorm, draft an entry, check continuity. Model and effort are Claude Code's own (<code>/model</code>, <code>/effort</code>).</li>
+            </ul>
+        </div>` : s.auth === "signin" ? html`<div class="ai-signin">
             ${s.ant ? html`
                 <p class="muted small">Signs in through Anthropic's <code>ant</code> tool in your browser, then uses that sign-in. Usage is billed to the Anthropic API account you choose.</p>
                 ${s.antStatus && html`<pre class="ai-status">${s.antStatus}</pre>`}
@@ -247,7 +307,7 @@ export function AiSettingsPanel() {
             </div>
             <p class="muted small">Create a key in the Claude Console (console.anthropic.com → API keys). It is kept on this computer only, in <code>${s.secretsFile}</code> (readable by you alone), and never shown to the page again.</p>
         </div>`}
-        <div class="field"><label>Model</label>
+        ${s.auth !== "claude-code" && html`<div class="field"><label>Model</label>
             <div class="seg wrap" role="group">${s.models.map((m) => html`<button class=${s.model === m.id ? "on" : ""} title=${m.note} onClick=${() => save({ model: m.id })}>${m.label}</button>`)}</div>
             <p class="muted small">${s.models.find((m) => m.id === s.model)?.note}</p>
         </div>
@@ -258,7 +318,7 @@ export function AiSettingsPanel() {
         <div class="row">
             <button disabled=${!s.ready || test?.busy} onClick=${runTest}>${test?.busy ? "Testing…" : "Test the connection"}</button>
             ${test && !test.busy && (test.ok ? html`<span class="ok">Connected (${test.model})</span>` : html`<span class="error">${test.error}</span>`)}
-        </div>
+        </div>`}
         ${error && html`<p class="error">${error}</p>`}
     </div>`;
 }

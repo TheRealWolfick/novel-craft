@@ -2,6 +2,7 @@
 // Usage: node server.js [--vault <path>] [--port 4321] [--host 127.0.0.1]
 import http from "node:http";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -24,6 +25,8 @@ import { Importer } from "./lib/importer.js";
 import { Docs } from "./lib/docs.js";
 import { Assets } from "./lib/assets.js";
 import { Assistant } from "./lib/ai.js";
+import { McpServer } from "./lib/mcp.js";
+import { Terminal, findClaude, prepareWorkspace, workspaceDir, sessions } from "./lib/claude-code.js";
 import { WorldExport } from "./lib/worldexport.js";
 import { textureHash } from "./lib/assets.js";
 import { TEXTURES } from "./public/map-core.js";
@@ -50,6 +53,13 @@ const VAULT_SOURCES = [["--vault", arg("vault")], ["settings", readSettings().va
 const startSource = VAULT_SOURCES.find(([, v]) => v);
 // the AI assistant: its tools read the open vault's services
 const assistant = new Assistant({ settingsFile: SETTINGS_FILE, readSettings, writeSettings, ctx: () => ({ vault, novels, store, plans, worlds, search, stats }) });
+// Claude Code: World Builder's MCP server, and the terminal it runs in (the AI tab); proposals it makes open in the app
+const mcp = new McpServer(assistant, { onProposal: (p) => { const msg = `event: proposal\ndata: ${JSON.stringify(p)}\n\n`; for (const res of clients) res.write(msg); } });
+const terminal = new Terminal();
+// Claude Code ends with the app (quitting, Ctrl+C, a service stop), never left running on its own
+process.on("exit", () => terminal.stop());
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.once(sig, () => { terminal.stop(); setTimeout(() => process.exit(0), 200); });
+let listenPort = null;
 const isFolder = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
 let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, search, importer, assets, exporter;
@@ -90,6 +100,7 @@ const STATIC = {
     "/outline.js": ["public/outline.js", "text/javascript"],
     "/blocks.js": ["public/blocks.js", "text/javascript"],
     "/ai.js": ["public/ai.js", "text/javascript"],
+    "/terminal.js": ["public/terminal.js", "text/javascript"],
     "/sections.js": ["public/sections.js", "text/javascript"],
     "/callout-style.js": ["public/callout-style.js", "text/javascript"],
     "/callout-designer.js": ["public/callout-designer.js", "text/javascript"],
@@ -106,6 +117,9 @@ const STATIC = {
     "/vendor/preact.mjs": ["node_modules/preact/dist/preact.mjs", "text/javascript"],
     "/vendor/hooks.mjs": ["node_modules/preact/hooks/dist/hooks.mjs", "text/javascript"],
     "/vendor/htm.mjs": ["node_modules/htm/dist/htm.module.js", "text/javascript"],
+    "/vendor/xterm.mjs": ["node_modules/@xterm/xterm/lib/xterm.mjs", "text/javascript"],
+    "/vendor/addon-fit.mjs": ["node_modules/@xterm/addon-fit/lib/addon-fit.mjs", "text/javascript"],
+    "/vendor/xterm.css": ["node_modules/@xterm/xterm/css/xterm.css", "text/css"],
 };
 const FILE_TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", avif: "image/avif", pdf: "application/pdf" };
 
@@ -140,7 +154,7 @@ function entryOut(novel, ledger, e, placed) {
 }
 
 // routes that work without a vault
-const SETUP_ROUTES = new Set(["GET /api/settings", "POST /api/settings", "GET /api/settings/folders", "POST /api/settings/appearance", "GET /api/docs", "GET /api/docs/page", "GET /api/docs/search", "GET /api/ai/status", "POST /api/ai/settings", "POST /api/ai/signin", "POST /api/ai/signout", "POST /api/ai/test"]);
+const SETUP_ROUTES = new Set(["GET /api/settings", "POST /api/settings", "GET /api/settings/folders", "POST /api/settings/appearance", "GET /api/docs", "GET /api/docs/page", "GET /api/docs/search", "GET /api/ai/status", "POST /api/ai/settings", "POST /api/ai/signin", "POST /api/ai/signout", "POST /api/ai/test", "GET /api/terminal/status"]);
 const routes = {
     // AI assistant: connection (Settings), forgetting a conversation; the chat itself streams (see the server below)
     "GET /api/ai/status": () => assistant.status(),
@@ -148,7 +162,28 @@ const routes = {
     "POST /api/ai/signin": () => assistant.signIn(),
     "POST /api/ai/signout": () => assistant.signOut(),
     "POST /api/ai/test": () => assistant.test(),
+    // what the page shows, for current_view (Claude Code asks through the MCP server)
+    "POST /api/ai/view": async ({ req }) => { const b = await json(req); assistant.view = b.view && typeof b.view === "object" ? { ...b.view, at: Date.now() } : null; return { ok: true }; },
+    // the terminal: Claude Code (the user's own `claude`) in a workspace connected to the MCP server
+    "GET /api/terminal/status": () => ({ claude: findClaude(), running: terminal.running, exit: terminal.exit, workspace: workspaceDir(), session: terminal.session ?? null, sessions: sessions() }),
+    // Claude Code's earlier conversations in the workspace (History in the AI tab)
+    "GET /api/terminal/sessions": () => ({ sessions: sessions(), running: terminal.running }),
+    "POST /api/terminal/start": async ({ req }) => {
+        const b = await json(req);
+        const claude = findClaude();
+        if (!claude && !process.env.WB_TERMINAL_CMD) throw fail(400, "Claude Code isn't installed (no claude command found)");
+        const cwd = await prepareWorkspace({ url: `http://127.0.0.1:${listenPort}/mcp`, token: await assistant.mcpToken(), vaultRoot: vault.root, outline: assistant.tools.outline() });
+        if (b.restart) await terminal.stop();   // switching conversations: end the one that runs
+        terminal.start({ claude, cwd, cols: b.cols, rows: b.rows, resume: b.resume ?? false });
+        return { running: terminal.running };
+    },
+    "POST /api/terminal/input": async ({ req }) => { terminal.write((await json(req)).data ?? ""); return { ok: true }; },
+    "POST /api/terminal/resize": async ({ req }) => { const b = await json(req); terminal.resize(b.cols, b.rows); return { ok: true }; },
+    "POST /api/terminal/stop": async () => { await terminal.stop(); return { ok: true }; },
     "DELETE /api/ai/conversation": ({ q }) => assistant.forget(q.get("id")),
+    // saved API chat conversations (History in the AI tab)
+    "GET /api/ai/conversations": async () => ({ conversations: await assistant.list() }),
+    "GET /api/ai/conversation": ({ q }) => assistant.shown(need(q.get("id"), "id")),
     // proposals: reviewed in the drawer, applied or rejected one by one ("which": an index) or all at once ("all")
     "GET /api/ai/proposal": ({ q }) => assistant.proposals.get(need(q.get("id"), "id")),
     "POST /api/ai/proposal/apply": async ({ req }) => { const b = await json(req); return assistant.proposals.apply(need(b.id, "id"), b.which ?? "all"); },
@@ -574,6 +609,41 @@ async function serveStamp(req, res, pathname) {
     fs.createReadStream(abs).pipe(res);
 }
 
+/**
+ * The MCP endpoint (Streamable HTTP, JSON responses). Only Claude Code's workspace has the token; requests from web
+ * pages (an Origin header) are refused, so a site in a browser can't reach the vault through it.
+ */
+async function mcpRequest(req, res) {
+    if (req.headers.origin) return send(res, 403, { error: "Not for web pages" });
+    const token = assistant.secrets().mcpToken;
+    if (!token || req.headers.authorization !== `Bearer ${token}`) return send(res, 401, { error: "Missing or wrong token" });
+    if (req.method === "GET") { res.writeHead(405, { allow: "POST, DELETE" }); return res.end(); }
+    if (req.method === "DELETE") { res.writeHead(200); return res.end(); }
+    if (req.method !== "POST") { res.writeHead(405); return res.end(); }
+    if (!String(req.headers["content-type"] ?? "").includes("application/json")) return send(res, 415, { error: "JSON only" });
+    let body;
+    try { body = await json(req); } catch { return send(res, 400, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }); }
+    const session = req.headers["mcp-session-id"] || null;
+    const one = (m) => mcp.handle(m, session);
+    const out = Array.isArray(body) ? (await Promise.all(body.map(one))).filter(Boolean) : await one(body);
+    const headers = { "content-type": "application/json" };
+    if (!Array.isArray(body) && body?.method === "initialize") headers["mcp-session-id"] = crypto.randomUUID();
+    if (out == null || (Array.isArray(out) && !out.length)) { res.writeHead(202, headers); return res.end(); }
+    res.writeHead(200, headers);
+    res.end(JSON.stringify(out));
+}
+
+/** The terminal's output as server-sent events (base64): what was shown so far, then everything new, then its exit */
+function terminalStream(req, res) {
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+    const backlog = terminal.backlog();
+    res.write(`event: hello\ndata: ${JSON.stringify({ running: terminal.running, exit: terminal.exit })}\n\n`);
+    if (backlog.length) res.write(`data: ${backlog.toString("base64")}\n\n`);
+    const f = (ev) => res.write(ev.data ? `data: ${ev.data.toString("base64")}\n\n` : `event: exit\ndata: ${JSON.stringify(ev.exit)}\n\n`);
+    terminal.listeners.add(f);
+    req.on("close", () => terminal.listeners.delete(f));
+}
+
 /** One chat turn, streamed as JSON lines ({t: "text", d} …); closing the request stops it */
 async function aiChat(req, res) {
     if (!vault) return send(res, 503, { error: "No vault folder chosen yet: open Settings", setup: true });
@@ -605,6 +675,8 @@ const server = http.createServer(async (req, res) => {
             return send(res, 200, await fsp.readFile(path.join(HERE, file)), type);
         }
         if (req.method === "POST" && url.pathname === "/api/ai/chat") return await aiChat(req, res);
+        if (url.pathname === "/mcp") return await mcpRequest(req, res);
+        if (req.method === "GET" && url.pathname === "/api/terminal/stream") return terminalStream(req, res);
         const route = routes[`${req.method} ${url.pathname}`];
         if (!route) return send(res, 404, { error: "Not found" });
         if (!vault && !SETUP_ROUTES.has(`${req.method} ${url.pathname}`)) return send(res, 503, { error: "No vault folder chosen yet: open Settings", setup: true });
@@ -638,6 +710,7 @@ export async function start({ port = PORT, host = HOST, fallback = false } = {})
     // free one when that port is busy
     try { await listen(port); } catch (e) { if (!fallback || e.code !== "EADDRINUSE") throw e; await listen(0); }
     const actual = server.address().port;
+    listenPort = actual;
     console.log(`World Builder: http://${host === "0.0.0.0" ? "localhost" : host}:${actual}  (${vault ? `vault: ${vault.root}, ${vault.notes.size} notes` : "no vault yet: open Settings"})`);
     return { port: actual, server };
 }
