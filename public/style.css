@@ -983,3 +983,5 @@ kbd { font: 500 11.5px var(--mono); padding: 1px 6px; border: 1px solid var(--li
 .appearance-range { display: flex; gap: 10px; align-items: center; }
 .appearance-range input[type="range"] { flex: 1; max-width: 320px; padding: 0; }
 .appearance-preview { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.appearance-stepper button[aria-label] { width: 34px; height: 30px; padding: 0; font-size: 17px; line-height: 1; }
+.stepper-value { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }

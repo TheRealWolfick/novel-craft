@@ -16,7 +16,7 @@ blurb: The app's colour, fonts and text sizes on this device, and the vault fold
 | App colour | Buttons, selections and highlights wherever no novel colours the page. A novel's own colour (set on its page) wins inside it. |
 | Interface font | Menus, tables, forms |
 | Reading and writing font | Chapter text in the writer, notes, docs |
-| Interface size | Zooms the whole app (80–140%) |
+| Interface size | Zooms the whole app, 80–140%, with the − and + buttons |
 | Chapter text size | The writer and its preview |
 | Notes and docs text size | Note bodies and these docs |
 

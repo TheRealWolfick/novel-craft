@@ -3042,6 +3042,16 @@ function AppearancePanel({ saved }) {
     const range = (k, min, max, step, def, fmt) => html`<div class="appearance-range">
         <input type="range" min=${min} max=${max} step=${step} value=${a[k] ?? def} onInput=${(e) => change({ [k]: Number(e.target.value) })} aria-label=${k} />
         <span>${fmt(a[k] ?? def)}</span>${a[k] != null && a[k] !== def ? html`<button class="small" onClick=${() => change({ [k]: null })}>Default</button>` : ""}</div>`;
+    // buttons, not a slider: zooming the window moved a slider away from the pointer mid-drag
+    const stepper = (k, min, max, step, def, fmt) => {
+        const v = a[k] ?? def;
+        const to = (x) => change({ [k]: Math.round(Math.min(max, Math.max(min, x)) * 100) / 100 });
+        return html`<div class="appearance-range appearance-stepper">
+            <button type="button" aria-label="Smaller" title="Smaller" disabled=${v <= min} onClick=${() => to(v - step)}>−</button>
+            <span class="stepper-value">${fmt(v)}</span>
+            <button type="button" aria-label="Larger" title="Larger" disabled=${v >= max} onClick=${() => to(v + step)}>+</button>
+            ${a[k] != null && a[k] !== def ? html`<button class="small" onClick=${() => change({ [k]: null })}>Default</button>` : ""}</div>`;
+    };
     return html`<div class="panel">
         <h3>Appearance <span class="muted" style="font-weight:400;font-size:13px">on this device</span></h3>
         <div class="appearance-grid">
@@ -3055,7 +3065,7 @@ function AppearancePanel({ saved }) {
             <select value=${a.uiFont ?? "system"} onChange=${(e) => change({ uiFont: e.target.value === "system" ? null : e.target.value })}>${Object.entries(UI_FONTS).map(([k, [l]]) => html`<option value=${k}>${l}</option>`)}</select>
             <label>Reading and writing font</label>
             <select value=${a.readFont ?? "serif"} onChange=${(e) => change({ readFont: e.target.value === "serif" ? null : e.target.value })}>${Object.entries(READ_FONTS).map(([k, [l]]) => html`<option value=${k}>${l}</option>`)}</select>
-            <label>Interface size</label>${range("uiScale", 0.8, 1.4, 0.05, 1, (v) => `${Math.round(v * 100)}%`)}
+            <label>Interface size</label>${stepper("uiScale", 0.8, 1.4, 0.1, 1, (v) => `${Math.round(v * 100)}%`)}
             <label>Chapter text size</label>${range("writerSize", 13, 28, 1, 18, (v) => `${v}px`)}
             <label>Notes and docs text size</label>${range("readSize", 12, 22, 0.5, 15, (v) => `${v}px`)}
         </div>

@@ -979,10 +979,12 @@ if (process.env.SETTINGS_DIR) {
     sw.click(); await wait(100);
     const size = [...doc.querySelectorAll(".appearance-range input")].find((i) => i.getAttribute("aria-label") === "writerSize");
     size.value = "21"; size.dispatchEvent(new w.Event("input", { bubbles: true }));
+    doc.querySelector(".appearance-stepper button[aria-label='Larger']").click();
     await wait(800);
+    const zoomed = doc.querySelector(".appearance-stepper .stepper-value").textContent;
     const st = doc.documentElement.style;
     const saved = JSON.parse(fs.readFileSync(`${process.env.SETTINGS_DIR}/books-meta-viewer/settings.json`, "utf8"));
-    check(st.getPropertyValue("--app-accent").startsWith("#") && st.getPropertyValue("--writer-size") === "21px" && saved.appearance?.accent === "#2f6fb0" && saved.appearance?.writerSize === 21,
+    check(st.getPropertyValue("--app-accent").startsWith("#") && st.getPropertyValue("--writer-size") === "21px" && saved.appearance?.accent === "#2f6fb0" && saved.appearance?.writerSize === 21 && zoomed === "110%" && saved.appearance?.uiScale === 1.1,
         "appearance changes show at once and are saved in settings.json", JSON.stringify(saved.appearance));
     [...doc.querySelectorAll(".appearance-range button")].forEach((b) => b.click());
     [...doc.querySelectorAll(".accent-swatches button")][0].click(); await wait(600);
