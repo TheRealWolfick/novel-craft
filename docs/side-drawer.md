@@ -18,6 +18,8 @@ The drawer slides in from the right. Closed, it leaves a button per tab on the r
 
 <kbd>Ctrl</kbd>+<kbd>]</kbd> opens and closes it; <kbd>Escape</kbd> or a click beside it closes it. Closing never loses unsaved edits.
 
+Beside the [writer](docs:writing-a-chapter) the two share the window half and half; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> move the split and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\\</kbd> resets it.
+
 ## Lookup
 
 Type to search names, fields and the text of chapters. Results are grouped by kind with counts; **Only <novel>** limits notes inside novel folders to the one you're in. Opening a result shows it in the Viewer and keeps it under **Recently opened**. Chapter results have **✎ Write**.

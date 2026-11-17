@@ -706,6 +706,14 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
                 pg.focus(); fire(pg, "keydown", { key: "Escape" }); await wait(100);
             }
         }
+        // the writer remembers where it was scrolled to (per chapter, in localStorage scrollPlaces)
+        {
+            const wb = doc.querySelector(".writer .writer-body");
+            wb.scrollTop = 120; wb.dispatchEvent(new w.Event("scroll"));
+            await wait(400);
+            const places = JSON.parse(w.localStorage.getItem("scrollPlaces") ?? "{}");
+            check(Object.keys(places).some((k) => k.startsWith("writer:") && places[k].top === wb.scrollTop), "the writer saves where the chapter was scrolled to", JSON.stringify(places));
+        }
         // find in the chapter: counts matches and steps through them
         const findBox = doc.querySelector(".writer-find input");
         findBox.value = "Smoke writer"; fire(findBox, "input");

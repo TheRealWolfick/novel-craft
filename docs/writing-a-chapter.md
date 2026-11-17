@@ -4,7 +4,7 @@ group: Writing
 kind: guide
 order: 1
 blurb: 'The writer on the left, the plan and ledger entries on the right: formatting,
-  scene breaks, find and saving.'
+  moving around, selecting blocks, scene breaks, find and saving.'
 ---
 The writer opens a chapter note on the left of the window while the chapter's plan and ledger entries stay on the right, in the side drawer.
 
@@ -16,7 +16,7 @@ The writer opens a chapter note on the left of the window while the chapter's pl
 
 ![The writer beside chapter 1's plan](img/writer.png)
 
-The right drawer keeps its width; the writer takes the rest of the window, with the text in a readable column.
+With both open, the writer and the drawer share the window half and half. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> and <kbd>]</kbd> move the split left and right (between a quarter and three quarters), <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\\</kbd> puts it back in the middle; the split is remembered. The text sits in a column centred in the writer; its widest is set under **Column width** in [Settings](docs:settings-and-appearance#chapter-text).
 
 ## Fields on top
 
@@ -24,7 +24,7 @@ The right drawer keeps its width; the writer takes the rest of the window, with 
 
 ## Writing in blocks
 
-Each paragraph, heading, list item and callout is a block. Blocks show formatted until you click one; then that block shows its markdown and the cursor lands where you clicked. <kbd>Escape</kbd> shows it formatted again.
+Each paragraph, heading, list item and callout is a block. Blocks show formatted until you click one; then that block shows its markdown and the cursor lands where you clicked.
 
 - <kbd>Enter</kbd> starts a new paragraph, <kbd>Shift</kbd>+<kbd>Enter</kbd> breaks the line inside it.
 - Typing `# `, `- `, `1. `, `> ` or `- [ ] ` at the start of a paragraph turns it into a heading, list item, quote or task.
@@ -32,7 +32,26 @@ Each paragraph, heading, list item and callout is a block. Blocks show formatted
 - <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> moves a block.
 - <kbd>Ctrl</kbd>+<kbd>B</kbd>, <kbd>I</kbd>, <kbd>K</kbd> toggle bold, italic and a `[[link]]`; with no selection they take the word at the cursor.
 
-Paragraphs are justified with an indented first line, like the vault's chapter style. The size and font are on the [Settings](docs:settings-and-appearance) page. Every shortcut is in [Keyboard shortcuts](ref:keyboard-shortcuts).
+Paragraphs are justified with an indented first line, like the vault's chapter style. Text size, paragraph spacing, column width and a colour for speech in quotes are under [Chapter text](docs:settings-and-appearance#chapter-text) in Settings. Every shortcut is in [Keyboard shortcuts](ref:keyboard-shortcuts).
+
+## Moving around
+
+While you edit a block the arrow keys move through its text. On its first or last line <kbd>↑</kbd> / <kbd>↓</kbd> carry on into the block above or below, at the same place across the line; <kbd>←</kbd> / <kbd>→</kbd> do the same at its start and end. So you can walk through the whole chapter without the page scrolling away from the cursor.
+
+## Selecting blocks
+
+<kbd>Escape</kbd> stops editing and selects the block, shaded in the novel's colour. Now the arrows move by block instead of by line:
+
+- <kbd>↑</kbd> / <kbd>↓</kbd> select the block above or below; with <kbd>Shift</kbd> (or <kbd>Shift</kbd>+click) the selection grows. <kbd>Ctrl</kbd>+<kbd>A</kbd> selects them all.
+- <kbd>Enter</kbd> or <kbd>Space</kbd> edits the selected block.
+- <kbd>Shift</kbd>+<kbd>Enter</kbd> adds an empty paragraph after the selection and puts the cursor in it (press it again for a line break inside it).
+- <kbd>Backspace</kbd> turns the selection red; press it again to delete the blocks. Any other key cancels.
+- <kbd>Ctrl</kbd>+<kbd>B</kbd>, <kbd>I</kbd> and the other formatting keys format every selected block; if all of them have it already, it comes off.
+- <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> copy or cut the blocks as markdown, <kbd>Ctrl</kbd>+<kbd>V</kbd> pastes after them, <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> move them.
+
+<kbd>Escape</kbd> again, or a click on any text, leaves block navigation. While editing, <kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> with the selection already at the block's start or end selects this block and the next, so a selection can reach across paragraphs.
+
+> [!tip] Note blocks and the scratchpad use the same editor, so this works there too.
 
 ## Scene breaks, callouts and images
 

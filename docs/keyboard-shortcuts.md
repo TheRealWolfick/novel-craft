@@ -11,6 +11,8 @@ blurb: Every keyboard shortcut in the app, in one table.
 | --- | --- |
 | <kbd>Ctrl</kbd>+<kbd>[</kbd> | Open or close the writer |
 | <kbd>Ctrl</kbd>+<kbd>]</kbd> | Open or close the side drawer |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> | Move the split between the writer and the drawer left / right (both open) |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\\</kbd> | Put the split back in the middle |
 | <kbd>Escape</kbd> | Close the drawer |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the form or note you're editing |
 | <kbd>/</kbd> | Search the docs (on a docs page) |
@@ -29,9 +31,30 @@ blurb: Every keyboard shortcut in the app, in one table.
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Undo / redo |
 | <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | Indent / outdent a list item |
 | <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> | Move a block |
-| <kbd>Escape</kbd> | Show the block formatted again |
+| <kbd>↑</kbd> / <kbd>↓</kbd> | Move by line; on a block's first / last line, on into the previous / next block |
+| <kbd>←</kbd> / <kbd>→</kbd> | At a block's start / end, on into the previous / next block |
+| <kbd>Escape</kbd> | Stop editing and select the block (block navigation) |
+| <kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> | With the selection at the block's start / end: select this block and the next |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Find in the chapter |
 | <kbd>Ctrl</kbd>+<kbd>E</kbd> | Preview |
+
+## Writer: selected blocks
+
+After <kbd>Escape</kbd> (or <kbd>Shift</kbd>+click on a block) whole blocks are selected and the arrows move by block.
+
+| Keys | Does |
+| --- | --- |
+| <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Home</kbd> / <kbd>End</kbd> | Select the previous / next, first / last block |
+| <kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Shift</kbd>+click | Select more blocks |
+| <kbd>Ctrl</kbd>+<kbd>A</kbd> | Select every block |
+| <kbd>Enter</kbd> / <kbd>Space</kbd> | Edit the block |
+| <kbd>Shift</kbd>+<kbd>Enter</kbd> | New paragraph after the selection, ready to type in |
+| <kbd>Backspace</kbd> / <kbd>Delete</kbd> twice | Delete the selected blocks |
+| <kbd>Ctrl</kbd>+<kbd>B</kbd> / <kbd>I</kbd> / <kbd>K</kbd>… | Format every selected block |
+| <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd> | Copy / cut the blocks, paste after them |
+| <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> | Move the selected blocks |
+| <kbd>Ctrl</kbd>+<kbd>Z</kbd> | Undo |
+| <kbd>Escape</kbd> | Leave block navigation |
 
 ## Plan outlines
 

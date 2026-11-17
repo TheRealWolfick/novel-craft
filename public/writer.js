@@ -4,7 +4,7 @@ import { h } from "preact";
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "preact/hooks";
 import htm from "htm";
 import { parseBlocks, serializeBlocks, blockMarkdown, newBlock, defaultSep, isList, isProse, wordCount, toggleWrap, IMAGE_ONLY, inlineHtml, markSpeech } from "./blocks.js";
-import { api, useApi, qs, toast, store, markDirty, confirmDiscard, Loading, openInDrawer, fieldInput, useNovelLinks, Html } from "./app.js";
+import { api, useApi, qs, toast, store, markDirty, confirmDiscard, Loading, openInDrawer, fieldInput, useNovelLinks, Html, useScrollMemory } from "./app.js";
 
 const html = htm.bind(h);
 const chapterHref = (folder, n) => `#/chapter/${encodeURIComponent(folder)}/${n}`;
@@ -75,6 +75,8 @@ function ChapterWriter({ folder, n, index }) {
     const findRef = useRef();
     const find = useFind(bodyRef);
     const c = data?.chapter;
+    // where you were in this chapter, also after a restart (the block at the top of the view, so a new width still fits)
+    useScrollMemory(bodyRef, `writer:${folder}:${n}`, { ready: !!c, rows: ".be-page > .be-row" });
     const fresh = !c || c.mtime >= saved.mtime;
     const fm = !c ? {} : fresh ? c.fm : { ...c.fm, ...saved.fm };
     const body = !c ? "" : fresh ? c.body : saved.body ?? c.body;

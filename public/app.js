@@ -82,6 +82,76 @@ const store = {
     set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
 };
 
+// ------------------------------------------------------------------ scroll memory
+
+// the page the app opened on (where you were when it closed): only its scroll position comes back by itself
+const START_HASH = location.hash;
+let leftStart = false;
+addEventListener("hashchange", () => { if (location.hash !== START_HASH) leftStart = true; });
+const onStartPage = () => !leftStart && location.hash === START_HASH;
+
+const SCROLL_KEY = "scrollPlaces", SCROLL_KEPT = 150;
+/**
+ * Remembers where a scrolling area was (localStorage scrollPlaces, by `key`) and goes back there when it shows again,
+ * also after the app restarts. `box` is a ref (or window) whose scrolling element `scroller(box)` finds (default: the box
+ * itself), looked up each time, so a scroller that is re-rendered still counts. With `rows` (a selector) the place is
+ * the row at the top of the view and how far into it, so it survives another width or text size; otherwise px.
+ * Content that arrives later is waited for (a few tries over 3 s); scrolling, clicking or typing there stops the tries.
+ * `restore: false` only saves.
+ */
+export function useScrollMemory(box, key, { ready = true, rows = null, scroller = null, restore = true } = {}) {
+    useLayoutEffect(() => {
+        const root = box === window ? window : box?.current;
+        if (!ready || !root || !key) return;
+        const find = () => (scroller ? scroller(root) : root === window ? document.scrollingElement : root);
+        const topOf = (el) => (el === document.scrollingElement ? 0 : el.getBoundingClientRect().top);
+        const p = restore ? store.get(SCROLL_KEY, {})[key] : null;
+        let moved = false, restoring = !!p, timer = null;
+        const apply = () => {
+            const el = find();
+            if (moved || !p || !el) return;
+            const row = rows && p.block != null ? el.querySelectorAll(rows)[p.block] : null;
+            el.scrollTop = row ? el.scrollTop + row.getBoundingClientRect().top - topOf(el) + p.off : p.top ?? 0;
+        };
+        const save = () => {
+            const el = find();
+            if (!el || el.closest?.("[hidden]")) return;   // a hidden tab: its scroll position means nothing now
+            let block = null, off = 0;
+            if (rows) {
+                const top = topOf(el), all = el.querySelectorAll(rows);
+                for (let k = 0; k < all.length; k++) {
+                    const r = all[k].getBoundingClientRect();
+                    if (r.bottom > top) { block = k; off = Math.round(top - r.top); break; }
+                }
+            }
+            const places = store.get(SCROLL_KEY, {});
+            places[key] = { top: Math.round(el.scrollTop), block, off, at: Date.now() };
+            const keys = Object.keys(places);
+            if (keys.length > SCROLL_KEPT) keys.sort((x, y) => (places[x].at ?? 0) - (places[y].at ?? 0)).slice(0, keys.length - SCROLL_KEPT).forEach((k) => delete places[k]);
+            store.set(SCROLL_KEY, places);
+        };
+        const onScroll = (e) => {
+            const el = find();
+            if (!el || (e.target !== el && !(e.target === document && el === document.scrollingElement))) return;
+            if (restoring && !moved) return;   // our own scrolling while the content is still arriving
+            clearTimeout(timer);
+            timer = setTimeout(save, 250);
+        };
+        const mine = () => { moved = true; restoring = false; };
+        const INPUT = ["wheel", "pointerdown", "keydown", "touchstart"];
+        root.addEventListener("scroll", onScroll, { capture: true, passive: true });
+        for (const ev of INPUT) root.addEventListener(ev, mine, { passive: true });
+        apply();
+        const tries = [100, 300, 700, 1500, 3000].map((ms, k, all) => setTimeout(() => { apply(); if (k === all.length - 1) restoring = false; }, ms));
+        return () => {
+            tries.forEach(clearTimeout);
+            clearTimeout(timer);
+            root.removeEventListener("scroll", onScroll, { capture: true });
+            for (const ev of INPUT) root.removeEventListener(ev, mine);
+        };
+    }, [ready, key, restore]);
+}
+
 // ------------------------------------------------------------------ theme: light / dark / system, novel accents
 
 const THEMES = [["system", "System"], ["light", "Light"], ["dark", "Dark"]];
@@ -330,6 +400,14 @@ function Drawer({ index, novel }) {
     // panes stay mounted once shown, so a half-typed search or unsaved edits survive switching tabs
     const [seen, setSeen] = useState(() => new Set([tab]));
     useEffect(() => { if (!seen.has(tab)) setSeen(new Set([...seen, tab])); }, [tab]);
+    // each tab (and each page in the viewer) keeps where it was scrolled to, also after a restart
+    const panes = { viewer: useRef(), lookup: useRef(), datastore: useRef(), taxonomy: useRef(), novel: useRef() };
+    const body = (pane) => pane.querySelector(":scope > .drawer-body");
+    useScrollMemory(panes.viewer, d.recent[0] && `drawer:${d.recent[0]}`, { ready: tab === "viewer", scroller: body });
+    useScrollMemory(panes.lookup, "drawer:lookup", { ready: tab === "lookup" && seen.has("lookup"), scroller: body });
+    useScrollMemory(panes.datastore, "drawer:datastore", { ready: tab === "datastore" && seen.has("datastore"), scroller: body });
+    useScrollMemory(panes.taxonomy, "drawer:taxonomy", { ready: tab === "taxonomy" && seen.has("taxonomy"), scroller: body });
+    useScrollMemory(panes.novel, novel && `drawer:novel:${novel}`, { ready: tab === "novel" && seen.has("novel"), scroller: body });
     const tabs = DRAWER_TABS.filter(([k]) => (k !== "novel" || novel) && (k !== "ai" || d.ai));
     const label = (h) => drawerLabel(h, index);
     const href = d.recent[0];
@@ -344,11 +422,11 @@ function Drawer({ index, novel }) {
                 <span class="grow" />
                 <button class="small" title="Collapse (Ctrl+])" onClick=${collapseDrawer}>»</button>
             </div>
-            <div class="drawer-pane" hidden=${tab !== "viewer"}><${DrawerViewer} index=${index} d=${d} /></div>
-            ${seen.has("lookup") && html`<div class="drawer-pane" hidden=${tab !== "lookup"}><${Lookup} index=${index} novel=${novel} active=${tab === "lookup" && d.open} /></div>`}
-            ${seen.has("datastore") && html`<div class="drawer-pane" hidden=${tab !== "datastore"}><${BrowsePane} index=${index} taxonomy=${false} active=${tab === "datastore" && d.open} /></div>`}
-            ${seen.has("taxonomy") && html`<div class="drawer-pane" hidden=${tab !== "taxonomy"}><${BrowsePane} index=${index} taxonomy=${true} active=${tab === "taxonomy" && d.open} /></div>`}
-            ${novel && seen.has("novel") && html`<div class="drawer-pane" hidden=${tab !== "novel"}><${NovelDrawer} key=${novel} folder=${novel} index=${index} /></div>`}
+            <div class="drawer-pane" hidden=${tab !== "viewer"} ref=${panes.viewer}><${DrawerViewer} index=${index} d=${d} /></div>
+            ${seen.has("lookup") && html`<div class="drawer-pane" hidden=${tab !== "lookup"} ref=${panes.lookup}><${Lookup} index=${index} novel=${novel} active=${tab === "lookup" && d.open} /></div>`}
+            ${seen.has("datastore") && html`<div class="drawer-pane" hidden=${tab !== "datastore"} ref=${panes.datastore}><${BrowsePane} index=${index} taxonomy=${false} active=${tab === "datastore" && d.open} /></div>`}
+            ${seen.has("taxonomy") && html`<div class="drawer-pane" hidden=${tab !== "taxonomy"} ref=${panes.taxonomy}><${BrowsePane} index=${index} taxonomy=${true} active=${tab === "taxonomy" && d.open} /></div>`}
+            ${novel && seen.has("novel") && html`<div class="drawer-pane" hidden=${tab !== "novel"} ref=${panes.novel}><${NovelDrawer} key=${novel} folder=${novel} index=${index} /></div>`}
             ${d.ai && seen.has("ai") && html`<div class="drawer-pane" hidden=${tab !== "ai"}><${AiPane} active=${tab === "ai" && d.open} /></div>`}
         </aside>
     </div>`;
@@ -3244,6 +3322,7 @@ function App() {
     const writer = useWriter();
     // a new page collapses both drawers, but not the first one: that is where you were when the app closed
     const firstRoute = useRef(true);
+    useScrollMemory(window, `page:${location.hash}`, { restore: onStartPage() });
     useEffect(() => {
         try { localStorage.setItem("lastHash", location.hash); } catch { /* private window */ }
         if (firstRoute.current) { firstRoute.current = false; return; }
