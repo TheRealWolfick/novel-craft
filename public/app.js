@@ -7,7 +7,7 @@ import { MapEditor } from "./map-editor.js";
 import { WorldView, WorldOutline, MapAssetsView } from "./world.js";
 import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, BlockEditor } from "./writer.js";
 import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from "./sections.js";
-import { inlineHtml } from "./blocks.js";
+import { inlineHtml, setSpeechGroups } from "./blocks.js";
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
 import { ImportView } from "./importer.js";
 import { DocsView, DocArticle } from "./docs.js";
@@ -217,7 +217,9 @@ function themePair(hex) {
     return hexToOklab(hex)[0] < (PAGE_L.light + PAGE_L.dark) / 2 ? { light: hex, dark: inv } : { light: inv, dark: hex };
 }
 const SPEECH_KEYS = [["speechColor", "--speech"], ["speechItalic", "--speech-em"], ["speechBold", "--speech-strong"], ["speechBoldItalic", "--speech-strong-em"]];
-const CHAPTER_VARS = ["--writer-para", "--writer-col", ...SPEECH_KEYS.flatMap(([, v]) => [`${v}-light`, `${v}-dark`])];
+// your own groupings ([…], <<…>>): up to SPEECH_GROUPS, each its colour as --sg-<n> (light-dark() follows the theme)
+const SPEECH_GROUPS = 8;
+const CHAPTER_VARS = ["--writer-para", "--writer-col", ...SPEECH_KEYS.flatMap(([, v]) => [`${v}-light`, `${v}-dark`]), ...Array.from({ length: SPEECH_GROUPS }, (_, k) => `--sg-${k}`)];
 function applyAppearance(a = {}) {
     const vars = {};
     if (a.accent) { vars["--app-accent"] = readableAccent(a.accent, false); vars["--app-accent-dark"] = readableAccent(a.accent, true); }
@@ -229,6 +231,10 @@ function applyAppearance(a = {}) {
     if (a.writerWidth >= 400) vars["--writer-col"] = `${a.writerWidth}px`; // a maximum: the column never gets wider than the writer
     // speech colours: one per theme (style.css picks --speech from --speech-light or --speech-dark)
     if (a.speechColor) for (const [k, v] of SPEECH_KEYS) if (a[k]) { const p = themePair(a[k]); vars[`${v}-light`] = p.light; vars[`${v}-dark`] = p.dark; }
+    const groups = (a.speechGroups ?? []).slice(0, SPEECH_GROUPS);
+    groups.forEach((g, k) => { if (g.color) { const p = themePair(g.color); vars[`--sg-${k}`] = `light-dark(${p.light}, ${p.dark})`; } });
+    setSpeechGroups(groups);
+    store.set("speechGroups", groups.map(({ open, close }) => ({ open, close })));
     const st = document.documentElement.style;
     // (the plain --speech… names are an earlier version's, set inline they would win over the theme's)
     for (const k of ["--app-accent", "--app-accent-dark", "--font-ui", "--font-read", "--writer-size", "--read-size", ...CHAPTER_VARS, ...SPEECH_KEYS.map(([, v]) => v)]) { if (vars[k]) st.setProperty(k, vars[k]); else st.removeProperty(k); }
@@ -238,6 +244,8 @@ function applyAppearance(a = {}) {
     else st.zoom = scale === 1 ? "" : String(scale);
     store.set("appearanceVars", vars);
 }
+
+setSpeechGroups(store.get("speechGroups", []));
 
 function applyNovelAccent(hex) {
     const st = document.documentElement.style;
@@ -3245,9 +3253,24 @@ ${range("writerWidth", 480, 1600, 20, 760, (v) => `${v}px`)}
                     <label class="check"><input type="checkbox" checked=${!!a[k]} onChange=${(e) => change({ [k]: e.target.checked ? a.speechColor : null })} /> Own colour</label>
                     ${a[k] ? html`<input type="color" value=${a[k]} onInput=${(e) => change({ [k]: e.target.value })} aria-label=${l} /><${ThemeSwatches} hex=${a[k]} />` : html`<span class="muted small-note">${k === "speechBoldItalic" ? "as bold, else italics, else speech" : "same as speech"}</span>`}
                 </div>`)}
+            <label>Your own groupings</label>
+            <div class="speech-groups">
+                ${(a.speechGroups ?? []).map((g, k) => {
+                    const set = (patch) => change({ speechGroups: (a.speechGroups ?? []).map((x, j) => (j === k ? { ...x, ...patch } : x)) });
+                    const mark = (key, label) => html`<input class="sg-mark" value=${g[key]} maxlength="4" aria-label=${label} title=${label} onInput=${(e) => set({ [key]: e.target.value.replace(/\s/g, "") })} />`;
+                    return html`<div class="appearance-range speech-colours" key=${k}>
+                        ${mark("open", "Opens with")}<span class="muted">text</span>${mark("close", "Closes with")}
+                        <input type="color" value=${g.color} onInput=${(e) => set({ color: e.target.value })} aria-label="Colour" /><${ThemeSwatches} hex=${g.color} />
+                        <button class="small" title="Remove this grouping" onClick=${() => change({ speechGroups: (a.speechGroups ?? []).filter((_, j) => j !== k) })}>×</button>
+                    </div>`;
+                })}
+                ${(a.speechGroups ?? []).length < SPEECH_GROUPS && html`<div><button class="small" onClick=${() => change({ speechGroups: [...(a.speechGroups ?? []), { open: "[", close: "]", color: "#8a4fb8" }] })}>+ Add a grouping</button>
+                    <span class="muted small-note">Text between your own marks, e.g. <code>[System notice]</code>, in its own colour (links and fields are left alone)</span></div>`}
+            </div>
         </div>
         <div class="appearance-preview chapter-sample" style="font-family: var(--font-read, var(--serif)); font-size: var(--writer-size, 18px); line-height: 1.7">
             <p dangerouslySetInnerHTML=${{ __html: inlineHtml("The kettle had gone cold. \"You're late,\" Mara said, without looking up. *\"Again.\"*") }} />
+            ${(a.speechGroups ?? []).some((g) => g.open && g.close) && html`<p dangerouslySetInnerHTML=${{ __html: inlineHtml(`The screen flickered. ${(a.speechGroups ?? []).filter((g) => g.open && g.close).map((g) => `${g.open}Level up!${g.close}`).join(" ")} "Finally," she breathed.`) }} />`}
             <p dangerouslySetInnerHTML=${{ __html: inlineHtml("'I know,' he said, and the dogs' leads tangled. **\"It won't happen twice.\"** ***\"Promise.\"***") }} />
         </div>
     </div>`;

@@ -192,39 +192,62 @@ const WORD = /[\p{L}\p{N}]/u;
 const QUOTES = { '"': '"', "“": "”", "'": "'", "‘": "’" };
 const CLOSERS = { '"': ['"', "”"], "“": ["”", '"'], "'": ["'", "’"], "‘": ["’", "'"] };
 
+// your own groupings (Settings → Chapter text), e.g. [ ] or << >>: {open, close} each, coloured with be-sg-<n>
+let speechGroups = [];
+/** Sets the custom groupings: [{open, close}] (the index is the colour class be-sg-<index>) */
+export function setSpeechGroups(list) {
+    speechGroups = (Array.isArray(list) ? list : []).map((g, k) => ({ open: String(g?.open ?? ""), close: String(g?.close ?? ""), k }))
+        .filter((g) => g.open && g.close && !/\s/.test(g.open + g.close)).sort((x, y) => y.open.length - x.open.length);
+}
+// links, inline fields and callout markers aren't groupings, whatever the brackets
+const NOT_GROUPED = /!?\[\[[^\]\n]*\]\]|\[[^\]\n]*\]\([^)\n]*\)|\[[\w\/-]+::[^\]\n]*\]|^\[![\w-]+\]/g;
+
 /**
- * Where speech in quotes lies in a block's text: [[start, end], …] (end after the closing quote). Only the outermost
- * quote counts (quotes inside it are part of it). An opening quote has no letter or digit before it (or starts the
- * text) and no space after it; a closing one has no letter or digit after it (so the apostrophes in "don't" and
- * "'tis" are ignored). Speech in double quotes that never closes runs to the end of the block (dialogue that goes on
- * in the next paragraph); single quotes need their closing quote. `skip` [[a, b], …] are ranges to ignore (code, comments).
+ * Where speech lies in a block's text: [[start, end, group], …] (end after the closing mark; group null for quotes, else
+ * the index of one of your groupings). Only the outermost counts (quotes or groupings inside it are part of it). An
+ * opening mark has no letter or digit before it (or starts the text) and no space after it; a closing one has no space
+ * before it and no letter or digit after it (so the apostrophes in "don't" and "'tis" are ignored). Speech in double
+ * quotes that never closes runs to the end of the block (dialogue that goes on in the next paragraph); single quotes
+ * and groupings need their closing mark. `skip` [[a, b], …] are ranges to ignore (code, comments).
  */
-export function speechRanges(text, skip = []) {
+export function speechRanges(text, skip = [], groups = speechGroups) {
     const t = String(text ?? "");
     const out = [];
-    const skipped = (i) => skip.some(([a, b]) => i >= a && i < b);
+    const links = groups.length ? [...t.matchAll(NOT_GROUPED)].map((m) => [m.index, m.index + m[0].length]) : [];
+    const skipped = (i, more = []) => skip.some(([a, b]) => i >= a && i < b) || more.some(([a, b]) => i >= a && i < b);
+    const opens = (i, len) => !(i > 0 && WORD.test(t[i - 1])) && t[i + len] && !/\s/.test(t[i + len]);
+    const closes = (j, len) => !/\s/.test(t[j - 1]) && !(j + len < t.length && WORD.test(t[j + len]));
     for (let i = 0; i < t.length; i++) {
+        if (skipped(i)) continue;
+        // one of your groupings
+        const g = groups.find((x) => t.startsWith(x.open, i) && !skipped(i, links) && opens(i, x.open.length));
+        if (g) {
+            let end = -1;
+            for (let j = t.indexOf(g.close, i + g.open.length); j > -1; j = t.indexOf(g.close, j + 1)) {
+                if (!skipped(j) && !skipped(j, links) && closes(j, g.close.length)) { end = j + g.close.length; break; }
+            }
+            if (end > -1) { out.push([i, end, g.k]); i = end - 1; continue; }
+        }
         const q = t[i];
-        if (!QUOTES[q] || skipped(i)) continue;
-        if ((i > 0 && WORD.test(t[i - 1])) || !t[i + 1] || /\s/.test(t[i + 1])) continue;
+        if (!QUOTES[q] || !opens(i, 1)) continue;
         let end = -1;
         for (let j = i + 1; j < t.length; j++) {
-            if (!CLOSERS[q].includes(t[j]) || skipped(j) || /\s/.test(t[j - 1])) continue;
-            if (j + 1 < t.length && WORD.test(t[j + 1])) continue;
+            if (!CLOSERS[q].includes(t[j]) || skipped(j) || !closes(j, 1)) continue;
             end = j + 1; break;
         }
-        if (end < 0) { if (q === '"' || q === "“") { out.push([i, t.length]); break; } continue; }
-        out.push([i, end]);
+        if (end < 0) { if (q === '"' || q === "“") { out.push([i, t.length, null]); break; } continue; }
+        out.push([i, end, null]);
         i = end - 1;
     }
     return out;
 }
+const speechClass = (g) => (g == null ? "be-speech" : `be-sg be-sg-${g}`);
 
 /** Wraps the speech in each paragraph and list item under `root` in <span class="be-speech"> (for rendered HTML) */
 export function markSpeech(root) {
     const doc = root.ownerDocument;
     for (const el of root.querySelectorAll("p, li")) {
-        if (el.closest("blockquote, .callout, code, pre") || el.querySelector(".be-speech")) continue;
+        if (el.closest("blockquote, .callout, code, pre") || el.querySelector(".be-speech, .be-sg")) continue;
         const nodes = [];
         const walk = doc.createTreeWalker(el, 4 /* text */, { acceptNode: (n) => (n.parentElement.closest("p, li") === el && !n.parentElement.closest("code") ? 1 : 2) });
         for (let n = walk.nextNode(); n; n = walk.nextNode()) nodes.push(n);
@@ -235,14 +258,14 @@ export function markSpeech(root) {
         for (const n of nodes) {
             const from = at, to = at + n.data.length;
             at = to;
-            const cuts = ranges.filter(([a, b]) => a < to && b > from).map(([a, b]) => [Math.max(a, from) - from, Math.min(b, to) - from]);
+            const cuts = ranges.filter(([a, b]) => a < to && b > from).map(([a, b, g]) => [Math.max(a, from) - from, Math.min(b, to) - from, g]);
             if (!cuts.length) continue;
             const frag = doc.createDocumentFragment();
             let k = 0;
-            for (const [a, b] of cuts) {
+            for (const [a, b, g] of cuts) {
                 if (a > k) frag.append(n.data.slice(k, a));
                 const sp = doc.createElement("span");
-                sp.className = "be-speech";
+                sp.className = speechClass(g);
                 sp.textContent = n.data.slice(a, b);
                 frag.append(sp);
                 k = b;
@@ -344,11 +367,11 @@ export function inlineHtml(src, { raw = false } = {}) {
     const speech = speechRanges(t, skip);
     const piece = (s, at) => {
         let res = "", k = 0;
-        for (const [a, b] of speech) {
+        for (const [a, b, g] of speech) {
             const x = Math.max(a - at, k), y = Math.min(b - at, s.length);
             if (y <= x) continue;
             if (x > k) res += `<span data-s="${at + k}">${esc(s.slice(k, x))}</span>`;
-            res += `<span class="be-speech" data-s="${at + x}">${esc(s.slice(x, y))}</span>`;
+            res += `<span class="${speechClass(g)}" data-s="${at + x}">${esc(s.slice(x, y))}</span>`;
             k = y;
         }
         return k < s.length ? res + `<span data-s="${at + k}">${esc(s.slice(k))}</span>` : res;

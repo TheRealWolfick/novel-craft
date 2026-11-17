@@ -575,6 +575,14 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
         && spoken(`'tis the season`).length === 0 && JSON.stringify(spoken(`“Outer ‘inner’ quote,” and "going on`)) === JSON.stringify([`“Outer ‘inner’ quote,”`, `"going on`]),
         "speech: outermost quotes only, apostrophes ignored, open double quotes run to the end", JSON.stringify(spoken(`'I can't,' she said of the dogs' leads.`)));
     check(/<em><span class="be-speech" data-s="1">&quot;Hi&quot;<\/span><\/em>/.test(inlineHtml(`*"Hi"* he said`)), "speech in italics is marked inside the <em>", inlineHtml(`*"Hi"* he said`));
+    {
+        const { setSpeechGroups } = await import("../public/blocks.js");
+        setSpeechGroups([{ open: "[", close: "]" }]);
+        const t = `[System: Level up!] "Hi," and [[Bob]], [a](b), array[0], "say [inner]"`;
+        const got = speechRanges(t).map(([a, b, g]) => [t.slice(a, b), g]);
+        setSpeechGroups([]);
+        check(JSON.stringify(got) === JSON.stringify([["[System: Level up!]", 0], ['"Hi,"', null], ['"say [inner]"', null]]), "your own groupings colour [text], not links, array[0] or ones inside speech", JSON.stringify(got));
+    }
     const shown = (md) => inlineHtml(md).replace(/<span[^>]*>|<\/span>/g, "");
     check(shown("\\**Knock*\\*") === "*<em>Knock</em>*" && shown("a **b** ***c***") === "a <strong>b</strong> <em><strong>c</strong></em>" && shown("5 * 3 * 2") === "5 * 3 * 2",
         "live preview shows bold, italics and escaped stars like Obsidian", shown("\\**Knock*\\*"));

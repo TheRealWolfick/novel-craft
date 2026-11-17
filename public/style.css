@@ -689,9 +689,12 @@ table.holdings td.copy-cell { width: 1%; padding-left: 6px; }
 /* block editor: toolbar on top, the page in a readable column */
 .block-editor { max-width: 760px; margin: 0 auto; }
 /* chapter text settings (Settings → Chapter text): column width as a share of the writer, so it never overflows */
-.writer .block-editor { max-width: var(--writer-col, 760px); }
+.writer .block-editor, .writer .writer-preview { max-width: var(--writer-col, 760px); }
+.writer .writer-preview { margin: 0 auto; }
 .writer .be-row:not(.tight) { margin-bottom: var(--writer-para, .55em); }
 .be-speech { color: var(--speech, inherit); }
+.be-sg-0 { color: var(--sg-0, inherit); } .be-sg-1 { color: var(--sg-1, inherit); } .be-sg-2 { color: var(--sg-2, inherit); } .be-sg-3 { color: var(--sg-3, inherit); }
+.be-sg-4 { color: var(--sg-4, inherit); } .be-sg-5 { color: var(--sg-5, inherit); } .be-sg-6 { color: var(--sg-6, inherit); } .be-sg-7 { color: var(--sg-7, inherit); }
 em .be-speech, .be-speech em { color: var(--speech-em, var(--speech, inherit)); }
 strong .be-speech, .be-speech strong { color: var(--speech-strong, var(--speech, inherit)); }
 strong em .be-speech, em strong .be-speech { color: var(--speech-strong-em, var(--speech-strong, var(--speech-em, var(--speech, inherit)))); }
@@ -1012,6 +1015,8 @@ kbd { font: 500 11.5px var(--mono); padding: 1px 6px; border: 1px solid var(--li
 .appearance-preview { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .speech-colours label { display: inline-flex; gap: 6px; align-items: center; font-weight: 400; }
 .speech-colours input[type="color"] { width: 34px; height: 28px; padding: 1px; }
+.speech-groups { display: flex; flex-direction: column; gap: 6px; }
+.sg-mark { width: 4.5em; text-align: center; font-family: var(--mono); }
 .theme-swatches { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font: 600 14px/1 var(--font-read, var(--serif)); }
 .theme-swatches span { padding: 6px 8px; }
 .appearance-preview.chapter-sample { display: block; }

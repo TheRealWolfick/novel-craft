@@ -32,6 +32,7 @@ How the [writer](docs:writing-a-chapter) and its preview show a chapter. A sampl
 | Column width | The widest the text column gets, 480–1600px (760px by default). It never gets wider than the writer, so with the side drawer open beside it the column fits the space that is left. |
 | Speech colour | Dialogue in quotes in its own colour |
 | Speech in italics / bold / bold italics | An own colour for speech in that style (otherwise the speech colour) |
+| Your own groupings | Text between marks you choose, such as `[System notice]` or `<<thought>>`, in its own colour (up to 8) |
 
 ### Which quotes count as speech
 
@@ -39,6 +40,7 @@ How the [writer](docs:writing-a-chapter) and its preview show a chapter. A sampl
 - Only the outermost quote: `"She said 'no' twice."` is one piece of speech.
 - An opening quote has no letter or digit just before it, and no space after it. A closing quote has no letter or digit after it. So the apostrophes in *don't*, *'tis* and *the dogs' leads* are left alone.
 - Speech in double quotes that isn't closed runs to the end of the paragraph, the way dialogue carries on into the next paragraph. Single quotes need their closing quote.
+- Your own groupings follow the same rules and need their closing mark. `[[links]]`, `[text](links)` and `[field:: value]` are never a grouping, and a grouping inside speech (or speech inside a grouping) takes the outer one's colour.
 
 ### Light and dark
 
