@@ -12,6 +12,7 @@
     --chip: #ece9e2; --radius: 8px; --mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
     --serif: "Newsreader", "Iowan Old Style", Georgia, serif;
     --accent-soft: color-mix(in srgb, var(--accent) 13%, var(--panel));
+    --speech: var(--speech-light); --speech-em: var(--speech-em-light); --speech-strong: var(--speech-strong-light); --speech-strong-em: var(--speech-strong-em-light);
     color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -20,6 +21,7 @@
         --accent: var(--novel-accent-dark, var(--app-accent-dark, #b195f5)); --on-accent: #17161a;
         --ok: #6cc28f; --warn: #e2a24b; --bad: #f08a80; --chip: #2d2c33;
         --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--panel));
+        --speech: var(--speech-dark); --speech-em: var(--speech-em-dark); --speech-strong: var(--speech-strong-dark); --speech-strong-em: var(--speech-strong-em-dark);
         color-scheme: dark;
     }
 }
@@ -28,6 +30,7 @@
     --accent: var(--novel-accent-dark, var(--app-accent-dark, #b195f5)); --on-accent: #17161a;
     --ok: #6cc28f; --warn: #e2a24b; --bad: #f08a80; --chip: #2d2c33;
     --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--panel));
+    --speech: var(--speech-dark); --speech-em: var(--speech-em-dark); --speech-strong: var(--speech-strong-dark); --speech-strong-em: var(--speech-strong-em-dark);
     color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -999,6 +1002,8 @@ kbd { font: 500 11.5px var(--mono); padding: 1px 6px; border: 1px solid var(--li
 .appearance-preview { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .speech-colours label { display: inline-flex; gap: 6px; align-items: center; font-weight: 400; }
 .speech-colours input[type="color"] { width: 34px; height: 28px; padding: 1px; }
+.theme-swatches { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; font: 600 14px/1 var(--font-read, var(--serif)); }
+.theme-swatches span { padding: 6px 8px; }
 .appearance-preview.chapter-sample { display: block; }
 .chapter-sample p { margin: 0 0 var(--writer-para, .55em); text-align: justify; text-indent: 1em; }
 .chapter-sample p:last-child { margin-bottom: 0; }

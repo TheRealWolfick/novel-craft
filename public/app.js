@@ -116,7 +116,38 @@ function readableAccent(hex, dark) {
 const UI_FONTS = { system: ["System", 'system-ui, -apple-system, "Segoe UI", sans-serif'], humanist: ["Humanist sans", '"Cantarell", "Segoe UI", "Noto Sans", system-ui, sans-serif'], serif: ["Serif (Newsreader)", '"Newsreader", Georgia, serif'], rounded: ["Rounded", '"Nunito", "Varela Round", "Quicksand", system-ui, sans-serif'], mono: ["Monospace", "ui-monospace, \"JetBrains Mono\", Menlo, monospace"] };
 const READ_FONTS = { serif: ["Newsreader (serif)", '"Newsreader", "Iowan Old Style", Georgia, serif'], georgia: ["Georgia", 'Georgia, "Times New Roman", serif'], sans: ["Sans serif", 'system-ui, "Segoe UI", sans-serif'], humanist: ["Humanist sans", '"Cantarell", "Segoe UI", "Noto Sans", sans-serif'], mono: ["Monospace (typewriter)", '"Courier Prime", "Courier New", ui-monospace, monospace'] };
 const ACCENTS = ["#6a4fc4", "#2f6fb0", "#3d7a5a", "#b03a5b", "#a6621b", "#2e7f86", "#8a4fb8", "#5e6b78"];
-const CHAPTER_VARS = ["--writer-para", "--writer-col", "--speech", "--speech-em", "--speech-strong", "--speech-strong-em"];
+/** sRGB hex <-> OKLab (perceptual lightness L 0..1, a, b) */
+const toLin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+const fromLin = (v) => (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055);
+function hexToOklab(hex) {
+    const [r, g, b] = rgb(hex).map((v) => toLin(v / 255));
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b), s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+function oklabToRgb([L, a, b]) {
+    const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+    return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s].map(fromLin);
+}
+// perceived lightness (OKLab L) of the light and dark page (--panel); speech colours are mirrored between them
+const PAGE_L = { light: 1, dark: 0.245 };
+/** The same colour with its brightness mirrored between the light and dark page, so it stands out from either as much
+ *  (hue kept; colourfulness reduced only as far as sRGB needs) */
+function invertLightness(hex) {
+    const [L, a, b] = hexToOklab(hex);
+    const L2 = Math.min(0.99, Math.max(0.01, PAGE_L.light + PAGE_L.dark - L));
+    const ok = (k) => oklabToRgb([L2, a * k, b * k]).every((v) => v >= -0.0005 && v <= 1.0005);
+    let lo = 0, hi = 1;
+    if (!ok(1)) for (let i = 0; i < 20; i++) { const mid = (lo + hi) / 2; if (ok(mid)) lo = mid; else hi = mid; }
+    else lo = 1;
+    return toHex(oklabToRgb([L2, a * lo, b * lo]).map((v) => v * 255));
+}
+/** A picked speech colour as {light, dark}: a darker colour is the light theme's (dark mode gets it mirrored), a lighter one the dark theme's */
+function themePair(hex) {
+    const inv = invertLightness(hex);
+    return hexToOklab(hex)[0] < (PAGE_L.light + PAGE_L.dark) / 2 ? { light: hex, dark: inv } : { light: inv, dark: hex };
+}
+const SPEECH_KEYS = [["speechColor", "--speech"], ["speechItalic", "--speech-em"], ["speechBold", "--speech-strong"], ["speechBoldItalic", "--speech-strong-em"]];
+const CHAPTER_VARS = ["--writer-para", "--writer-col", ...SPEECH_KEYS.flatMap(([, v]) => [`${v}-light`, `${v}-dark`])];
 function applyAppearance(a = {}) {
     const vars = {};
     if (a.accent) { vars["--app-accent"] = readableAccent(a.accent, false); vars["--app-accent-dark"] = readableAccent(a.accent, true); }
@@ -126,14 +157,11 @@ function applyAppearance(a = {}) {
     if (a.readSize) vars["--read-size"] = `${a.readSize}px`;
     if (a.writerPara != null) vars["--writer-para"] = `${a.writerPara}em`;
     if (a.writerWidth >= 400) vars["--writer-col"] = `${a.writerWidth}px`; // a maximum: the column never gets wider than the writer
-    if (a.speechColor) {
-        vars["--speech"] = a.speechColor;
-        if (a.speechItalic) vars["--speech-em"] = a.speechItalic;
-        if (a.speechBold) vars["--speech-strong"] = a.speechBold;
-        if (a.speechBoldItalic) vars["--speech-strong-em"] = a.speechBoldItalic;
-    }
+    // speech colours: one per theme (style.css picks --speech from --speech-light or --speech-dark)
+    if (a.speechColor) for (const [k, v] of SPEECH_KEYS) if (a[k]) { const p = themePair(a[k]); vars[`${v}-light`] = p.light; vars[`${v}-dark`] = p.dark; }
     const st = document.documentElement.style;
-    for (const k of ["--app-accent", "--app-accent-dark", "--font-ui", "--font-read", "--writer-size", "--read-size", ...CHAPTER_VARS]) { if (vars[k]) st.setProperty(k, vars[k]); else st.removeProperty(k); }
+    // (the plain --speech… names are an earlier version's, set inline they would win over the theme's)
+    for (const k of ["--app-accent", "--app-accent-dark", "--font-ui", "--font-read", "--writer-size", "--read-size", ...CHAPTER_VARS, ...SPEECH_KEYS.map(([, v]) => v)]) { if (vars[k]) st.setProperty(k, vars[k]); else st.removeProperty(k); }
     // interface size: the desktop app zooms the window; a browser page zooms the document
     const scale = a.uiScale && a.uiScale !== 1 ? a.uiScale : 1;
     if (typeof window.__wbZoom === "function") window.__wbZoom(scale);
@@ -3050,6 +3078,13 @@ function QAView() {
 // ------------------------------------------------------------------ settings
 
 /** The vault folder: shown, typed or picked from a folder browser; switching reloads the app on the new vault */
+/** How a speech colour shows in each theme: "Aa" on the light and the dark page */
+function ThemeSwatches({ hex }) {
+    const p = themePair(hex);
+    return html`<span class="theme-swatches" title="Light mode / dark mode (the other theme gets the same colour with its brightness inverted)">
+        <span style=${`background:#ffffff;color:${p.light}`}>Aa</span><span style=${`background:#1f1e23;color:${p.dark}`}>Aa</span></span>`;
+}
+
 /** Accent, fonts and sizes for this device; each change shows at once and is saved */
 function AppearancePanel({ saved: raw }) {
     // a column width saved as a share of the writer (under 400, an earlier version) counts as unset
@@ -3108,13 +3143,13 @@ ${range("writerWidth", 480, 1600, 20, 760, (v) => `${v}px`)}
             <label>Speech colour</label>
             <div class="appearance-range speech-colours">
                 <label class="check"><input type="checkbox" checked=${!!a.speechColor} onChange=${(e) => change(e.target.checked ? { speechColor: "#2f6fb0" } : { speechColor: null })} /> Colour speech in quotes</label>
-                ${a.speechColor && html`<input type="color" value=${a.speechColor} onInput=${(e) => change({ speechColor: e.target.value })} aria-label="Speech colour" />`}
+                ${a.speechColor && html`<input type="color" value=${a.speechColor} onInput=${(e) => change({ speechColor: e.target.value })} aria-label="Speech colour" /><${ThemeSwatches} hex=${a.speechColor} />`}
             </div>
             ${a.speechColor && [["speechItalic", "Speech in italics"], ["speechBold", "Speech in bold"], ["speechBoldItalic", "Speech in bold italics"]].map(([k, l]) => html`
                 <label>${l}</label>
                 <div class="appearance-range speech-colours">
                     <label class="check"><input type="checkbox" checked=${!!a[k]} onChange=${(e) => change({ [k]: e.target.checked ? a.speechColor : null })} /> Own colour</label>
-                    ${a[k] ? html`<input type="color" value=${a[k]} onInput=${(e) => change({ [k]: e.target.value })} aria-label=${l} />` : html`<span class="muted small-note">${k === "speechBoldItalic" ? "as bold, else italics, else speech" : "same as speech"}</span>`}
+                    ${a[k] ? html`<input type="color" value=${a[k]} onInput=${(e) => change({ [k]: e.target.value })} aria-label=${l} /><${ThemeSwatches} hex=${a[k]} />` : html`<span class="muted small-note">${k === "speechBoldItalic" ? "as bold, else italics, else speech" : "same as speech"}</span>`}
                 </div>`)}
         </div>
         <div class="appearance-preview chapter-sample" style="font-family: var(--font-read, var(--serif)); font-size: var(--writer-size, 18px); line-height: 1.7">
