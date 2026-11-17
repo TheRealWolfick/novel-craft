@@ -676,6 +676,36 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
             await wait(1200);
             check(/\n\n!\[\[pb-[^\]]+\]\]\n\n/.test(fs.readFileSync(`${COPY}/${wc.path}`, "utf8")), "the scene break is saved as its own paragraph");
         }
+        // ↓ on a paragraph's last line goes on into the next paragraph (jsdom has no layout: every line is first and last)
+        {
+            const rows = () => [...doc.querySelectorAll(".writer .be-page > .be-row")];
+            const p3 = await editPara((t) => t.length > 20);
+            if (p3) {
+                const idx = rows().findIndex((r) => r.contains(p3));
+                p3.focus(); p3.setSelectionRange(p3.value.length, p3.value.length);
+                fire(p3, "keydown", { key: "ArrowDown" });
+                await wait(250);
+                const active = doc.activeElement;
+                check(active?.tagName === "TEXTAREA" && rows().findIndex((r) => r.contains(active)) === idx + 1, "↓ on a paragraph's last line edits the next one (it stays open)", active?.tagName);
+                // Escape: block mode, the arrows move by block, Shift extends, Backspace twice deletes, Ctrl+Z brings it back
+                fire(active, "keydown", { key: "Escape" });
+                await wait(200);
+                const pg = doc.querySelector(".writer .be-page");
+                check(doc.activeElement === pg && rows()[idx + 1]?.classList.contains("be-sel"), "Escape selects the block (block mode)");
+                fire(pg, "keydown", { key: "ArrowUp" }); await wait(150);
+                fire(pg, "keydown", { key: "ArrowDown", shiftKey: true }); await wait(150);
+                check(rows()[idx].classList.contains("be-sel") && rows()[idx + 1].classList.contains("be-sel") && doc.querySelectorAll(".writer .be-sel").length === 2,
+                    "↑ moves the selection, Shift+↓ selects one more");
+                const n = rows().length;
+                fire(pg, "keydown", { key: "Backspace" }); await wait(150);
+                check(rows().length === n && !!doc.querySelector(".writer .be-armed"), "the first Backspace only arms the delete");
+                fire(pg, "keydown", { key: "Backspace" }); await wait(200);
+                check(rows().length === n - 2, "the second Backspace deletes the selected blocks");
+                fire(doc.querySelector(".writer .be-page"), "keydown", { key: "z", ctrlKey: true }); await wait(200);
+                check(rows().length === n, "Ctrl+Z brings them back");
+                pg.focus(); fire(pg, "keydown", { key: "Escape" }); await wait(100);
+            }
+        }
         // find in the chapter: counts matches and steps through them
         const findBox = doc.querySelector(".writer-find input");
         findBox.value = "Smoke writer"; fire(findBox, "input");

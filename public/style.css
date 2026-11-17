@@ -209,7 +209,9 @@ section.group:first-of-type > h2 { margin-top: 4px; }
 .drawer-wrap.open .drawer { transform: none; visibility: visible; pointer-events: auto; transition: transform var(--slide), width var(--slide), visibility 0s; }
 /* beside the writer the drawer narrows only when the window can't fit both (at once, never while sliding); it widens
    again only after it has slid away */
-.layout.writer-beside { --drawer-w: min(1280px, 94%, max(420px, 100% - 640px)); }
+/* both open: the window is split between them, the writer's share --split (0.5 by default; Ctrl+Shift+[ / ] / \ ),
+   each keeping at least 380px */
+.layout.writer-beside { --drawer-w: clamp(380px, calc((1 - var(--split, .5)) * 100%), calc(100% - 380px)); }
 /* collapsed drawer: a button per tab on the right edge (the viewer's shows the current page) */
 .drawer-side { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; transition: opacity .2s; }
 .drawer-tab { pointer-events: auto; max-height: 19vh; padding: 12px 5px;
@@ -647,7 +649,7 @@ table.holdings td.copy-cell { width: 1%; padding-left: 6px; }
 .writer-wrap.open .writer { transform: none; visibility: visible; pointer-events: auto; transition: transform var(--slide), width var(--slide), visibility 0s; }
 /* beside the open drawer the writer ends where the drawer begins; widths are % of the (scrollbar-free) window, the
    same box both drawers sit in, so they meet exactly, and both move with one timing, so every change stays in step */
-.layout.writer-beside .writer { width: max(640px, calc(100% - var(--drawer-w))); }
+.layout.writer-beside .writer { width: calc(100% - var(--drawer-w)); }
 .writer-tab { position: absolute; left: 0; top: 50%; transform: translateY(-50%); pointer-events: auto; max-height: 30vh; padding: 12px 5px;
     border: 1px solid var(--line); border-left: none; border-right: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--panel);
     box-shadow: 4px 0 14px rgba(0,0,0,.12); color: var(--text); font-size: 12.5px; transition: opacity .2s, padding .15s; }
@@ -700,6 +702,14 @@ strong em .be-speech, em strong .be-speech { color: var(--speech-strong-em, var(
 .be-page { font-family: var(--font-read, var(--serif)); font-size: var(--writer-size, 18px); line-height: 1.7; padding-left: 2.2em; }
 .be-row { position: relative; padding-left: calc(var(--level) * 26px); margin-bottom: .55em; }
 .be-row.tight { margin-bottom: 0; }
+/* block mode: whole blocks selected */
+.be-page:focus { outline: none; }
+.be-row.be-sel::before { content: ""; position: absolute; inset: -3px -6px; border-radius: 7px; background: var(--accent-soft); pointer-events: none; z-index: 0; }
+.be-row.be-sel > * { position: relative; z-index: 1; }
+.be-row.be-sel > .be-mark { position: absolute; }
+.be-row.be-armed::before { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); }
+.be-row.be-armed:not(:has(+ .be-armed))::after { content: "Backspace again to delete"; position: absolute; right: 0; bottom: -1.5em; z-index: 2;
+    font: 600 11px/1.4 system-ui, sans-serif; color: var(--bad); background: var(--panel); padding: 1px 6px; border-radius: 4px; }
 .be-row textarea { display: block; width: 100%; min-height: 0; border: 1px solid transparent; background: transparent; resize: none; overflow: hidden;
     font: inherit; color: inherit; padding: 1px 6px; border-radius: 5px; transition: background-color .15s, border-color .15s; }
 .be-row textarea:hover, .be-text:hover { background: var(--bg); }

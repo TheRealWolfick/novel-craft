@@ -303,6 +303,53 @@ const showsRendered = (b) => b.kind === "quote" || (b.kind === "p" && IMAGE_ONLY
 /** prose shown formatted (bold, italic…) except while its text is being edited */
 const showsLive = (b) => isProse(b) && !showsRendered(b);
 
+/**
+ * A copy of a text box's text laid out like it (same font, width, padding, wrapping), each character in its own span,
+ * for finding where characters sit on screen; the caller removes it.
+ */
+function layoutCopy(el) {
+    const cs = getComputedStyle(el);
+    const div = document.createElement("div");
+    for (const k of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing", "wordSpacing", "lineHeight", "textIndent", "textAlign", "textTransform",
+        "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "boxSizing", "tabSize", "hyphens"]) div.style[k] = cs[k];
+    Object.assign(div.style, { position: "absolute", visibility: "hidden", top: "0", left: "-9999px", width: `${el.offsetWidth}px`, whiteSpace: "pre-wrap", overflowWrap: "break-word", borderStyle: "solid" });
+    const text = el.value;
+    for (let k = 0; k <= text.length; k++) {
+        const sp = document.createElement("span");
+        sp.textContent = k < text.length ? text[k] : "\u200b";   // the place after the last character
+        div.append(sp);
+    }
+    document.body.append(div);
+    return div;
+}
+/** Whether the caret at `pos` is on the text box's first / last line, and how far across it is (px) */
+function caretLines(el, pos) {
+    if (!el.value) return { first: true, last: true, x: 0 };
+    const div = layoutCopy(el);
+    const spans = div.children;
+    // the caret sits before character `pos`; after a line break it starts the next line
+    const at = spans[Math.min(pos, spans.length - 1)];
+    const top = at.offsetTop, x = at.offsetLeft;
+    const res = { first: top <= spans[0].offsetTop + 1, last: top >= spans[spans.length - 1].offsetTop - 1, x };
+    div.remove();
+    return res;
+}
+/** The caret position on the text box's first or last line closest to `x` px across */
+function posAtX(el, x, line) {
+    if (!el.value) return 0;
+    const div = layoutCopy(el);
+    const spans = [...div.children];
+    const top = line === "first" ? spans[0].offsetTop : spans.at(-1).offsetTop;
+    let best = line === "first" ? 0 : el.value.length, dist = Infinity;
+    spans.forEach((sp, k) => {
+        if (Math.abs(sp.offsetTop - top) > 1) return;
+        const d = Math.abs(sp.offsetLeft - x);
+        if (d < dist) { dist = d; best = k; }
+    });
+    div.remove();
+    return Math.min(best, el.value.length);
+}
+
 /** Source offset of the text under a click in a live-preview block (its spans carry data-s), or null */
 function sourceOffsetAt(x, y) {
     let node = null, off = 0;
@@ -323,6 +370,11 @@ const HISTORY = 200;
 export function BlockEditor({ value, onChange, breaks = [], callouts = true, sceneBreaks = true, compact = false, autoFocus = false }) {
     const [doc, setDoc] = useState(() => withBlock(parseBlocks(value)));
     const [editing, setEditing] = useState(null); // id of the block whose text is being edited (the others show formatted)
+    // block mode: whole blocks selected (anchor .a, head .h: indices), the arrows move by block; armed: Backspace pressed once
+    const [bsel, setBsel] = useState(null);
+    const [armed, setArmed] = useState(false);
+    const page = useRef();
+    const pageFocus = useRef(false);
     const [, setRenderTick] = useState(0);
     const [breakImg, setBreakImgState] = useState(() => store.get("sceneBreak", ""));
     const setBreakImg = (v) => { setBreakImgState(v); store.set("sceneBreak", v); };
@@ -349,16 +401,22 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
             if (el && heights.current.get(el) !== b.text) { heights.current.set(el, b.text); els.push(el); }
         }
         fit(els);
+        if (pageFocus.current && bsel && page.current) {
+            pageFocus.current = false;
+            page.current.focus({ preventScroll: true });
+        }
+        if (bsel) page.current?.children[bsel.h]?.scrollIntoView?.({ block: "nearest" });
         if (focus.current) {
             const { i, pos, end } = focus.current;
             const b = blocks[Math.max(0, Math.min(i, blocks.length - 1))];
             const el = refs.current.get(b?.id);
             // a rendered block opens for editing first; the focus follows on the next render
             if (!el && b && (showsRendered(b) || showsLive(b)) && editing !== b.id) return setEditing(b.id);
+            const { x, line } = focus.current;
             focus.current = null;
             if (el) {
                 el.focus({ preventScroll: true });
-                const a = Math.min(pos ?? el.value.length, el.value.length);
+                const a = x != null ? posAtX(el, x, line) : Math.min(pos ?? el.value.length, el.value.length);
                 el.setSelectionRange(a, Math.min(end ?? a, el.value.length));
                 el.scrollIntoView?.({ block: "nearest" });
             }
@@ -450,6 +508,112 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
         return splice(i + 1, 0, [br, after], { i: i + 2, pos: 0 });
     };
 
+    // ---- block mode: whole blocks selected, the arrows move by block (Enter / Space edits, Backspace twice deletes)
+    const selectBlocks = (a, h = a) => {
+        const n = blocks.length - 1;
+        setEditing(null); setArmed(false);
+        setBsel({ a: Math.max(0, Math.min(n, a)), h: Math.max(0, Math.min(n, h)) });
+        pageFocus.current = true;
+    };
+    const editBlock = (i, pos) => { setBsel(null); setArmed(false); focus.current = { i, pos }; setDoc({ ...doc }); };
+    const range = () => (bsel ? [Math.min(bsel.a, bsel.h), Math.max(bsel.a, bsel.h)] : null);
+    const selectedMarkdown = () => { const [lo, hi] = range(); return serializeBlocks({ lead: "", blocks: blocks.slice(lo, hi + 1).map((b, k, all) => (k === all.length - 1 ? { ...b, sep: "" } : b)) }); };
+    const removeSelected = () => {
+        const [lo, hi] = range();
+        const next = [...blocks];
+        next.splice(lo, hi - lo + 1);
+        if (!next.length) next.push(newBlock());
+        else if (hi === blocks.length - 1) next[next.length - 1] = { ...next.at(-1), sep: blocks[hi].sep };   // the file's last line break stays
+        commit(next);
+        const at = Math.min(lo, next.length - 1);
+        setArmed(false);
+        setBsel({ a: at, h: at });
+        pageFocus.current = true;
+    };
+    const onPageKey = (e) => {
+        if (e.target !== page.current || !bsel || e.isComposing) return;
+        const mod = e.ctrlKey || e.metaKey;
+        const [lo, hi] = range();
+        const key = e.key;
+        if (key !== "Backspace" && key !== "Delete" && armed) setArmed(false);
+        if (mod && !e.altKey && (key === "z" || key === "Z" || key === "y")) { e.preventDefault(); setBsel(null); return key === "y" || e.shiftKey ? restore("redo", "undo") : restore("undo", "redo"); }
+        if (mod && !e.shiftKey && key.toLowerCase() === "a") { e.preventDefault(); return selectBlocks(0, blocks.length - 1); }
+        if (e.altKey && (key === "ArrowUp" || key === "ArrowDown")) {
+            // move the selected blocks past their neighbour; separators stay where they are
+            e.preventDefault();
+            const up = key === "ArrowUp";
+            if (up ? lo === 0 : hi === blocks.length - 1) return;
+            const order = [...blocks];
+            const moved = order.splice(lo, hi - lo + 1);
+            order.splice(up ? lo - 1 : lo + 1, 0, ...moved);
+            commit(order.map((b, k) => ({ ...b, sep: blocks[k].sep })));
+            const d = up ? -1 : 1;
+            setBsel({ a: bsel.a + d, h: bsel.h + d });
+            pageFocus.current = true;
+            return;
+        }
+        if (key === "ArrowUp" || key === "ArrowDown") {
+            e.preventDefault();
+            const h = bsel.h + (key === "ArrowUp" ? -1 : 1);
+            return e.shiftKey ? selectBlocks(bsel.a, h) : selectBlocks(h);
+        }
+        if (key === "Home" || key === "End") { e.preventDefault(); const h = key === "Home" ? 0 : blocks.length - 1; return e.shiftKey ? selectBlocks(bsel.a, h) : selectBlocks(h); }
+        if (key === "Escape") { e.preventDefault(); e.stopPropagation(); setBsel(null); setArmed(false); page.current.blur(); return; }
+        if (key === "Enter" && e.shiftKey && !mod) {
+            // a new paragraph after the selection, ready to type in
+            e.preventDefault();
+            setBsel(null);
+            return splice(hi + 1, 0, [{ ...newBlock("p"), sep: blocks[hi].sep }], { i: hi + 1, pos: 0 });
+        }
+        if ((key === "Enter" || key === " ") && !mod) { e.preventDefault(); return editBlock(bsel.h); }
+        if (key === "Backspace" || key === "Delete") {
+            e.preventDefault();
+            if (!armed) { setArmed(true); clearTimeout(armTimer.current); armTimer.current = setTimeout(() => setArmed(false), 2000); return; }
+            return removeSelected();
+        }
+        const wk = mod && !e.altKey ? WRAP_KEYS[e.shiftKey ? key.toUpperCase() : key.toLowerCase()] : null;
+        if (wk) {
+            // the same formatting on every selected block: wrapped where any isn't yet, else taken off them all
+            e.preventDefault();
+            const can = (b) => isProse(b) && b.text.trim();
+            const tog = (b) => toggleWrap(b.text, 0, b.text.length, wk[0], wk[1]).text;
+            const sel = blocks.slice(lo, hi + 1).filter(can);
+            const adding = sel.some((b) => tog(b).length > b.text.length);
+            commit(blocks.map((b, k) => (k < lo || k > hi || !can(b) || (tog(b).length > b.text.length) !== adding ? b : { ...b, text: tog(b) })));
+            pageFocus.current = true;
+            return;
+        }
+    };
+    const armTimer = useRef();
+    const onPageCopy = (cut) => (e) => {
+        if (e.target !== page.current || !bsel) return;
+        e.preventDefault();
+        e.clipboardData?.setData("text/plain", selectedMarkdown());
+        if (cut) removeSelected();
+    };
+    const onPagePaste = (e) => {
+        if (e.target !== page.current || !bsel) return;
+        const pasted = (e.clipboardData?.getData("text/plain") ?? "").replace(/\s+$/, "");
+        if (!pasted) return;
+        e.preventDefault();
+        const [, hi] = range();
+        const parts = parseBlocks(pasted).blocks;
+        parts[parts.length - 1] = { ...parts.at(-1), sep: blocks[hi].sep };
+        const next = [...blocks];
+        next.splice(hi + 1, 0, ...parts);
+        commit(next);
+        setBsel({ a: hi + 1, h: hi + parts.length });
+        pageFocus.current = true;
+    };
+    /** Shift+click on a block: select the blocks from the current one to it */
+    const shiftPick = (i, e) => {
+        if (!e.shiftKey) return false;
+        e.preventDefault();
+        window.getSelection?.()?.removeAllRanges();
+        selectBlocks(bsel ? bsel.a : cur.current.i, i);
+        return true;
+    };
+
     // ---- typing
     const onInput = (i) => (e) => {
         const b = blocks[i], el = e.target;
@@ -481,7 +645,7 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
         const wk = mod && !e.altKey ? WRAP_KEYS[e.shiftKey ? e.key.toUpperCase() : e.key.toLowerCase()] : null;
         if (wk && b.kind !== "hr" && b.kind !== "code" && b.kind !== "raw") { e.preventDefault(); return wrap(i, wk[0], wk[1]); }
         if (mod && e.shiftKey && e.key === "Enter" && sceneBreaks) { e.preventDefault(); return insertBreak(i); }
-        if (e.key === "Escape" && (showsRendered(b) || showsLive(b))) { e.preventDefault(); el.blur(); return; }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); return selectBlocks(i); }
         if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             e.preventDefault();
             const j = e.key === "ArrowUp" ? i - 1 : i + 1;
@@ -492,10 +656,27 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
             next[j] = { ...blocks[i], sep: blocks[j].sep };
             return commit(next, { i: j, pos: start });
         }
-        // moving between blocks when the caret can't go further inside this one
-        if (!mod && !e.shiftKey && !e.altKey) {
-            if ((e.key === "ArrowUp" || e.key === "ArrowLeft") && start === 0 && end === 0 && i > 0) { e.preventDefault(); focus.current = { i: i - 1 }; return setDoc({ ...doc }); }
-            if ((e.key === "ArrowDown" || e.key === "ArrowRight") && start === len && end === len && i < blocks.length - 1) { e.preventDefault(); focus.current = { i: i + 1, pos: 0 }; return setDoc({ ...doc }); }
+        // leaving the block: ←/→ at its ends and ↑/↓ on its first / last line go on into the next block (↑/↓ at the same
+        // place across the line; the browser would scroll the page instead); Shift+↑/↓ with the selection at the text's
+        // start / end select this block and the next (block mode), so a selection can reach across paragraphs
+        if (!mod && !e.altKey) {
+            if (!e.shiftKey && e.key === "ArrowLeft" && start === 0 && end === 0 && i > 0) { e.preventDefault(); focus.current = { i: i - 1 }; return setDoc({ ...doc }); }
+            if (!e.shiftKey && e.key === "ArrowRight" && start === len && end === len && i < blocks.length - 1) { e.preventDefault(); focus.current = { i: i + 1, pos: 0 }; return setDoc({ ...doc }); }
+            if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                const up = e.key === "ArrowUp";
+                if (e.shiftKey) {
+                    if (up ? start === 0 : end === len) { e.preventDefault(); return selectBlocks(i, up ? i - 1 : i + 1); }
+                } else if (start === end) {
+                    const lines = caretLines(el, start);
+                    if (up ? lines.first : lines.last) {
+                        e.preventDefault();
+                        const j = up ? i - 1 : i + 1;
+                        if (j < 0 || j >= blocks.length) { el.setSelectionRange(up ? 0 : len, up ? 0 : len); return; }
+                        focus.current = { i: j, x: lines.x, line: up ? "last" : "first" };
+                        return setDoc({ ...doc });
+                    }
+                }
+            }
         }
         if (b.kind === "hr") {
             if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); return splice(i, 1, [], { i: e.key === "Backspace" ? i - 1 : i }); }
@@ -587,6 +768,8 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
     const curBlock = blocks[cur.current.i];
     const kindOf = (b) => (!b ? "" : b.kind === "h" ? `h${b.level}` : b.kind === "quote" && /^\[!/.test(b.text) ? "callout" : b.kind);
     const numbers = olNumbers(blocks);
+    const [selLo, selHi] = range() ?? [-1, -1];
+    const selCls = (i) => (i >= selLo && i <= selHi ? ` be-sel${armed ? " be-armed" : ""}` : "");
     // start editing the first block (a block or scratchpad opened for editing)
     useEffect(() => { if (autoFocus) { focus.current = { i: 0 }; setDoc((d) => ({ ...d })); } }, []);
     return html`<div class=${`block-editor ${compact ? "compact" : ""}`} ref=${box}>
@@ -604,25 +787,26 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
                 <button class="small" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled=${!hist.current.redo.length} onMouseDown=${tool(() => restore("redo", "undo"))}>↷</button>
             </span>
         </div>
-        <div class="be-page">
-            ${blocks.map((b, i) => showsRendered(b) && editing !== b.id ? html`<div key=${b.id} class=${`be-row be-rendered ${b.kind === "p" ? "be-image" : "be-quote-view"}`}>
+        <div class=${`be-page ${bsel ? "block-mode" : ""}`} ref=${page} tabIndex="-1" onKeyDown=${onPageKey} onCopy=${onPageCopy(false)} onCut=${onPageCopy(true)} onPaste=${onPagePaste}
+            onBlur=${(e) => { if (e.target === page.current && !page.current.contains(e.relatedTarget)) { setBsel(null); setArmed(false); } }}>
+            ${blocks.map((b, i) => showsRendered(b) && editing !== b.id ? html`<div key=${b.id} class=${`be-row be-rendered ${b.kind === "p" ? "be-image" : "be-quote-view"}${selCls(i)}`}>
                 <div class="be-render md" tabIndex="0" role="button" aria-label=${b.kind === "p" ? "Image line: Enter to edit" : "Callout: Enter to edit"} title="Click to edit"
                     onClick=${(e) => {
+                        if (shiftPick(i, e)) return;
                         const a = e.target.closest?.("a[href]");
                         if (a) { e.preventDefault(); if (a.getAttribute("href").startsWith("#/")) openInDrawer(a.getAttribute("href")); return; }
                         focus.current = { i, pos: 0 }; setEditing(b.id);
                     }}
                     onKeyDown=${(e) => {
-                        if (e.key === "Enter") { e.preventDefault(); focus.current = { i, pos: 0 }; setEditing(b.id); }
-                        else if ((e.key === "ArrowUp" || e.key === "ArrowLeft") && i > 0) { e.preventDefault(); focus.current = { i: i - 1 }; setDoc({ ...doc }); }
-                        else if ((e.key === "ArrowDown" || e.key === "ArrowRight") && i < blocks.length - 1) { e.preventDefault(); focus.current = { i: i + 1, pos: 0 }; setDoc({ ...doc }); }
-                        else if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); splice(i, 1, [], { i: Math.max(0, e.key === "Backspace" ? i - 1 : i) }); }
+                        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); focus.current = { i, pos: 0 }; setEditing(b.id); }
+                        else if (["ArrowUp", "ArrowDown", "Escape", "Backspace", "Delete"].includes(e.key)) { e.preventDefault(); e.stopPropagation(); selectBlocks(i); }
                     }}
                     dangerouslySetInnerHTML=${{ __html: rendered.get(blockMarkdown(b, blocks, i)) ?? `<p class="muted">${b.kind === "p" ? "Image" : "Callout"}…</p>` }} />
-            </div>` : showsLive(b) && editing !== b.id ? html`<div key=${b.id} class=${`be-row be-${b.kind} be-live ${b.kind === "h" ? `be-h${b.level}` : ""} ${b.sep.length > 1 || !isList(b) ? "" : "tight"}`}
+            </div>` : showsLive(b) && editing !== b.id ? html`<div key=${b.id} class=${`be-row be-${b.kind} be-live ${b.kind === "h" ? `be-h${b.level}` : ""} ${b.sep.length > 1 || !isList(b) ? "" : "tight"}${selCls(i)}`}
                 style=${`--level:${b.level ?? 0}`}>
                 ${gutter(b, numbers[i], () => replace(i, { ...b, checked: !b.checked }, { i }))}
                 <div class="be-text" lang="en" onClick=${(e) => {
+                    if (shiftPick(i, e)) return;
                     // selecting text (to copy it) doesn't open the block; Ctrl+click on a link opens the note in the drawer
                     if (window.getSelection?.()?.isCollapsed === false) return;
                     const link = e.target.closest?.(".be-link[title]");
@@ -631,7 +815,7 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
                     focus.current = { i, pos: pos ?? b.text.length };
                     setEditing(b.id);
                 }} dangerouslySetInnerHTML=${{ __html: inlineHtml(b.text) || `<span class="be-empty">${i === 0 && blocks.length === 1 ? "Start writing…" : "\u200b"}</span>` }} />
-            </div>` : html`<div key=${b.id} class=${`be-row be-${b.kind} ${b.kind === "h" ? `be-h${b.level}` : ""} ${b.kind === "quote" && /^\[!/.test(b.text) ? "be-callout" : ""} ${b.sep.length > 1 || !isList(b) ? "" : "tight"}`}
+            </div>` : html`<div key=${b.id} class=${`be-row be-${b.kind} ${b.kind === "h" ? `be-h${b.level}` : ""} ${b.kind === "quote" && /^\[!/.test(b.text) ? "be-callout" : ""} ${b.sep.length > 1 || !isList(b) ? "" : "tight"}${selCls(i)}`}
                 style=${`--level:${b.level ?? 0}`}>
                 ${gutter(b, numbers[i], () => replace(i, { ...b, checked: !b.checked }, { i }))}
                 ${!compact && (b.kind === "p" || isList(b)) && html`<div class="be-mirror" aria-hidden="true" dangerouslySetInnerHTML=${{ __html: `${inlineHtml(b.text, { raw: true })}\u200b` }} />`}
@@ -640,11 +824,12 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
                     placeholder=${blocks.length === 1 && i === 0 ? "Start writing…" : b.kind === "h" ? "Heading" : ""}
                     aria-label=${b.kind === "hr" ? "Divider" : undefined}
                     onInput=${onInput(i)} onKeyDown=${onKeyDown(i)} onPaste=${onPaste(i)}
-                    onFocus=${(e) => { track(i)(e); if (editing !== b.id) setEditing(b.id); }} onSelect=${track(i)} onKeyUp=${track(i)} onMouseUp=${track(i)}
-                    onBlur=${() => { if (editing === b.id) setEditing(null); }} />
+                    onFocus=${(e) => { track(i)(e); if (bsel) { setBsel(null); setArmed(false); } if (editing !== b.id) setEditing(b.id); }} onSelect=${track(i)} onKeyUp=${track(i)} onMouseUp=${track(i)}
+                    onBlur=${() => setEditing((cur) => (cur === b.id ? null : cur))} />
             </div>`)}
         </div>
-        <div class="plan-hint muted">Enter: new paragraph · Shift+Enter: line break · "# ", "- ", "1. ", "> " at the start: heading, list, quote · Tab: indent list · Alt+↑↓: move · Ctrl+B / I / K: bold, italic, link · ${sceneBreaks ? "Ctrl+Shift+Enter: scene break · " : ""}click text to edit it, Escape to show it formatted · Ctrl+click a link to open it</div>
+        <div class="plan-hint muted">Enter: new paragraph · Shift+Enter: line break · "# ", "- ", "1. ", "> " at the start: heading, list, quote · Tab: indent list · Alt+↑↓: move · Ctrl+B / I / K: bold, italic, link · ${sceneBreaks ? "Ctrl+Shift+Enter: scene break · " : ""}click text to edit it · Ctrl+click a link to open it<br />
+            Escape: select blocks · then ↑↓: move · Shift+↑↓ / Shift+click: select more · Enter or Space: edit · Shift+Enter: new paragraph · Backspace twice: delete · Ctrl+B / I…: format them all · Ctrl+C / X / V · Alt+↑↓: move them</div>
     </div>`;
 }
 

@@ -258,7 +258,7 @@ document.addEventListener("click", (e) => {
     openInDrawer(a.getAttribute("href"));
 });
 // Escape collapses the drawer (not while typing in the writer, and not under an open lightbox)
-// Ctrl+[ opens / closes the writer (left), Ctrl+] the drawer (right), from anywhere
+// Ctrl+[ opens / closes the writer (left), Ctrl+] the drawer (right), from anywhere (Ctrl+Shift+[ / ] / \ : the split, below)
 addEventListener("keydown", (e) => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || (e.key !== "[" && e.key !== "]")) return;
     if (e.key === "[" && e.target.closest?.(".xterm")) return;   // Ctrl+[ is Escape in a terminal
@@ -266,7 +266,23 @@ addEventListener("keydown", (e) => {
     if (e.key === "[") toggleWriter();
     else setDrawer({ ...drawer, open: !drawer.open });
 });
-addEventListener("keydown", (e) => { if (e.key === "Escape" && drawer.open && !document.querySelector(".lightbox") && !e.target.closest?.(".writer, .block-editor, .nblock.moving, .xterm")) collapseDrawer(); });
+// Ctrl+Shift+[ / ] move the split between the writer and the drawer (both open) left / right, Ctrl+Shift+\ (|) puts it
+// back in the middle; the writer's share is kept in localStorage (drawerSplit) and set as --split
+const SPLIT = { min: 0.25, max: 0.75, step: 0.05 };
+const applySplit = (v) => { if (v === 0.5) document.documentElement.style.removeProperty("--split"); else document.documentElement.style.setProperty("--split", String(v)); };
+applySplit(store.get("drawerSplit", 0.5));
+addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey || !["BracketLeft", "BracketRight", "Backslash"].includes(e.code)) return;
+    e.preventDefault(); e.stopPropagation();   // (before a terminal reads it as a key for itself)
+    const cur = store.get("drawerSplit", 0.5);
+    const next = e.code === "Backslash" ? 0.5 : Math.round(Math.min(SPLIT.max, Math.max(SPLIT.min, cur + (e.code === "BracketLeft" ? -SPLIT.step : SPLIT.step))) * 100) / 100;
+    store.set("drawerSplit", next);
+    applySplit(next);
+    const w = Math.round(next * 100);
+    toast(`Writer ${w}% · drawer ${100 - w}%${e.code === "Backslash" ? " (reset)" : ""}`);
+}, true);
+// (an Escape something already handled doesn't count, nor one from an element its handler has just removed)
+addEventListener("keydown", (e) => { if (e.key === "Escape" && !e.defaultPrevented && e.target.isConnected !== false && drawer.open && !document.querySelector(".lightbox") && !e.target.closest?.(".writer, .block-editor, .nblock.moving, .xterm")) collapseDrawer(); });
 
 // a renamed note's drawer page follows it
 function renameInDrawer(from, to) { if (drawer.recent.includes(from)) setDrawer({ ...drawer, recent: drawer.recent.map((h) => (h === from ? to : h)) }); }
