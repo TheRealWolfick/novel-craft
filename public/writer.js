@@ -3,7 +3,7 @@
 import { h } from "preact";
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "preact/hooks";
 import htm from "htm";
-import { parseBlocks, serializeBlocks, blockMarkdown, newBlock, defaultSep, isList, isProse, wordCount, toggleWrap, IMAGE_ONLY, inlineHtml } from "./blocks.js";
+import { parseBlocks, serializeBlocks, blockMarkdown, newBlock, defaultSep, isList, isProse, wordCount, toggleWrap, IMAGE_ONLY, inlineHtml, markSpeech } from "./blocks.js";
 import { api, useApi, qs, toast, store, markDirty, confirmDiscard, Loading, openInDrawer, fieldInput, useNovelLinks, Html } from "./app.js";
 
 const html = htm.bind(h);
@@ -279,7 +279,9 @@ function Preview({ md }) {
         const t = setTimeout(() => api.send("POST", "/api/render", { markdown: md }).then((r) => live && setOut(r.html)).catch((e) => live && setOut(`<p class="error">${e.message}</p>`)), 120);
         return () => { live = false; clearTimeout(t); };
     }, [md]);
-    return out == null ? html`<${Loading} />` : html`<div data-drawer><${Html} html=${out} class="md writer-preview" /></div>`;
+    const box = useRef();
+    useEffect(() => { if (box.current) markSpeech(box.current); }, [out]);
+    return out == null ? html`<${Loading} />` : html`<div data-drawer ref=${box}><${Html} html=${out} class="md writer-preview" /></div>`;
 }
 
 // ------------------------------------------------------------------ block editor
@@ -632,7 +634,8 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
             </div>` : html`<div key=${b.id} class=${`be-row be-${b.kind} ${b.kind === "h" ? `be-h${b.level}` : ""} ${b.kind === "quote" && /^\[!/.test(b.text) ? "be-callout" : ""} ${b.sep.length > 1 || !isList(b) ? "" : "tight"}`}
                 style=${`--level:${b.level ?? 0}`}>
                 ${gutter(b, numbers[i], () => replace(i, { ...b, checked: !b.checked }, { i }))}
-                <textarea ref=${(el) => { if (el) refs.current.set(b.id, el); else refs.current.delete(b.id); }} rows="1"
+                ${!compact && (b.kind === "p" || isList(b)) && html`<div class="be-mirror" aria-hidden="true" dangerouslySetInnerHTML=${{ __html: `${inlineHtml(b.text, { raw: true })}\u200b` }} />`}
+                <textarea class=${!compact && (b.kind === "p" || isList(b)) ? "be-over" : ""} ref=${(el) => { if (el) refs.current.set(b.id, el); else refs.current.delete(b.id); }} rows="1"
                     value=${b.kind === "hr" ? "" : b.text} readOnly=${b.kind === "hr"} spellcheck=${b.kind !== "code" && b.kind !== "raw"}
                     placeholder=${blocks.length === 1 && i === 0 ? "Start writing…" : b.kind === "h" ? "Heading" : ""}
                     aria-label=${b.kind === "hr" ? "Divider" : undefined}

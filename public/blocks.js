@@ -186,34 +186,105 @@ const WS = /\s|^$/u;
 const PUNCT_U = /[\p{P}\p{S}]/u;
 const TAGS = { "*1": "em", "_1": "em", "*2": "strong", "_2": "strong", "~2": "s", "=2": "mark" };
 
+// ------------------------------------------------------------------ speech (dialogue in quotes)
+
+const WORD = /[\p{L}\p{N}]/u;
+const QUOTES = { '"': '"', "“": "”", "'": "'", "‘": "’" };
+const CLOSERS = { '"': ['"', "”"], "“": ["”", '"'], "'": ["'", "’"], "‘": ["’", "'"] };
+
+/**
+ * Where speech in quotes lies in a block's text: [[start, end], …] (end after the closing quote). Only the outermost
+ * quote counts (quotes inside it are part of it). An opening quote has no letter or digit before it (or starts the
+ * text) and no space after it; a closing one has no letter or digit after it (so the apostrophes in "don't" and
+ * "'tis" are ignored). Speech in double quotes that never closes runs to the end of the block (dialogue that goes on
+ * in the next paragraph); single quotes need their closing quote. `skip` [[a, b], …] are ranges to ignore (code, comments).
+ */
+export function speechRanges(text, skip = []) {
+    const t = String(text ?? "");
+    const out = [];
+    const skipped = (i) => skip.some(([a, b]) => i >= a && i < b);
+    for (let i = 0; i < t.length; i++) {
+        const q = t[i];
+        if (!QUOTES[q] || skipped(i)) continue;
+        if ((i > 0 && WORD.test(t[i - 1])) || !t[i + 1] || /\s/.test(t[i + 1])) continue;
+        let end = -1;
+        for (let j = i + 1; j < t.length; j++) {
+            if (!CLOSERS[q].includes(t[j]) || skipped(j) || /\s/.test(t[j - 1])) continue;
+            if (j + 1 < t.length && WORD.test(t[j + 1])) continue;
+            end = j + 1; break;
+        }
+        if (end < 0) { if (q === '"' || q === "“") { out.push([i, t.length]); break; } continue; }
+        out.push([i, end]);
+        i = end - 1;
+    }
+    return out;
+}
+
+/** Wraps the speech in each paragraph and list item under `root` in <span class="be-speech"> (for rendered HTML) */
+export function markSpeech(root) {
+    const doc = root.ownerDocument;
+    for (const el of root.querySelectorAll("p, li")) {
+        if (el.closest("blockquote, .callout, code, pre") || el.querySelector(".be-speech")) continue;
+        const nodes = [];
+        const walk = doc.createTreeWalker(el, 4 /* text */, { acceptNode: (n) => (n.parentElement.closest("p, li") === el && !n.parentElement.closest("code") ? 1 : 2) });
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) nodes.push(n);
+        const text = nodes.map((n) => n.data).join("");
+        const ranges = speechRanges(text);
+        if (!ranges.length) continue;
+        let at = 0;
+        for (const n of nodes) {
+            const from = at, to = at + n.data.length;
+            at = to;
+            const cuts = ranges.filter(([a, b]) => a < to && b > from).map(([a, b]) => [Math.max(a, from) - from, Math.min(b, to) - from]);
+            if (!cuts.length) continue;
+            const frag = doc.createDocumentFragment();
+            let k = 0;
+            for (const [a, b] of cuts) {
+                if (a > k) frag.append(n.data.slice(k, a));
+                const sp = doc.createElement("span");
+                sp.className = "be-speech";
+                sp.textContent = n.data.slice(a, b);
+                frag.append(sp);
+                k = b;
+            }
+            if (k < n.data.length) frag.append(n.data.slice(k));
+            n.replaceWith(frag);
+        }
+    }
+}
+
 /**
  * One block's text as HTML with its formatting shown (bold, italic, strikethrough, highlight, code, links, comments,
  * backslash escapes) and the markup hidden, like Obsidian's live preview. Every piece of visible text is a
  * `<span data-s="N">` where N is its offset in the source, so a click can put the caret at the same place.
+ * `raw`: every character of the source stays (markup too), wrapped in the same formatting and speech spans: the
+ * coloured copy drawn over a block being edited, which must wrap exactly like the text box under it.
  */
-export function inlineHtml(src) {
+export function inlineHtml(src, { raw = false } = {}) {
     const t = String(src ?? "");
     const toks = [];
+    const skip = [];
     const text = (s, at) => { if (s) toks.push({ type: "text", s, at }); };
     let i = 0, buf = "", bufAt = 0;
     const flush = () => { text(buf, bufAt); buf = ""; };
     const add = (ch, at) => { if (!buf) bufAt = at; buf += ch; };
     while (i < t.length) {
         const c = t[i];
-        if (c === "\\" && PUNCT.test(t[i + 1] ?? "")) { flush(); text(t[i + 1], i + 1); i += 2; continue; }
+        if (c === "\\" && PUNCT.test(t[i + 1] ?? "")) { flush(); if (raw) text(t.slice(i, i + 2), i); else text(t[i + 1], i + 1); i += 2; continue; }
         if (c === "%" && t[i + 1] === "%") {
             const j = t.indexOf("%%", i + 2);
-            if (j > -1) { flush(); toks.push({ type: "html", html: `<span class="be-comment" data-s="${i}">${esc(t.slice(i, j + 2))}</span>` }); i = j + 2; continue; }
+            if (j > -1) { skip.push([i, j + 2]); flush(); toks.push({ type: "html", html: `<span class="be-comment" data-s="${i}">${esc(t.slice(i, j + 2))}</span>` }); i = j + 2; continue; }
         }
         if (c === "`") {
             const j = t.indexOf("`", i + 1);
-            if (j > i + 1) { flush(); toks.push({ type: "html", html: `<code><span data-s="${i + 1}">${esc(t.slice(i + 1, j))}</span></code>` }); i = j + 1; continue; }
+            if (j > i + 1) { skip.push([i, j + 1]); flush(); if (raw) { toks.push({ type: "src", s: t.slice(i, j + 1), at: i }); i = j + 1; continue; } toks.push({ type: "html", html: `<code><span data-s="${i + 1}">${esc(t.slice(i + 1, j))}</span></code>` }); i = j + 1; continue; }
         }
         if ((c === "[" && t[i + 1] === "[") || (c === "!" && t[i + 1] === "[" && t[i + 2] === "[")) {
             const open = c === "!" ? i + 3 : i + 2;
             const j = t.indexOf("]]", open);
             if (j > -1 && !t.slice(open, j).includes("\n")) {
                 flush();
+                if (raw) { toks.push({ type: "text", s: t.slice(i, j + 2), at: i }); i = j + 2; continue; }
                 const inner = t.slice(open, j), bar = inner.indexOf("|");
                 const label = bar > -1 ? inner.slice(bar + 1) : inner.split("#")[0].split("/").pop();
                 const at = bar > -1 ? open + bar + 1 : open + inner.lastIndexOf(label);
@@ -223,6 +294,7 @@ export function inlineHtml(src) {
         }
         if (c === "[") {
             const m = /^\[([^\]\n]+)\]\(([^)\s]+)\)/.exec(t.slice(i));
+            if (m && raw) { flush(); text(m[0], i); i += m[0].length; continue; }
             if (m) { flush(); toks.push({ type: "html", html: `<span class="be-link" title="${esc(m[2])}"><span data-s="${i + 1}">${esc(m[1])}</span></span>` }); i += m[0].length; continue; }
         }
         if (c === "*" || c === "_" || ((c === "~" || c === "=") && t[i + 1] === c)) {
@@ -268,14 +340,34 @@ export function inlineHtml(src) {
         }
         if (d.len > 0 && d.open) stack.push(k);
     }
+    // speech: text pieces inside quotes get the be-speech class (split where speech starts or ends)
+    const speech = speechRanges(t, skip);
+    const piece = (s, at) => {
+        let res = "", k = 0;
+        for (const [a, b] of speech) {
+            const x = Math.max(a - at, k), y = Math.min(b - at, s.length);
+            if (y <= x) continue;
+            if (x > k) res += `<span data-s="${at + k}">${esc(s.slice(k, x))}</span>`;
+            res += `<span class="be-speech" data-s="${at + x}">${esc(s.slice(x, y))}</span>`;
+            k = y;
+        }
+        return k < s.length ? res + `<span data-s="${at + k}">${esc(s.slice(k))}</span>` : res;
+    };
     let out = "";
     for (const k of toks) {
-        if (k.type === "text") out += `<span data-s="${k.at}">${esc(k.s)}</span>`;
+        if (k.type === "text") out += piece(k.s, k.at);
+        else if (k.type === "src") out += `<span data-s="${k.at}">${esc(k.s)}</span>`;
+        else if (raw) {
+            // the source as typed, its markup kept inside the formatting it makes (a closer's stars before the close)
+            const chars = piece(k.ch.repeat(k.orig), k.at);
+            out += k.closes.length ? chars + k.closes.map((g) => `</${g}>`).join("") + k.opens.map((g) => `<${g}>`).join("")
+                : k.opens.map((g) => `<${g}>`).join("") + chars;
+        }
         else if (k.type === "html") out += k.html;
         else {
             out += k.closes.map((g) => `</${g}>`).join("");
             // a closer's leftover stars come after the ones it used, an opener's before
-            if (k.len > 0) out += `<span data-s="${k.closes.length ? k.at + k.orig - k.len : k.at}">${esc(k.ch.repeat(k.len))}</span>`;
+            if (k.len > 0) out += piece(k.ch.repeat(k.len), k.closes.length ? k.at + k.orig - k.len : k.at);
             out += k.opens.map((g) => `<${g}>`).join("");
         }
     }

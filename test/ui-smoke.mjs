@@ -568,7 +568,13 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
 // chapter writer (left drawer) and the drawer's Lookup and Novel tabs
 {
     const doc = w.document;
-    const { parseBlocks, serializeBlocks, inlineHtml } = await import("../public/blocks.js");
+    const { parseBlocks, serializeBlocks, inlineHtml, speechRanges } = await import("../public/blocks.js");
+    const spoken = (t) => speechRanges(t).map(([a, b]) => t.slice(a, b));
+    check(JSON.stringify(spoken(`"Hello," he said. "I don't know."`)) === JSON.stringify([`"Hello,"`, `"I don't know."`])
+        && JSON.stringify(spoken(`'I can't,' she said of the dogs' leads.`)) === JSON.stringify([`'I can't,'`])
+        && spoken(`'tis the season`).length === 0 && JSON.stringify(spoken(`“Outer ‘inner’ quote,” and "going on`)) === JSON.stringify([`“Outer ‘inner’ quote,”`, `"going on`]),
+        "speech: outermost quotes only, apostrophes ignored, open double quotes run to the end", JSON.stringify(spoken(`'I can't,' she said of the dogs' leads.`)));
+    check(/<em><span class="be-speech" data-s="1">&quot;Hi&quot;<\/span><\/em>/.test(inlineHtml(`*"Hi"* he said`)), "speech in italics is marked inside the <em>", inlineHtml(`*"Hi"* he said`));
     const shown = (md) => inlineHtml(md).replace(/<span[^>]*>|<\/span>/g, "");
     check(shown("\\**Knock*\\*") === "*<em>Knock</em>*" && shown("a **b** ***c***") === "a <strong>b</strong> <em><strong>c</strong></em>" && shown("5 * 3 * 2") === "5 * 3 * 2",
         "live preview shows bold, italics and escaped stars like Obsidian", shown("\\**Knock*\\*"));

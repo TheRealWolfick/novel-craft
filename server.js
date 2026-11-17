@@ -201,7 +201,8 @@ const routes = {
         const keep = {};
         if (/^#[0-9a-f]{6}$/i.test(b.accent ?? "")) keep.accent = b.accent;
         for (const k of ["uiFont", "readFont"]) if (typeof b[k] === "string" && b[k].length < 40) keep[k] = b[k];
-        for (const [k, lo, hi] of [["uiScale", 0.8, 1.4], ["writerSize", 13, 28], ["readSize", 12, 22]]) if (Number.isFinite(b[k])) keep[k] = Math.min(hi, Math.max(lo, b[k]));
+        for (const k of ["speechColor", "speechItalic", "speechBold", "speechBoldItalic"]) if (/^#[0-9a-f]{6}$/i.test(b[k] ?? "")) keep[k] = b[k];
+        for (const [k, lo, hi] of [["uiScale", 0.8, 1.4], ["writerSize", 13, 28], ["readSize", 12, 22], ["writerPara", 0, 2.5], ["writerWidth", 400, 2000]]) if (Number.isFinite(b[k]) && !(k === "writerWidth" && b[k] < 400)) keep[k] = Math.min(hi, Math.max(lo, b[k]));
         await writeSettings({ appearance: keep });
         return { appearance: keep };
     },

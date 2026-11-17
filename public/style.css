@@ -667,11 +667,11 @@ table.holdings td.copy-cell { width: 1%; padding-left: 6px; }
 .writer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 22px 30px; background: var(--panel); }
 /* the save bar sits under the scrolling text, not over it */
 .writer-foot { flex: none; border-top: 1px solid var(--line); background: var(--panel); padding: 8px 22px; }
-.writer-foot .savebar { max-width: 760px; margin: 0 auto; padding: 0; border: none; position: static; }
-.writer-error { max-width: 760px; margin: 0 auto 8px; }
+.writer-foot .savebar { max-width: var(--writer-col, 760px); margin: 0 auto; padding: 0; border: none; position: static; }
+.writer-error { max-width: var(--writer-col, 760px); margin: 0 auto 8px; }
 .writer-new { max-width: 640px; margin: 30px auto; }
 /* frontmatter on top, one field per row */
-.writer-fields { max-width: 760px; margin: 14px auto 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.writer-fields { max-width: var(--writer-col, 760px); margin: 14px auto 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
 .writer-fields-head { width: 100%; text-align: left; border: none; background: none; padding: 8px 12px; display: flex; gap: 8px; align-items: center; font-weight: 600; }
 .writer-fields-head .caret { display: inline-block; transition: transform .15s; color: var(--muted); }
 .writer-fields.open .writer-fields-head .caret { transform: rotate(90deg); }
@@ -683,6 +683,13 @@ table.holdings td.copy-cell { width: 1%; padding-left: 6px; }
 .wf > input:not([type="checkbox"]) { width: 100%; }
 /* block editor: toolbar on top, the page in a readable column */
 .block-editor { max-width: 760px; margin: 0 auto; }
+/* chapter text settings (Settings → Chapter text): column width as a share of the writer, so it never overflows */
+.writer .block-editor { max-width: var(--writer-col, 760px); }
+.writer .be-row:not(.tight) { margin-bottom: var(--writer-para, .55em); }
+.be-speech { color: var(--speech, inherit); }
+em .be-speech, .be-speech em { color: var(--speech-em, var(--speech, inherit)); }
+strong .be-speech, .be-speech strong { color: var(--speech-strong, var(--speech, inherit)); }
+strong em .be-speech, em strong .be-speech { color: var(--speech-strong-em, var(--speech-strong, var(--speech-em, var(--speech, inherit)))); }
 .be-toolbar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 8px 0; background: var(--panel); border-bottom: 1px solid var(--line); margin-bottom: 14px; }
 .be-group { display: flex; gap: 2px; flex-wrap: wrap; }
 .be-toolbar button { min-width: 30px; font-size: 12.5px; padding: 3px 7px; }
@@ -718,8 +725,15 @@ input.be-mark { width: auto; top: .45em; margin: 0; }
 .be-hr textarea:focus { background: linear-gradient(var(--accent), var(--accent)) center / 100% 2px no-repeat; }
 .writer-preview { font-family: var(--font-read, var(--serif)); font-size: var(--writer-size, 18px); line-height: 1.7; }
 /* chapter paragraphs: justified, first line indented (like the vault's .chapter class); image-only lines centred */
-.writer .be-p textarea, .writer .be-p .be-text { text-align: justify; text-indent: 1em; hyphens: manual; }
-.writer-preview > p { text-align: justify; text-indent: 1em; margin: 0 0 .55em; }
+.writer .be-p textarea, .writer .be-p .be-text, .writer .be-p .be-mirror { text-align: justify; text-indent: 1em; hyphens: manual; }
+/* a block being edited: a coloured copy of its text (speech) lies exactly over the text box, whose own text is transparent */
+.be-mirror { position: absolute; top: 0; right: 0; bottom: 0; left: calc(var(--level, 0) * 26px); pointer-events: none; z-index: 1;
+    border: 1px solid transparent; padding: 1px 6px; white-space: pre-wrap; overflow-wrap: break-word; overflow: hidden; color: var(--text); }
+.be-ul > .be-mirror, .be-ol > .be-mirror, .be-task > .be-mirror { left: calc((var(--level, 0) + 1) * 26px); }
+.be-mirror em, .be-mirror strong, .be-mirror s, .be-mirror mark { font: inherit; text-decoration: none; background: none; }
+.be-row textarea.be-over { color: transparent; caret-color: var(--text); }
+.be-row textarea.be-over::selection { color: transparent; }
+.writer-preview > p { text-align: justify; text-indent: 1em; margin: 0 0 var(--writer-para, .55em); }
 .writer-preview > p:has(> img.embed:only-child) { text-indent: 0; text-align: center; }
 .writer-preview img.embed, .be-render img.embed { display: block; margin: 1.2em auto; max-width: 100%; max-height: none; border-radius: 0; }
 .be-render { cursor: text; border-radius: 6px; outline: none; padding: 1px 0; }
@@ -983,6 +997,11 @@ kbd { font: 500 11.5px var(--mono); padding: 1px 6px; border: 1px solid var(--li
 .appearance-range { display: flex; gap: 10px; align-items: center; }
 .appearance-range input[type="range"] { flex: 1; max-width: 320px; padding: 0; }
 .appearance-preview { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.speech-colours label { display: inline-flex; gap: 6px; align-items: center; font-weight: 400; }
+.speech-colours input[type="color"] { width: 34px; height: 28px; padding: 1px; }
+.appearance-preview.chapter-sample { display: block; }
+.chapter-sample p { margin: 0 0 var(--writer-para, .55em); text-align: justify; text-indent: 1em; }
+.chapter-sample p:last-child { margin-bottom: 0; }
 .appearance-stepper button[aria-label] { width: 34px; height: 30px; padding: 0; font-size: 17px; line-height: 1; }
 .stepper-value { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }
 

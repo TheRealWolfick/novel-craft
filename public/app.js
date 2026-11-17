@@ -7,6 +7,7 @@ import { MapEditor } from "./map-editor.js";
 import { WorldView, WorldOutline, MapAssetsView } from "./world.js";
 import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, BlockEditor } from "./writer.js";
 import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from "./sections.js";
+import { inlineHtml } from "./blocks.js";
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
 import { ImportView } from "./importer.js";
 import { DocsView, DocArticle } from "./docs.js";
@@ -115,6 +116,7 @@ function readableAccent(hex, dark) {
 const UI_FONTS = { system: ["System", 'system-ui, -apple-system, "Segoe UI", sans-serif'], humanist: ["Humanist sans", '"Cantarell", "Segoe UI", "Noto Sans", system-ui, sans-serif'], serif: ["Serif (Newsreader)", '"Newsreader", Georgia, serif'], rounded: ["Rounded", '"Nunito", "Varela Round", "Quicksand", system-ui, sans-serif'], mono: ["Monospace", "ui-monospace, \"JetBrains Mono\", Menlo, monospace"] };
 const READ_FONTS = { serif: ["Newsreader (serif)", '"Newsreader", "Iowan Old Style", Georgia, serif'], georgia: ["Georgia", 'Georgia, "Times New Roman", serif'], sans: ["Sans serif", 'system-ui, "Segoe UI", sans-serif'], humanist: ["Humanist sans", '"Cantarell", "Segoe UI", "Noto Sans", sans-serif'], mono: ["Monospace (typewriter)", '"Courier Prime", "Courier New", ui-monospace, monospace'] };
 const ACCENTS = ["#6a4fc4", "#2f6fb0", "#3d7a5a", "#b03a5b", "#a6621b", "#2e7f86", "#8a4fb8", "#5e6b78"];
+const CHAPTER_VARS = ["--writer-para", "--writer-col", "--speech", "--speech-em", "--speech-strong", "--speech-strong-em"];
 function applyAppearance(a = {}) {
     const vars = {};
     if (a.accent) { vars["--app-accent"] = readableAccent(a.accent, false); vars["--app-accent-dark"] = readableAccent(a.accent, true); }
@@ -122,8 +124,16 @@ function applyAppearance(a = {}) {
     if (READ_FONTS[a.readFont] && a.readFont !== "serif") vars["--font-read"] = READ_FONTS[a.readFont][1];
     if (a.writerSize) vars["--writer-size"] = `${a.writerSize}px`;
     if (a.readSize) vars["--read-size"] = `${a.readSize}px`;
+    if (a.writerPara != null) vars["--writer-para"] = `${a.writerPara}em`;
+    if (a.writerWidth >= 400) vars["--writer-col"] = `${a.writerWidth}px`; // a maximum: the column never gets wider than the writer
+    if (a.speechColor) {
+        vars["--speech"] = a.speechColor;
+        if (a.speechItalic) vars["--speech-em"] = a.speechItalic;
+        if (a.speechBold) vars["--speech-strong"] = a.speechBold;
+        if (a.speechBoldItalic) vars["--speech-strong-em"] = a.speechBoldItalic;
+    }
     const st = document.documentElement.style;
-    for (const k of ["--app-accent", "--app-accent-dark", "--font-ui", "--font-read", "--writer-size", "--read-size"]) { if (vars[k]) st.setProperty(k, vars[k]); else st.removeProperty(k); }
+    for (const k of ["--app-accent", "--app-accent-dark", "--font-ui", "--font-read", "--writer-size", "--read-size", ...CHAPTER_VARS]) { if (vars[k]) st.setProperty(k, vars[k]); else st.removeProperty(k); }
     // interface size: the desktop app zooms the window; a browser page zooms the document
     const scale = a.uiScale && a.uiScale !== 1 ? a.uiScale : 1;
     if (typeof window.__wbZoom === "function") window.__wbZoom(scale);
@@ -3041,7 +3051,9 @@ function QAView() {
 
 /** The vault folder: shown, typed or picked from a folder browser; switching reloads the app on the new vault */
 /** Accent, fonts and sizes for this device; each change shows at once and is saved */
-function AppearancePanel({ saved }) {
+function AppearancePanel({ saved: raw }) {
+    // a column width saved as a share of the writer (under 400, an earlier version) counts as unset
+    const saved = raw?.writerWidth < 400 ? (({ writerWidth, ...rest }) => rest)(raw) : raw;
     const [a, setA] = useState(saved);
     const cur = useRef(saved); // the latest values, so quick changes in a row build on each other
     useEffect(() => { setA(saved); cur.current = saved; }, [JSON.stringify(saved)]);
@@ -3082,11 +3094,33 @@ function AppearancePanel({ saved }) {
             <label>Reading and writing font</label>
             <select value=${a.readFont ?? "serif"} onChange=${(e) => change({ readFont: e.target.value === "serif" ? null : e.target.value })}>${Object.entries(READ_FONTS).map(([k, [l]]) => html`<option value=${k}>${l}</option>`)}</select>
             <label>Interface size</label>${stepper("uiScale", 0.8, 1.4, 0.1, 1, (v) => `${Math.round(v * 100)}%`)}
-            <label>Chapter text size</label>${range("writerSize", 13, 28, 1, 18, (v) => `${v}px`)}
             <label>Notes and docs text size</label>${range("readSize", 12, 22, 0.5, 15, (v) => `${v}px`)}
         </div>
-        <div class="appearance-preview"><button class="primary">A button</button><span class="chip on">Selected</span><a href="#/settings">A link</a>
-            <span style="font-family: var(--font-read, var(--serif)); font-size: var(--writer-size, 18px)">The quick brown fox in chapter text.</span></div>
+        <div class="appearance-preview"><button class="primary">A button</button><span class="chip on">Selected</span><a href="#/settings">A link</a></div>
+    </div>
+    <div class="panel">
+        <h3>Chapter text <span class="muted" style="font-weight:400;font-size:13px">the chapter writer, on this device</span></h3>
+        <div class="appearance-grid">
+            <label>Text size</label>${range("writerSize", 13, 28, 1, 18, (v) => `${v}px`)}
+            <label>Paragraph spacing</label>${range("writerPara", 0, 2.5, 0.05, 0.55, (v) => `${Number(v).toFixed(2)} em`)}
+            <label>Column width</label>
+${range("writerWidth", 480, 1600, 20, 760, (v) => `${v}px`)}
+            <label>Speech colour</label>
+            <div class="appearance-range speech-colours">
+                <label class="check"><input type="checkbox" checked=${!!a.speechColor} onChange=${(e) => change(e.target.checked ? { speechColor: "#2f6fb0" } : { speechColor: null })} /> Colour speech in quotes</label>
+                ${a.speechColor && html`<input type="color" value=${a.speechColor} onInput=${(e) => change({ speechColor: e.target.value })} aria-label="Speech colour" />`}
+            </div>
+            ${a.speechColor && [["speechItalic", "Speech in italics"], ["speechBold", "Speech in bold"], ["speechBoldItalic", "Speech in bold italics"]].map(([k, l]) => html`
+                <label>${l}</label>
+                <div class="appearance-range speech-colours">
+                    <label class="check"><input type="checkbox" checked=${!!a[k]} onChange=${(e) => change({ [k]: e.target.checked ? a.speechColor : null })} /> Own colour</label>
+                    ${a[k] ? html`<input type="color" value=${a[k]} onInput=${(e) => change({ [k]: e.target.value })} aria-label=${l} />` : html`<span class="muted small-note">${k === "speechBoldItalic" ? "as bold, else italics, else speech" : "same as speech"}</span>`}
+                </div>`)}
+        </div>
+        <div class="appearance-preview chapter-sample" style="font-family: var(--font-read, var(--serif)); font-size: var(--writer-size, 18px); line-height: 1.7">
+            <p dangerouslySetInnerHTML=${{ __html: inlineHtml("The kettle had gone cold. \"You're late,\" Mara said, without looking up. *\"Again.\"*") }} />
+            <p dangerouslySetInnerHTML=${{ __html: inlineHtml("'I know,' he said, and the dogs' leads tangled. **\"It won't happen twice.\"** ***\"Promise.\"***") }} />
+        </div>
     </div>`;
 }
 
