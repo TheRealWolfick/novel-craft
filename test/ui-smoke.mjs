@@ -1120,6 +1120,11 @@ if (process.env.SETTINGS_DIR) {
         const shaded = readScreen(mk(10, [[0, "  a shaded code line", true], [5, "❯ a message", true]]).map((x, i) => (x.bg ? { ...x, bgColor: i === 0 ? 111 : 3618615 } : x)));
         check(top.bubbles[0]?.cut && top.bubbles[0].n === 2 && top.bubbles.length === 2 && !shaded.bubbles.some((b) => b.cut),
             "a message partly scrolled off the top stays a bubble (only in your messages' colour)", JSON.stringify(top.bubbles));
+        // an expanded tool call right under a message (shaded too) is not part of it
+        const expanded = readScreen(mk(12, [[1, "❯ look up Wade", true], [2, "  and his sister", true], [3, "⏺ Called world-builder 2 times (ctrl+o to collapse)", true], [4, "  ⎿  world-builder - search (MCP)(query: \"Wade\")", true], [5, "     Found 3 notes", true]]).map((x) => (x.bg ? { ...x, bgColor: 3618615 } : x)));
+        const other = readScreen(mk(8, [[1, "❯ a message", true], [2, "  shaded in another colour", true]]).map((x, i) => (x.bg ? { ...x, bgColor: i === 1 ? 3618615 : 222 } : x)));
+        check(expanded.bubbles.length === 1 && expanded.bubbles[0].n === 2 && other.bubbles[0]?.n === 1,
+            "a message's bubble stops at a tool call or rows in another colour", JSON.stringify([expanded.bubbles, other.bubbles]));
         const linked = readScreen(mk(10, [[2, "  Wade is in [[Wade Ptolemy]] and [[Lantern Cross|the Cross]]."], [4, "❯ ask about [[X]]", true]]));
         check(JSON.stringify(linked.links.map((l) => [l.r, l.c, l.len, l.target, l.label])) === JSON.stringify([[2, 13, 16, "Wade Ptolemy", "Wade Ptolemy"], [2, 34, 27, "Lantern Cross", "the Cross"]]),
             "[[links]] in Claude Code's text are found to draw as links (not inside your own messages)", JSON.stringify(linked.links));

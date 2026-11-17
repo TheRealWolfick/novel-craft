@@ -94,18 +94,25 @@ export function readScreen(rows, { msgBg = null } = {}) {
     // the background your messages have (from one on screen now, else the one seen before), for a message whose
     // first rows have scrolled off the top: its remaining rows at the top are the rest of it (cut: true)
     out.msgBg = rows.find((x) => x.text.startsWith("❯ ") && x.bg && x.bgColor != null)?.bgColor ?? msgBg;
+    // a message goes on in rows of its own colour that Claude Code wrapped it into: indented two spaces under its text
+    // (or blank), never a tool call or result (⏺ / ● / ⎿), whose expanded rows can be shaded too
+    const goesOn = (row, color) => row.bg && row.bgColor === color && !row.text.startsWith("❯ ") && (row.text === "" || row.text.startsWith("  ")) && !/^\s*[⏺●⎿]/.test(row.text);
+    const bubble = (r, lines, extra) => {
+        while (lines.length > 1 && !lines.at(-1).trim()) lines.pop();
+        out.bubbles.push({ r, n: lines.length, lines, ...extra });
+    };
     let r0 = 0;
-    if (out.msgBg != null && end > 0 && rows[0].bg && rows[0].bgColor === out.msgBg && !rows[0].text.startsWith("❯ ")) {
+    if (out.msgBg != null && end > 0 && goesOn(rows[0], out.msgBg) && rows[0].text.trim()) {
         const lines = [];
-        while (r0 < end && rows[r0].bg && rows[r0].bgColor === out.msgBg && !rows[r0].text.startsWith("❯ ")) lines.push(rows[r0++].text);
-        out.bubbles.push({ r: 0, n: r0, lines, cut: true });
+        while (r0 < end && goesOn(rows[r0], out.msgBg)) lines.push(rows[r0++].text);
+        bubble(0, lines, { cut: true });
     }
     for (let r = r0; r < end; r++) {
         if (!rows[r].text.startsWith("❯ ") || !rows[r].bg) continue;
         const lines = [rows[r].text.slice(2)];
         let k = 1;
-        while (r + k < end && rows[r + k].bg && !rows[r + k].text.startsWith("❯ ")) { lines.push(rows[r + k].text); k++; }
-        out.bubbles.push({ r, n: k, lines });
+        while (r + k < end && goesOn(rows[r + k], rows[r].bgColor)) { lines.push(rows[r + k].text); k++; }
+        bubble(r, lines);
         r += k - 1;
     }
     const inBubble = (r) => out.bubbles.some((b) => r >= b.r && r < b.r + b.n);
