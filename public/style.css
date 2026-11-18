@@ -748,7 +748,7 @@ input.be-mark { width: auto; top: .45em; margin: 0; }
 .be-ul > .be-mirror, .be-ol > .be-mirror, .be-task > .be-mirror { left: calc((var(--level, 0) + 1) * 26px); }
 .be-mirror em, .be-mirror strong, .be-mirror s, .be-mirror mark { font: inherit; text-decoration: none; background: none; }
 .be-row textarea.be-over { color: transparent; caret-color: var(--text); }
-.be-row textarea.be-over::selection { color: transparent; }
+.be-row textarea.be-over::selection { color: transparent; background: color-mix(in srgb, var(--accent) 32%, transparent); }
 .writer-preview > p { text-align: justify; text-indent: 1em; margin: 0 0 var(--writer-para, .55em); }
 .writer-preview > p:has(> img.embed:only-child) { text-indent: 0; text-align: center; }
 .writer-preview img.embed, .be-render img.embed { display: block; margin: 1.2em auto; max-width: 100%; max-height: none; border-radius: 0; }
