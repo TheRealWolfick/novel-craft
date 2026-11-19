@@ -63,7 +63,7 @@ Callouts and image lines show rendered, styled the way the [callout designer](do
 
 ## Find in the chapter
 
-The find box in the writer's header highlights every match; <kbd>Enter</kbd> and <kbd>Shift</kbd>+<kbd>Enter</kbd> (or the arrows) step through them. <kbd>Ctrl</kbd>+<kbd>F</kbd> inside the writer jumps to it.
+The find box in the writer's header highlights every match; <kbd>Enter</kbd> and <kbd>Shift</kbd>+<kbd>Enter</kbd> (or <kbd>Ctrl</kbd>+<kbd>↓</kbd> / <kbd>↑</kbd>) step through them. <kbd>Ctrl</kbd>+<kbd>F</kbd> inside the writer jumps to the box, and pressed again goes back to where you were writing. <kbd>Escape</kbd> clears the search and puts the cursor in the text at the current match.
 
 ![Find highlights every match](img/writer-find.png)
 

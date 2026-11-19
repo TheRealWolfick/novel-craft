@@ -71,9 +71,19 @@ function ChapterWriter({ folder, n, index }) {
     const [showFields, setShowFieldsState] = useState(store.get("writerFields", true));
     const setShowFields = (v) => { setShowFieldsState(v); store.set("writerFields", v); };
     const startWords = useRef(null);
+    const latest = useRef({});
+    latest.current = { draft, fmEdits };
     const bodyRef = useRef();
     const findRef = useRef();
+    const editorApi = useRef(null);
     const find = useFind(bodyRef);
+    // back from the find bar: to the current match (Escape), else to where you were writing
+    const leaveFind = (match) => {
+        const ed = editorApi.current;
+        if (ed && match) ed.editAtNode(match.startContainer, match.startOffset);
+        else if (ed) ed.resume();
+        else findRef.current?.blur();
+    };
     const c = data?.chapter;
     // where you were in this chapter, also after a restart (the block at the top of the view, so a new width still fits)
     useScrollMemory(bodyRef, `writer:${folder}:${n}`, { ready: !!c, rows: ".be-page > .be-row" });
@@ -99,16 +109,29 @@ function ChapterWriter({ folder, n, index }) {
         setBusy(true); setErr("");
         try {
             const set = Object.fromEntries(changedKeys.map((k) => [k, coerceNum(fmEdits[k])]));
+            const sentDraft = draft, sentFm = fmEdits;
             const r = await api.send("PATCH", "/api/note", { path: c.path, set, body: bodyChanged ? draft : undefined, baseMtime: baseMtime ?? mtime });
             setSaved({ mtime: r.mtime, fm: { ...(fresh ? {} : saved.fm), ...set }, body: bodyChanged ? draft : fresh ? null : saved.body });
-            reset();
+            // what was typed while the save was on its way stays (resetting to the sent text lost it and closed the block)
+            const later = latest.current;
+            const keepDraft = later.draft !== sentDraft;
+            const keepFm = Object.keys(later.fmEdits).filter((k) => later.fmEdits[k] !== sentFm[k]);
+            setDraft((d) => (d === sentDraft ? null : d));
+            setFmEdits((cur) => Object.fromEntries(Object.entries(cur).filter(([k, v]) => v !== sentFm[k])));
+            setBaseMtime(keepDraft || keepFm.length ? r.mtime : null);
+            setErr("");
             toast("Chapter saved");
         } catch (e) { setErr(e.message); }
         setBusy(false);
     };
     const go = (m) => { if (m != null) openWriter(folder, m); };
     const onKeyDown = (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === "f" && c) { e.preventDefault(); findRef.current?.focus(); findRef.current?.select(); return; }
+        if ((e.ctrlKey || e.metaKey) && e.key === "f" && c) {
+            e.preventDefault();
+            if (document.activeElement === findRef.current) leaveFind(null);
+            else { findRef.current?.focus(); findRef.current?.select(); }
+            return;
+        }
         if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); save(); }
         if ((e.ctrlKey || e.metaKey) && e.key === "e" && c) { e.preventDefault(); setPreview(!preview); }
     };
@@ -116,7 +139,7 @@ function ChapterWriter({ folder, n, index }) {
     const title = (changedKeys.includes("chapter title") ? fmEdits["chapter title"] : fm["chapter title"]) || c?.title || data.workingTitle;
     return html`<div class="writer-inner" onKeyDown=${onKeyDown}>
         <header class="writer-head">
-            ${c && html`<${FindBar} find=${find} inputRef=${findRef} />`}
+            ${c && html`<${FindBar} find=${find} inputRef=${findRef} onLeave=${leaveFind} />`}
             <div class="writer-title">
                 <div class="muted">${data.novel}</div>
                 <b>Chapter ${data.n}${title ? `: ${title}` : ""}</b>
@@ -141,7 +164,7 @@ function ChapterWriter({ folder, n, index }) {
                         ${READONLY.has(k) ? html`<div class="ro muted">${String(fm[k] ?? "")}</div>` : chapterField(k, k in fmEdits ? fmEdits[k] : fm[k], fm[k], (v) => editField(k, v), index, novelLinks)}
                     </div>`)}</div>`}
                 </section>
-                ${preview ? html`<${Preview} md=${text} /> ` : html`<${BlockEditor} value=${text} onChange=${editBody} breaks=${data.breaks ?? []} />`}
+                ${preview ? html`<${Preview} md=${text} /> ` : html`<${BlockEditor} value=${text} onChange=${editBody} breaks=${data.breaks ?? []} api=${editorApi} />`}
             `}
         </div>
         ${c && html`<footer class="writer-foot">
@@ -225,21 +248,23 @@ function useFind(rootRef) {
         setCur(i);
         show(i);
     };
-    return { q, setQ: (v) => { setQ(v); setCur(0); }, cur: Math.min(cur, Math.max(0, count - 1)), count, next: () => go(1), prev: () => go(-1), show: () => show(Math.min(cur, count - 1)) };
+    return { q, setQ: (v) => { setQ(v); setCur(0); }, cur: Math.min(cur, Math.max(0, count - 1)), count, current: () => ranges.current[Math.min(cur, ranges.current.length - 1)] ?? null, next: () => go(1), prev: () => go(-1), show: () => show(Math.min(cur, count - 1)) };
 }
 
-function FindBar({ find, inputRef }) {
+function FindBar({ find, inputRef, onLeave }) {
     useEffect(() => { if (find.q) find.show(); }, [find.q, find.count > 0]);
     return html`<div class="writer-find" role="search">
         <input ref=${inputRef} type="search" placeholder="Find in chapter…" aria-label="Find in chapter" value=${find.q}
             onInput=${(e) => find.setQ(e.target.value)}
             onKeyDown=${(e) => {
                 if (e.key === "Enter") { e.preventDefault(); e.shiftKey ? find.prev() : find.next(); }
-                if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); find.setQ(""); }
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.key === "ArrowUp" ? find.prev() : find.next(); }
+                // Escape: clear the search and go back into the text at the current match
+                if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); const m = find.q ? find.current() : null; find.setQ(""); onLeave?.(m); }
             }} />
         <span class="muted find-count">${find.q ? (find.count ? `${find.cur + 1} / ${find.count}` : "0") : ""}</span>
-        <button class="small" title="Previous match (Shift+Enter)" aria-label="Previous match" disabled=${!find.count} onClick=${find.prev}>↑</button>
-        <button class="small" title="Next match (Enter)" aria-label="Next match" disabled=${!find.count} onClick=${find.next}>↓</button>
+        <button class="small" title="Previous match (Shift+Enter, Ctrl+↑)" aria-label="Previous match" disabled=${!find.count} onClick=${find.prev}>↑</button>
+        <button class="small" title="Next match (Enter, Ctrl+↓)" aria-label="Next match" disabled=${!find.count} onClick=${find.next}>↓</button>
     </div>`;
 }
 
@@ -364,12 +389,18 @@ function sourceOffsetAt(x, y) {
 const HISTORY = 200;
 
 /**
+ * The blur came from the whole window losing focus (another window took it: focus follows the mouse, a notification,
+ * Alt+Tab), not from moving within the page: the block stays open and gets the keyboard back with the window.
+ */
+const windowBlur = () => typeof document.hasFocus === "function" && !document.hasFocus();
+
+/**
  * Chapter text editor. One textarea per block; Enter starts the next paragraph (or list item), Shift+Enter breaks the
  * line inside it, Backspace at the start turns a heading/list/quote back into a paragraph or joins the one above,
  * Tab / Shift+Tab indent list items, Alt+↑↓ moves a block. Typing "# ", "- ", "1. ", "> " or "- [ ] " at the start of
  * a paragraph turns it into that block; "---" + Enter makes a divider. Ctrl+Z / Ctrl+Shift+Z undo and redo.
  */
-export function BlockEditor({ value, onChange, breaks = [], callouts = true, sceneBreaks = true, compact = false, autoFocus = false }) {
+export function BlockEditor({ value, onChange, breaks = [], callouts = true, sceneBreaks = true, compact = false, autoFocus = false, api: handle = null }) {
     const [doc, setDoc] = useState(() => withBlock(parseBlocks(value)));
     const [editing, setEditing] = useState(null); // id of the block whose text is being edited (the others show formatted)
     // block mode: whole blocks selected (anchor .a, head .h: indices), the arrows move by block; armed: Backspace pressed once
@@ -388,11 +419,13 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
     const heights = useRef(new WeakMap()); // textarea -> text its height was fitted for
     const box = useRef();
     const hist = useRef({ undo: [], redo: [], at: 0 });
-    useEffect(() => {
+    // a layout effect, so it compares in the same pass as the render: a plain effect ran a moment later, after a fast
+    // next keystroke had already moved `emitted` on, and took the text from one key earlier for a change from outside
+    useLayoutEffect(() => {
         if ((value ?? "") === emitted.current) return;
         emitted.current = value ?? "";
         hist.current = { undo: [], redo: [], at: 0 };
-        setDoc(withBlock(parseBlocks(value)));
+        setDoc((d) => withBlock(keepIds(d.blocks, parseBlocks(value))));
     }, [value]);
     const blocks = doc.blocks;
     // fit textareas whose text changed (all of them when the width changes)
@@ -766,6 +799,18 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
     };
 
     const track = (i) => (e) => { cur.current = { i, start: e.target.selectionStart, end: e.target.selectionEnd }; };
+    // for the writer's find bar: go back to where you were, or into the text at a place in the shown (formatted) text
+    if (handle) handle.current = {
+        resume: () => { const { i, start, end } = cur.current; focus.current = { i, pos: start, end }; setBsel(null); setDoc((d) => ({ ...d })); },
+        editAtNode: (node, off) => {
+            const row = (node.nodeType === 3 ? node.parentElement : node)?.closest(".be-row");
+            const i = row ? [...page.current.children].indexOf(row) : -1;
+            if (i < 0) return handle.current.resume();
+            const span = node.nodeType === 3 ? node.parentElement.closest("[data-s]") : null;
+            focus.current = { i, pos: span ? Number(span.dataset.s) + off : 0 };
+            setBsel(null); setDoc((d) => ({ ...d }));
+        },
+    };
     const tool = (f) => (e) => { e.preventDefault(); f(cur.current.i); };
     const curBlock = blocks[cur.current.i];
     const kindOf = (b) => (!b ? "" : b.kind === "h" ? `h${b.level}` : b.kind === "quote" && /^\[!/.test(b.text) ? "callout" : b.kind);
@@ -790,7 +835,7 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
             </span>
         </div>
         <div class=${`be-page ${bsel ? "block-mode" : ""}`} ref=${page} tabIndex="-1" onKeyDown=${onPageKey} onCopy=${onPageCopy(false)} onCut=${onPageCopy(true)} onPaste=${onPagePaste}
-            onBlur=${(e) => { if (e.target === page.current && !page.current.contains(e.relatedTarget)) { setBsel(null); setArmed(false); } }}>
+            onBlur=${(e) => { if (windowBlur()) return; if (e.target === page.current && !page.current.contains(e.relatedTarget)) { setBsel(null); setArmed(false); } }}>
             ${blocks.map((b, i) => showsRendered(b) && editing !== b.id ? html`<div key=${b.id} class=${`be-row be-rendered ${b.kind === "p" ? "be-image" : "be-quote-view"}${selCls(i)}`}>
                 <div class="be-render md" tabIndex="0" role="button" aria-label=${b.kind === "p" ? "Image line: Enter to edit" : "Callout: Enter to edit"} title="Click to edit"
                     onClick=${(e) => {
@@ -827,7 +872,7 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
                     aria-label=${b.kind === "hr" ? "Divider" : undefined}
                     onInput=${onInput(i)} onKeyDown=${onKeyDown(i)} onPaste=${onPaste(i)}
                     onFocus=${(e) => { track(i)(e); if (bsel) { setBsel(null); setArmed(false); } if (editing !== b.id) setEditing(b.id); }} onSelect=${track(i)} onKeyUp=${track(i)} onMouseUp=${track(i)}
-                    onBlur=${() => setEditing((cur) => (cur === b.id ? null : cur))} />
+                    onBlur=${() => { if (windowBlur()) return; setEditing((cur) => (cur === b.id ? null : cur)); }} />
             </div>`)}
         </div>
         <div class="plan-hint muted">Enter: new paragraph · Shift+Enter: line break · "# ", "- ", "1. ", "> " at the start: heading, list, quote · Tab: indent list · Alt+↑↓: move · Ctrl+B / I / K: bold, italic, link · ${sceneBreaks ? "Ctrl+Shift+Enter: scene break · " : ""}click text to edit it · Ctrl+click a link to open it<br />
@@ -853,6 +898,19 @@ function keepApart(prev, next) {
         out[k] = { ...a, sep: "\n\n" };
     }
     return out;
+}
+
+/**
+ * The text came from outside (the file changed on disk): blocks at the start and end that read the same keep their ids,
+ * so the block you are writing in stays open and the rows around it aren't rebuilt.
+ */
+function keepIds(prev, doc) {
+    const same = (a, b) => a.kind === b.kind && a.text === b.text && (a.level ?? 0) === (b.level ?? 0);
+    const next = doc.blocks;
+    let k = 0;
+    while (k < prev.length && k < next.length && same(prev[k], next[k])) { next[k] = { ...next[k], id: prev[k].id }; k++; }
+    for (let j = 1; j <= Math.min(prev.length, next.length) - k && same(prev.at(-j), next.at(-j)); j++) next[next.length - j] = { ...next.at(-j), id: prev.at(-j).id };
+    return doc;
 }
 
 // an empty document still has one paragraph to type in

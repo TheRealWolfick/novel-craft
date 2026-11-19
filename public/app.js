@@ -1918,7 +1918,7 @@ function PlanEditor({ value, onChange, placeholder = "First event…" }) {
     const focus = useRef(null);
     const box = useRef();
     // external changes (saved elsewhere, reloaded) replace the outline unless they are our own output
-    useEffect(() => { if ((value ?? "") !== emitted.current) { emitted.current = value ?? ""; setItems(fromValue(value)); } }, [value]);
+    useLayoutEffect(() => { if ((value ?? "") !== emitted.current) { emitted.current = value ?? ""; setItems(fromValue(value)); } }, [value]);
     const fit = () => fitHeights(refs.current);
     useLayoutEffect(() => {
         fit();
