@@ -826,6 +826,16 @@ function Loading({ error }) {
     return error ? html`<p class="error">${error}</p>` : html`<p class="muted">Loading…</p>`;
 }
 
+/** The nearest ancestor that `position: fixed` children are placed in instead of the window (null: the window) */
+function fixedBox(el) {
+    for (let n = el?.parentElement; n && n !== document.body; n = n.parentElement) {
+        const cs = getComputedStyle(n);
+        if (cs.transform !== "none" || /transform|perspective|filter/.test(cs.willChange) || /paint|layout|strict|content/.test(cs.contain)
+            || (cs.filter && cs.filter !== "none") || (cs.backdropFilter && cs.backdropFilter !== "none") || (cs.perspective && cs.perspective !== "none")) return n;
+    }
+    return null;
+}
+
 /** Text input with suggestions; picks one value. `clearOnPick`: the box empties after each pick (adding to a list) */
 function Picker({ value, options, onChange, placeholder, allowFree = true, onCreate, createLabel = "Create", autoFocus, onClear, clearOnPick = false }) {
     const [text, setText] = useState(value ?? "");
@@ -851,7 +861,11 @@ function Picker({ value, options, onChange, placeholder, allowFree = true, onCre
             const vh = globalThis.innerHeight ?? 800;
             const below = vh - r.bottom - 8, above = r.top - 8;
             const up = below < 220 && above > below;
-            setPlace({ left: r.left, width: Math.max(r.width, 220), up, top: up ? null : r.bottom + 2, bottom: up ? vh - r.top + 2 : null, max: Math.max(120, Math.min(up ? above : below, vh * 0.6)) });
+            // inside a box with a transform / will-change / containment (the drawers, for their slide), "fixed" is
+            // relative to that box, not the window: place the list in its coordinates
+            const cb = fixedBox(input.current);
+            const o = cb ? cb.getBoundingClientRect() : { left: 0, top: 0, height: vh };
+            setPlace({ left: r.left - o.left, width: Math.max(r.width, 220), up, top: up ? null : r.bottom + 2 - o.top, bottom: up ? o.top + o.height - r.top + 2 : null, max: Math.max(120, Math.min(up ? above : below, vh * 0.6)) });
         };
         measure();
         addEventListener("scroll", measure, true);
