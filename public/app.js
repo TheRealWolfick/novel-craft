@@ -1593,7 +1593,7 @@ const SUMMARY = {
     Locations: { facts: ["scale", "parent", "world", "cat", "controlled-by", "population", "size", "climate"], sections: [] },
     Factions: { facts: ["cat", "world", "seat", "power-system"], sections: ["territory", "members", "relations/friendly", "relations/neutral", "relations/hostile"] },
     taxonomy: { facts: ["parent", "class"], sections: [] },
-    characters: { facts: ["race", "gender", "alive", "age-current", "member-of", "character/power-system", "character/level", "character/sub-level", "character/talent"], sections: ["personality", "appearance", "character/skills"] },
+    characters: { facts: ["race", "gender", "alive", "age-current", "member-of", "character/power-system", "character/level", "character/sub-level", "character/talent"], sections: ["personality", "appearance"] },
 };
 const fieldLabel = (k) => { const t = k.split("/").pop().replace(/-/g, " "); return t[0].toUpperCase() + t.slice(1); };
 const filled = (v) => !(v == null || v === "" || (Array.isArray(v) && !v.length));
@@ -1604,15 +1604,24 @@ function NoteSummary({ page, index }) {
         ?? SUMMARY[page.collection] ?? (page.collection?.startsWith("Taxonomy/") ? SUMMARY.taxonomy : fm.type === "character" ? SUMMARY.characters : null);
     const facts = (spec?.facts ?? []).filter((k) => filled(fm[k]));
     const sections = (spec?.sections ?? []).filter((k) => filled(fm[k]));
-    if (!filled(fm.description) && !facts.length && !sections.length) return null;
     const value = (k) => k === "value" && filled(fm.currency) ? html`${fm.value} <${Value} v=${fm.currency} links=${page.links} index=${index} />`
         : html`<${Value} v=${fm[k]} links=${page.links} index=${index} />`;
-    return html`<div class="panel note-summary">
-        ${filled(fm.description) && html`<p class="lead">${String(fm.description)}</p>`}
-        ${facts.length > 0 && html`<dl class="facts">${facts.map((k) => html`<div><dt>${fieldLabel(k)}</dt><dd>${value(k)}</dd></div>`)}</dl>`}
-        ${sections.map((k) => html`<h4>${fieldLabel(k)}</h4><div class="summary-section">${typeof fm[k] === "string" && !isLink(fm[k])
-            ? html`<p>${fm[k]}</p>` : value(k)}</div>`)}
-    </div>`;
+    const text = (k) => (typeof fm[k] === "string" && !isLink(fm[k]) ? html`<p>${fm[k]}</p>` : value(k));
+    // characters: skills and relationships each get a box of their own, only when they have anything
+    const isChar = fm.type === "character";
+    const skills = isChar && filled(fm["character/skills"]);
+    const relations = isChar ? Object.keys(fm).filter((k) => k.startsWith("relations/") && filled(fm[k])) : [];
+    const main = filled(fm.description) || facts.length > 0 || sections.length > 0;
+    if (!main && !skills && !relations.length) return null;
+    return html`
+        ${main && html`<div class="panel note-summary">
+            ${filled(fm.description) && html`<p class="lead">${String(fm.description)}</p>`}
+            ${facts.length > 0 && html`<dl class="facts">${facts.map((k) => html`<div><dt>${fieldLabel(k)}</dt><dd>${value(k)}</dd></div>`)}</dl>`}
+            ${sections.map((k) => html`<h4>${fieldLabel(k)}</h4><div class="summary-section">${text(k)}</div>`)}
+        </div>`}
+        ${skills && html`<div class="panel note-summary"><h3>Skills</h3><div class="summary-section">${text("character/skills")}</div></div>`}
+        ${relations.length > 0 && html`<div class="panel note-summary"><h3>Relationships</h3>
+            <dl class="facts">${relations.map((k) => html`<div><dt>${fieldLabel(k)}</dt><dd>${value(k)}</dd></div>`)}</dl></div>`}`;
 }
 
 // Ranked taxonomy notes (`ordered: true`) show every value of their facet in `class` order
@@ -1634,6 +1643,9 @@ function NoteView({ index, path, scope = "page" }) {
         "@characters": plan.characters.map((c) => ({ label: c.name })),
     }, [plan]);
     const [renaming, setRenaming] = useState(false);
+    // a character in the drawer: its sheet and its ledgers as two tabs
+    const [charTab, setCharTabState] = useState(() => store.get("characterTab", "sheet"));
+    const setCharTab = (t) => { setCharTabState(t); store.set("characterTab", t); };
     const pick = useItemPick();
     // a character's relation fields pick from the characters of its own novel
     const charNovel = page?.fm.type === "character" ? index?.novels.find((n) => page.path.startsWith(`${n.folder}/`))?.folder : null;
@@ -1677,6 +1689,7 @@ function NoteView({ index, path, scope = "page" }) {
     const startRename = () => { if (!dirtyForms.has(`${scope}:${page.path}`) || confirm("Renaming reloads this note. Discard unsaved changes?")) setRenaming(true); };
     const backlinks = Object.keys(page.backlinks).length > 0 && html`<div class="panel"><h3>Linked from</h3>${linkGroups(page.backlinks)}</div>`;
     const outlinks = Object.keys(page.outlinks ?? {}).length > 0 && html`<div class="panel"><h3>Links to</h3>${linkGroups(page.outlinks)}</div>`;
+    const charTabs = scope === "drawer" && page.fm.type === "character" && !!novel;
     return html`<div>
         ${renaming && html`<${RenameDialog} path=${page.path} onDone=${renamed} onClose=${() => setRenaming(false)} />`}
         <div class="spread">
@@ -1686,7 +1699,7 @@ function NoteView({ index, path, scope = "page" }) {
                     ${page.fm.status ? html` <span class="badge">${page.fm.status}</span>` : ""}</h1>
             </div>
             <div class="row">
-                ${page.fm.type === "character" && novel && html`<button onClick=${() => go(`#/owner/${encodeURIComponent(novel.folder)}/${encodeURIComponent(page.name)}`)}>Ledgers</button>`}
+                ${page.fm.type === "character" && novel && scope !== "drawer" && html`<button onClick=${() => go(`#/owner/${encodeURIComponent(novel.folder)}/${encodeURIComponent(page.name)}`)}>Ledgers</button>`}
                 ${pickable(pick, page.collection) && html`<button class="primary" onClick=${() => pick.pick(page.name)}>Use this for ${pick.label}</button>`}
                 ${page.collection === "Items" && !page.blueprint && html`<button title="Make the recipe (blueprint) for this item" onClick=${() => { if (scope === "drawer") collapseDrawer(); go(`#/newrecipe/${encodeURIComponent(page.path)}`); }}>Create recipe</button>`}
                 ${["Items", "Materials"].includes(page.collection) && html`<button title="Copy as an item callout (like a game's item tooltip)" onClick=${() => copyText(itemCallout(page, spec), `Copied ${page.name} as a callout`)}>⧉ Copy callout</button>`}
@@ -1696,7 +1709,12 @@ function NoteView({ index, path, scope = "page" }) {
             </div>
         </div>
         ${page.fmError && html`<div class="warnbox">Frontmatter could not be read: ${page.fmError}</div>`}
-        ${scope === "drawer"
+        ${charTabs && html`<div class="tabs note-tabs" role="tablist">
+            <button role="tab" aria-selected=${charTab !== "ledger"} class=${charTab !== "ledger" ? "on" : ""} onClick=${() => setCharTab("sheet")}>Character</button>
+            <button role="tab" aria-selected=${charTab === "ledger"} class=${charTab === "ledger" ? "on" : ""} onClick=${() => setCharTab("ledger")}>Ledger</button>
+        </div>`}
+        ${charTabs && charTab === "ledger" && html`<${OwnerView} key=${page.name} index=${index} folder=${novel.folder} owner=${page.name} params=${new URLSearchParams()} embedded=${true} />`}
+        <div hidden=${charTabs && charTab === "ledger"}>${scope === "drawer"
             // drawer: summary, content, then images on the left; frontmatter and links on the right
             // (plan notes keep their fields, which are the plan, on the left)
             ? html`<${ClassStrip} page=${page} index=${index} />
@@ -1706,7 +1724,7 @@ function NoteView({ index, path, scope = "page" }) {
             </div>`
             : html`<${Gallery} images=${page.images} />
                 <div class=${page.plan ? "" : "grid2"}>${fields}<div>${usage}${imageDrop}</div></div>
-                ${content}${backlinks}${outlinks}`}
+                ${content}${backlinks}${outlinks}`}</div>
     </div>`;
 }
 
@@ -2549,7 +2567,8 @@ function EntryCard({ e, folder, behaviour, future, showOwner }) {
     </div>`;
 }
 
-function OwnerView({ index, folder, owner, params }) {
+/** An owner's ledgers and holdings at a chapter. `embedded`: inside a character's drawer page (its Ledger tab), without the heading and sheet */
+function OwnerView({ index, folder, owner, params, embedded = false }) {
     const [at, setAt] = useState(params.get("at") ? Number(params.get("at")) : null);
     const [compare, setCompare] = useState(null);
     const [tab, setTab] = useState(params.get("type") ?? null);
@@ -2564,13 +2583,13 @@ function OwnerView({ index, folder, owner, params }) {
     const sheet = data.sheet;
     return html`<div>
         <div class="spread">
-            <div><div class="muted"><a href=${novelHref(folder)}>${novel.name}</a></div><h1>${owner}</h1></div>
+            ${embedded ? html`<span />` : html`<div><div class="muted"><a href=${novelHref(folder)}>${novel.name}</a></div><h1>${owner}</h1></div>`}
             <div class="row">
-                ${sheet && html`<button onClick=${() => go(noteHref(sheet.path))}>Sheet</button>`}
+                ${sheet && !embedded && html`<button onClick=${() => go(noteHref(sheet.path))}>Sheet</button>`}
                 <button class="primary" onClick=${() => go(entryHref(folder, { owner, type: current?.type ?? "Inventory" }))}>New ${current?.type ?? ""} entry</button>
             </div>
         </div>
-        ${sheet && html`<div class="panel"><div class="row" style="align-items:flex-start">
+        ${sheet && !embedded && html`<div class="panel"><div class="row" style="align-items:flex-start">
             ${sheet.images[0] && html`<img src=${sheet.images[0]} style="height:110px;border-radius:6px" />`}
             <div style="flex:1"><dl class="fields">${["race", "member-of", "character/power-system", "character/level", "character/sub-level", "character/talent", "alive", "age-current"].filter((k) => sheet.fm[k] != null && sheet.fm[k] !== "").map((k) => html`<dt>${k}</dt><dd><${Value} v=${sheet.fm[k]} links=${sheet.links} /></dd>`)}</dl></div>
         </div></div>`}

@@ -145,10 +145,13 @@ function ChapterWriter({ folder, n, index }) {
                 <b>Chapter ${data.n}${title ? `: ${title}` : ""}</b>
             </div>
             <div class="row">
-                <button class="small" disabled=${data.prev == null} title="Previous chapter" onClick=${() => go(data.prev)}>←</button>
-                <button class="small" title="Next chapter" onClick=${() => go(data.next ?? data.n + 1)}>→</button>
+                <span class="writer-nav">
+                    <button class="small" disabled=${data.prev == null} title="Previous chapter" aria-label="Previous chapter" onClick=${() => go(data.prev)}>←</button>
+                    <button class="small" title="Next chapter" aria-label="Next chapter" onClick=${() => go(data.next ?? data.n + 1)}>→</button>
+                </span>
                 ${c && html`<span class="muted writer-words" title="Words in this chapter (comments and markup don't count)">${words.toLocaleString()} words${words !== startWords.current ? html` <span class=${words > startWords.current ? "up" : "down"}>${words > startWords.current ? "+" : "−"}${Math.abs(words - startWords.current)}</span>` : ""}</span>`}
                 ${c && html`<button class=${`small ${preview ? "on" : ""}`} aria-pressed=${preview} title="Preview (Ctrl+E)" onClick=${() => setPreview(!preview)}>Preview</button>`}
+                <button class="small" title="Show this chapter's plan in the drawer" onClick=${() => openInDrawer(chapterHref(folder, n))}>Plan</button>
                 ${c && html`<button class="primary small" disabled=${!dirty || busy} onClick=${save}>${busy ? "Saving…" : "Save"}</button>`}
                 <button class="small" title="Collapse the writer (Ctrl+[)" onClick=${collapseWriter}>«</button>
             </div>
@@ -262,9 +265,11 @@ function FindBar({ find, inputRef, onLeave }) {
                 // Escape: clear the search and go back into the text at the current match
                 if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); const m = find.q ? find.current() : null; find.setQ(""); onLeave?.(m); }
             }} />
+        <span class="find-steps">
+            <button class="small" title="Previous match (Shift+Enter, Ctrl+↑)" aria-label="Previous match" disabled=${!find.count} onClick=${find.prev}>↑</button>
+            <button class="small" title="Next match (Enter, Ctrl+↓)" aria-label="Next match" disabled=${!find.count} onClick=${find.next}>↓</button>
+        </span>
         <span class="muted find-count">${find.q ? (find.count ? `${find.cur + 1} / ${find.count}` : "0") : ""}</span>
-        <button class="small" title="Previous match (Shift+Enter, Ctrl+↑)" aria-label="Previous match" disabled=${!find.count} onClick=${find.prev}>↑</button>
-        <button class="small" title="Next match (Enter, Ctrl+↓)" aria-label="Next match" disabled=${!find.count} onClick=${find.next}>↓</button>
     </div>`;
 }
 
@@ -875,8 +880,8 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
                     onBlur=${() => { if (windowBlur()) return; setEditing((cur) => (cur === b.id ? null : cur)); }} />
             </div>`)}
         </div>
-        <div class="plan-hint muted">Enter: new paragraph · Shift+Enter: line break · "# ", "- ", "1. ", "> " at the start: heading, list, quote · Tab: indent list · Alt+↑↓: move · Ctrl+B / I / K: bold, italic, link · ${sceneBreaks ? "Ctrl+Shift+Enter: scene break · " : ""}click text to edit it · Ctrl+click a link to open it<br />
-            Escape: select blocks · then ↑↓: move · Shift+↑↓ / Shift+click: select more · Enter or Space: edit · Shift+Enter: new paragraph · Backspace twice: delete · Ctrl+B / I…: format them all · Ctrl+C / X / V · Alt+↑↓: move them</div>
+        ${!compact && html`<div class="plan-hint muted">Enter: new paragraph · Shift+Enter: line break · "# ", "- ", "1. ", "> " at the start: heading, list, quote · Tab: indent list · Alt+↑↓: move · Ctrl+B / I / K: bold, italic, link · ${sceneBreaks ? "Ctrl+Shift+Enter: scene break · " : ""}click text to edit it · Ctrl+click a link to open it<br />
+            Escape: select blocks · then ↑↓: move · Shift+↑↓ / Shift+click: select more · Enter or Space: edit · Shift+Enter: new paragraph · Backspace twice: delete · Ctrl+B / I…: format them all · Ctrl+C / X / V · Alt+↑↓: move them</div>`}
     </div>`;
 }
 

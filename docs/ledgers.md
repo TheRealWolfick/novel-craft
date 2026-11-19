@@ -17,7 +17,7 @@ A ledger records what happens to one owner (a character, but also a ship, a trai
 
 ## An owner's ledgers
 
-Click a character on the novel page's **Characters & ledgers** tab. The owner page shows every ledger, with what they hold or know at the chapter on the slider. Compare two chapters to see what changed.
+Click a character on the novel page's **Characters & ledgers** tab. The owner page shows every ledger, with what they hold or know at the chapter on the slider. Compare two chapters to see what changed. A character opened in the side drawer has the same view on its **Ledger** tab, next to the **Character** tab with the sheet.
 
 ![Mara Venn's ledgers](img/owner.png)
 

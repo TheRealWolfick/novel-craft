@@ -103,7 +103,7 @@ export const DEFAULT_STYLES = {
         label: "Pencil note", font: "hand", width: 85, align: "center", padding: 4, radius: 0, margin: 0.4, rotate: -0.5, fontSize: 0.92,
         titleColor: "#6c675f", titleWeight: "400", titleSize: 0.92, textColor: "#6c675f", highlight: "underline", lineHeight: 1.5, barColor: "#6c675f", barWidth: 1,
         dark: { titleColor: "#bcb5b1", textColor: "#bcb5b1", barColor: "#bcb5b1" },
-        css: "& .callout-title { text-decoration: underline wavy color-mix(in srgb, currentColor 60%, transparent) 1px; text-underline-offset: .25em; }\n& { border-radius: 60% 0 0 60% / 10% 0 0 10%; }",
+        css: "& .callout-title { text-decoration: underline wavy color-mix(in srgb, currentColor 60%, transparent) 1px; text-underline-offset: .25em; }\n& { border-radius: .45em 0 0 .45em / 40% 0 0 40%; }",
     },
 };
 

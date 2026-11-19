@@ -69,6 +69,6 @@ The find box in the writer's header highlights every match; <kbd>Enter</kbd> and
 
 ## Saving
 
-**Save** (or <kbd>Ctrl</kbd>+<kbd>S</kbd>) writes only what changed: untouched paragraphs keep their exact text, and the frontmatter is only rewritten when you changed a field. **Preview** (<kbd>Ctrl</kbd>+<kbd>E</kbd>) shows the chapter as it reads.
+**Save** (or <kbd>Ctrl</kbd>+<kbd>S</kbd>) writes only what changed: untouched paragraphs keep their exact text, and the frontmatter is only rewritten when you changed a field. **Preview** (<kbd>Ctrl</kbd>+<kbd>E</kbd>) shows the chapter as it reads. **Plan** brings the chapter's plan back into the drawer when you've opened something else there.
 
 > [!warning] If the chapter changed in Obsidian since you opened it, saving stops and offers to load the saved version. Copy anything you want to keep first.

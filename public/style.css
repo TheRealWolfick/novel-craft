@@ -361,6 +361,9 @@ th:hover { color: var(--text); }
     .formgrid, .drawer .formgrid { grid-template-columns: 1fr; }
 }
 button.danger.armed { background: var(--bad); border-color: var(--bad); color: var(--on-accent); }
+/* armed stays readable on hover (icon and other buttons' hover colours would turn the text the same red) */
+button.danger.armed:hover, button.danger.armed:focus-visible { background: var(--bad); border-color: var(--bad); color: var(--on-accent) !important; filter: brightness(1.08); }
+.note-tabs { margin: 4px 0 12px; }
 
 /* ---------------------------------------------------------------- world builder */
 .sidebar a.side-pill { display: flex; justify-content: space-between; align-items: center; margin: 18px 0 0; padding: 5px 12px; border: 1.5px solid var(--accent); border-radius: 999px;
@@ -659,7 +662,11 @@ table.holdings td.copy-cell { width: 1%; padding-left: 6px; }
 .writer-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .writer-head { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .writer-title { min-width: 180px; flex: 1 1 220px; order: -1; }
-.writer-find { display: flex; align-items: center; gap: 4px; flex: 0 1 300px; min-width: 160px; }
+.writer-find { display: flex; align-items: center; gap: 4px; flex: 1 1 380px; max-width: 520px; min-width: 200px; }
+/* ↑↓ sit right against the find box; ← → (chapters) are a group of their own, set apart by a rule */
+.find-steps, .writer-nav { display: inline-flex; gap: 2px; }
+.writer-nav { padding-right: 10px; margin-right: 2px; border-right: 1px solid var(--line); }
+.writer-head > .row { margin-left: 12px; }
 .writer-find input { flex: 1; min-width: 0; padding: 4px 8px; }
 .find-count { font-size: 12px; min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
 ::highlight(writer-find) { background-color: rgba(245, 213, 71, .45); }

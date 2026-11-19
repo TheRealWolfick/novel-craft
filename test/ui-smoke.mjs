@@ -948,7 +948,7 @@ if (process.env.SETTINGS_DIR && fs.existsSync(STARTER)) {
     [...doc.querySelectorAll("button")].find((b) => b.textContent.trim() === "Save styles").click();
     await wait(1000);
     const note = `${COPY}/90. Templater/Callout Styles.md`;
-    check(fs.existsSync(note) && /callout-styles:\s*\n\s+journal:\s*\n\s+width: 70/.test(fs.readFileSync(note, "utf8")), "saving writes only the changes to Callout Styles.md", fs.existsSync(note) ? fs.readFileSync(note, "utf8").slice(0, 300) : "no note");
+    check(fs.existsSync(note) && /callout-styles:\s*\n(?:\s{2}.*\n)*?\s{2}journal:\s*\n(?:\s{4}.*\n)*?\s{4}width: 70\n/.test(fs.readFileSync(note, "utf8")), "saving writes only the changes to Callout Styles.md", fs.existsSync(note) ? fs.readFileSync(note, "utf8").slice(0, 300) : "no note");
 }
 // world export and import: maps carry stamp hashes; stamps you have are reused, missing ones come from the maps
 if (process.env.SETTINGS_DIR) {
