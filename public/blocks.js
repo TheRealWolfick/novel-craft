@@ -203,8 +203,8 @@ export function setSpeechGroups(list) {
 const NOT_GROUPED = /!?\[\[[^\]\n]*\]\]|\[[^\]\n]*\]\([^)\n]*\)|\[[\w\/-]+::[^\]\n]*\]|^\[![\w-]+\]/g;
 
 /**
- * Where speech lies in a block's text: [[start, end, group], …] (end after the closing mark; group null for quotes, else
- * the index of one of your groupings). Only the outermost counts (quotes or groupings inside it are part of it). An
+ * Where speech lies in a block's text: [[start, end, group, single], …] (end after the closing mark; group null for quotes,
+ * else the index of one of your groupings; single: in single quotes ' or ‘ ’, which have their own colour). Only the outermost counts (quotes or groupings inside it are part of it). An
  * opening mark has no letter or digit before it (or starts the text) and no space after it; a closing one has no space
  * before it and no letter or digit after it (so the apostrophes in "don't" and "'tis" are ignored). Speech in double
  * quotes that never closes runs to the end of the block (dialogue that goes on in the next paragraph); single quotes
@@ -226,7 +226,7 @@ export function speechRanges(text, skip = [], groups = speechGroups) {
             for (let j = t.indexOf(g.close, i + g.open.length); j > -1; j = t.indexOf(g.close, j + 1)) {
                 if (!skipped(j) && !skipped(j, links) && closes(j, g.close.length)) { end = j + g.close.length; break; }
             }
-            if (end > -1) { out.push([i, end, g.k]); i = end - 1; continue; }
+            if (end > -1) { out.push([i, end, g.k, false]); i = end - 1; continue; }
         }
         const q = t[i];
         if (!QUOTES[q] || !opens(i, 1)) continue;
@@ -235,13 +235,26 @@ export function speechRanges(text, skip = [], groups = speechGroups) {
             if (!CLOSERS[q].includes(t[j]) || skipped(j) || !closes(j, 1)) continue;
             end = j + 1; break;
         }
-        if (end < 0) { if (q === '"' || q === "“") { out.push([i, t.length, null]); break; } continue; }
-        out.push([i, end, null]);
+        if (end < 0) { if (q === '"' || q === "“") { out.push([i, t.length, null, false]); break; } continue; }
+        out.push([i, end, null, q === "'" || q === "‘"]);
         i = end - 1;
     }
     return out;
 }
-const speechClass = (g) => (g == null ? "be-speech" : `be-sg be-sg-${g}`);
+/**
+ * The class of a piece of speech: your groupings be-sg-<n>; quotes be-speech (+ be-single for single quotes), plus be-em /
+ * be-strong when the whole of it is in italics / bold (every letter in it), so one stressed word keeps the speech colour
+ */
+const speechClass = (g, single = false, em = false, strong = false) => (g != null ? `be-sg be-sg-${g}`
+    : `be-speech${single ? " be-single" : ""}${em ? " be-em" : ""}${strong ? " be-strong" : ""}`);
+/** For each speech range: whether every letter in it is in italics / bold. `letters` [[pos, em, strong], …] in order */
+function wholeFormat(ranges, letters) {
+    return ranges.map(([a, b]) => {
+        let any = false, em = true, strong = true;
+        for (const [p, e, st] of letters) if (p >= a && p < b) { any = true; em &&= e; strong &&= st; }
+        return { em: any && em, strong: any && strong };
+    });
+}
 
 /** Wraps the speech in each paragraph and list item under `root` in <span class="be-speech"> (for rendered HTML) */
 export function markSpeech(root) {
@@ -254,18 +267,27 @@ export function markSpeech(root) {
         const text = nodes.map((n) => n.data).join("");
         const ranges = speechRanges(text);
         if (!ranges.length) continue;
+        const letters = [];
+        let pos = 0;
+        for (const n of nodes) {
+            const p = n.parentElement;
+            const e = !!p.closest("em, i") && el.contains(p.closest("em, i")), st = !!p.closest("strong, b") && el.contains(p.closest("strong, b"));
+            for (let k = 0; k < n.data.length; k++) if (WORD.test(n.data[k])) letters.push([pos + k, e, st]);
+            pos += n.data.length;
+        }
+        const fmt = wholeFormat(ranges, letters);
         let at = 0;
         for (const n of nodes) {
             const from = at, to = at + n.data.length;
             at = to;
-            const cuts = ranges.filter(([a, b]) => a < to && b > from).map(([a, b, g]) => [Math.max(a, from) - from, Math.min(b, to) - from, g]);
+            const cuts = ranges.map((r, k) => [...r, fmt[k]]).filter(([a, b]) => a < to && b > from).map(([a, b, g, single, f]) => [Math.max(a, from) - from, Math.min(b, to) - from, g, single, f]);
             if (!cuts.length) continue;
             const frag = doc.createDocumentFragment();
             let k = 0;
-            for (const [a, b, g] of cuts) {
+            for (const [a, b, g, single, f] of cuts) {
                 if (a > k) frag.append(n.data.slice(k, a));
                 const sp = doc.createElement("span");
-                sp.className = speechClass(g);
+                sp.className = speechClass(g, single, f.em, f.strong);
                 sp.textContent = n.data.slice(a, b);
                 frag.append(sp);
                 k = b;
@@ -365,15 +387,26 @@ export function inlineHtml(src, { raw = false } = {}) {
     }
     // speech: text pieces inside quotes get the be-speech class (split where speech starts or ends)
     const speech = speechRanges(t, skip);
+    // which speech is wholly in italics / bold: follow the formatting through the tokens, noting each letter's
+    const letters = [];
+    if (speech.length) {
+        let em = 0, strong = 0;
+        const turn = (tags, by) => { for (const g of tags) { if (g === "em") em += by; if (g === "strong") strong += by; } };
+        for (const k of toks) {
+            if (k.type === "text") { for (let j = 0; j < k.s.length; j++) if (WORD.test(k.s[j])) letters.push([k.at + j, em > 0, strong > 0]); }
+            else if (k.closes || k.opens) { turn(k.closes ?? [], -1); turn(k.opens ?? [], 1); }
+        }
+    }
+    const fmt = wholeFormat(speech, letters);
     const piece = (s, at) => {
         let res = "", k = 0;
-        for (const [a, b, g] of speech) {
+        speech.forEach(([a, b, g, single], r) => {
             const x = Math.max(a - at, k), y = Math.min(b - at, s.length);
-            if (y <= x) continue;
+            if (y <= x) return;
             if (x > k) res += `<span data-s="${at + k}">${esc(s.slice(k, x))}</span>`;
-            res += `<span class="${speechClass(g)}" data-s="${at + x}">${esc(s.slice(x, y))}</span>`;
+            res += `<span class="${speechClass(g, single, fmt[r].em, fmt[r].strong)}" data-s="${at + x}">${esc(s.slice(x, y))}</span>`;
             k = y;
-        }
+        });
         return k < s.length ? res + `<span data-s="${at + k}">${esc(s.slice(k))}</span>` : res;
     };
     let out = "";

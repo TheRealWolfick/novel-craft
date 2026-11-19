@@ -12,7 +12,7 @@
     --chip: #ece9e2; --radius: 8px; --mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
     --serif: "Newsreader", "Iowan Old Style", Georgia, serif;
     --accent-soft: color-mix(in srgb, var(--accent) 13%, var(--panel));
-    --speech: var(--speech-light); --speech-em: var(--speech-em-light); --speech-strong: var(--speech-strong-light); --speech-strong-em: var(--speech-strong-em-light);
+    --speech: var(--speech-light); --speech-em: var(--speech-em-light); --speech-strong: var(--speech-strong-light); --speech-strong-em: var(--speech-strong-em-light); --speech-single: var(--speech-single-light);
     color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -21,7 +21,7 @@
         --accent: var(--novel-accent-dark, var(--app-accent-dark, #b195f5)); --on-accent: #17161a;
         --ok: #6cc28f; --warn: #e2a24b; --bad: #f08a80; --chip: #2d2c33;
         --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--panel));
-        --speech: var(--speech-dark); --speech-em: var(--speech-em-dark); --speech-strong: var(--speech-strong-dark); --speech-strong-em: var(--speech-strong-em-dark);
+        --speech: var(--speech-dark); --speech-em: var(--speech-em-dark); --speech-strong: var(--speech-strong-dark); --speech-strong-em: var(--speech-strong-em-dark); --speech-single: var(--speech-single-dark);
         color-scheme: dark;
     }
 }
@@ -30,7 +30,7 @@
     --accent: var(--novel-accent-dark, var(--app-accent-dark, #b195f5)); --on-accent: #17161a;
     --ok: #6cc28f; --warn: #e2a24b; --bad: #f08a80; --chip: #2d2c33;
     --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--panel));
-    --speech: var(--speech-dark); --speech-em: var(--speech-em-dark); --speech-strong: var(--speech-strong-dark); --speech-strong-em: var(--speech-strong-em-dark);
+    --speech: var(--speech-dark); --speech-em: var(--speech-em-dark); --speech-strong: var(--speech-strong-dark); --speech-strong-em: var(--speech-strong-em-dark); --speech-single: var(--speech-single-dark);
     color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -695,9 +695,15 @@ table.holdings td.copy-cell { width: 1%; padding-left: 6px; }
 .be-speech { color: var(--speech, inherit); }
 .be-sg-0 { color: var(--sg-0, inherit); } .be-sg-1 { color: var(--sg-1, inherit); } .be-sg-2 { color: var(--sg-2, inherit); } .be-sg-3 { color: var(--sg-3, inherit); }
 .be-sg-4 { color: var(--sg-4, inherit); } .be-sg-5 { color: var(--sg-5, inherit); } .be-sg-6 { color: var(--sg-6, inherit); } .be-sg-7 { color: var(--sg-7, inherit); }
-em .be-speech, .be-speech em { color: var(--speech-em, var(--speech, inherit)); }
-strong .be-speech, .be-speech strong { color: var(--speech-strong, var(--speech, inherit)); }
-strong em .be-speech, em strong .be-speech { color: var(--speech-strong-em, var(--speech-strong, var(--speech-em, var(--speech, inherit)))); }
+/* speech wholly in italics / bold (be-em / be-strong: every letter of it; one stressed word keeps the speech colour);
+   single quotes have their own colour when one is set, else they look like the rest of the speech */
+.be-speech.be-em, .be-speech.be-em em { color: var(--speech-em, var(--speech, inherit)); }
+.be-speech.be-strong, .be-speech.be-strong strong { color: var(--speech-strong, var(--speech, inherit)); }
+.be-speech.be-em.be-strong, .be-speech.be-em.be-strong :is(em, strong) { color: var(--speech-strong-em, var(--speech-strong, var(--speech-em, var(--speech, inherit)))); }
+.be-speech.be-single { color: var(--speech-single, var(--speech, inherit)); }
+.be-speech.be-single.be-em, .be-speech.be-single.be-em em { color: var(--speech-single, var(--speech-em, var(--speech, inherit))); }
+.be-speech.be-single.be-strong, .be-speech.be-single.be-strong strong { color: var(--speech-single, var(--speech-strong, var(--speech, inherit))); }
+.be-speech.be-single.be-em.be-strong, .be-speech.be-single.be-em.be-strong :is(em, strong) { color: var(--speech-single, var(--speech-strong-em, var(--speech-strong, var(--speech-em, var(--speech, inherit))))); }
 .be-toolbar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 8px 0; background: var(--panel); border-bottom: 1px solid var(--line); margin-bottom: 14px; }
 .be-group { display: flex; gap: 2px; flex-wrap: wrap; }
 .be-toolbar button { min-width: 30px; font-size: 12.5px; padding: 3px 7px; }

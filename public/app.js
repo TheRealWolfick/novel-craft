@@ -216,7 +216,7 @@ function themePair(hex) {
     const inv = invertLightness(hex);
     return hexToOklab(hex)[0] < (PAGE_L.light + PAGE_L.dark) / 2 ? { light: hex, dark: inv } : { light: inv, dark: hex };
 }
-const SPEECH_KEYS = [["speechColor", "--speech"], ["speechItalic", "--speech-em"], ["speechBold", "--speech-strong"], ["speechBoldItalic", "--speech-strong-em"]];
+const SPEECH_KEYS = [["speechColor", "--speech"], ["speechSingle", "--speech-single"], ["speechItalic", "--speech-em"], ["speechBold", "--speech-strong"], ["speechBoldItalic", "--speech-strong-em"]];
 // your own groupings ([…], <<…>>): up to SPEECH_GROUPS, each its colour as --sg-<n> (light-dark() follows the theme)
 const SPEECH_GROUPS = 8;
 const CHAPTER_VARS = ["--writer-para", "--writer-col", ...SPEECH_KEYS.flatMap(([, v]) => [`${v}-light`, `${v}-dark`]), ...Array.from({ length: SPEECH_GROUPS }, (_, k) => `--sg-${k}`)];
@@ -826,8 +826,8 @@ function Loading({ error }) {
     return error ? html`<p class="error">${error}</p>` : html`<p class="muted">Loading…</p>`;
 }
 
-/** Text input with suggestions; picks one value */
-function Picker({ value, options, onChange, placeholder, allowFree = true, onCreate, createLabel = "Create", autoFocus, onClear }) {
+/** Text input with suggestions; picks one value. `clearOnPick`: the box empties after each pick (adding to a list) */
+function Picker({ value, options, onChange, placeholder, allowFree = true, onCreate, createLabel = "Create", autoFocus, onClear, clearOnPick = false }) {
     const [text, setText] = useState(value ?? "");
     const [open, setOpen] = useState(false);
     const [hl, setHl] = useState(0);
@@ -838,7 +838,7 @@ function Picker({ value, options, onChange, placeholder, allowFree = true, onCre
         return list.slice(0, 14);
     }, [text, options]);
     const exact = options.some((o) => o.label.toLowerCase() === text.trim().toLowerCase());
-    const choose = (o) => { onChange(o); setText(o ? o.label : ""); setOpen(false); };
+    const choose = (o) => { onChange(o); setText(o && !clearOnPick ? o.label : ""); setOpen(false); };
     // the list is placed against the window (fixed), measured from the input, so a scrolling or clipped container
     // (a table that scrolls sideways, a panel) never cuts it off; it opens upwards when there is more room above
     const input = useRef();
@@ -862,7 +862,7 @@ function Picker({ value, options, onChange, placeholder, allowFree = true, onCre
     // typed text is taken when the field is left; an emptied field clears it (`onClear`)
     const commitFree = () => {
         if (!text.trim()) { if (onClear && value) onClear(); return; }
-        if (allowFree && text !== value) onChange({ label: text.trim(), free: true });
+        if (allowFree && text !== value) { onChange({ label: text.trim(), free: true }); if (clearOnPick) setText(""); }
     };
     return html`<div class="picker">
         <input ref=${input} value=${text} placeholder=${placeholder} autoFocus=${autoFocus}
@@ -901,7 +901,7 @@ function LinkField({ value, multiple, target, index, onChange, options: given })
     };
     return html`<div>
         ${multiple && html`<div>${values.map((v) => html`<${Chip} value=${v} index=${index} onRemove=${() => onChange(values.filter((x) => x !== v))} />`)}</div>`}
-        <div class="link-single"><${Picker} key=${shown} value=${multiple ? "" : linkLabel(value ?? "")} options=${options} onChange=${add} onClear=${multiple ? undefined : () => onChange("")}
+        <div class="link-single"><${Picker} key=${shown} value=${multiple ? "" : linkLabel(value ?? "")} options=${options} onChange=${add} onClear=${multiple ? undefined : () => onChange("")} clearOnPick=${multiple}
             placeholder=${Array.isArray(target) ? `Search ${target.map((t) => collectionLabel(t.replace(/^@/, "")).toLowerCase()).join(" and ")}…` : target ? `Search ${collectionLabel(target.replace(/^@/, ""))}…` : "Search notes…"} />
         ${!multiple && value && html`<button type="button" class="small link-clear" title="Clear" aria-label="Clear" onClick=${() => onChange("")}>×</button>`}</div>
     </div>`;
@@ -2069,8 +2069,15 @@ function NoteForm({ index, collection, novel, scope = "page" }) {
         if (!spec || vals) return;
         const init = {};
         for (const [k, def] of spec.fields) init[k] = Array.isArray(def) ? [...def] : def;
+        start.current = JSON.stringify(init);
         setVals(init);
     }, [spec]);
+    // a half-made note counts as unsaved: leaving the page (or the drawer page) asks first
+    const start = useRef(null);
+    const dirtyKey = `new:${collection}:${novel ?? ""}`;
+    const dirty = !busy && (!!name.trim() || (vals != null && JSON.stringify(vals) !== start.current));
+    useEffect(() => markDirty(scope, dirtyKey, dirty), [dirty]);
+    useEffect(() => () => markDirty(scope, dirtyKey, false), []);
     if (!index || !vals || !spec) return html`<${Loading} />`;
     const generated = new Set(spec.generated ?? []);
     const save = async () => {
@@ -2079,11 +2086,13 @@ function NoteForm({ index, collection, novel, scope = "page" }) {
             if (collection === "characters") {
                 const fm = Object.fromEntries(Object.entries(vals).filter(([k, v]) => v !== "" && !(Array.isArray(v) && !v.length) && !generated.has(k)).map(([k, v]) => [k, coerce(v)]));
                 const r = await api.send("POST", "/api/character", { novel, name, fm });
+                markDirty(scope, dirtyKey, false);
                 if (scope === "drawer") openInDrawer(noteHref(r.path));
                 else go(noteHref(r.path));
             } else {
                 const fm = Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, coerce(v)]));
                 const r = await api.send("POST", "/api/note", { collection, name, fm });
+                markDirty(scope, dirtyKey, false);
                 const made = r.path.split("/").pop().replace(/\.md$/, "");
                 // made while choosing an item: it is taken at once; otherwise it opens where the form was
                 if (pickable(pick, collection)) pick.pick(made);
@@ -2094,7 +2103,8 @@ function NoteForm({ index, collection, novel, scope = "page" }) {
         setBusy(false);
     };
     const title = collection === "characters" ? "New character" : `New ${spec.label ?? collection}`;
-    return html`<div>
+    // data-drawer: notes linked from the form (chips in link fields) open in the side drawer, so the form stays
+    return html`<div data-drawer>
         <h1>${title}</h1>
         <div class="panel"><div class="formgrid">
             <label>File name</label><input value=${name} onInput=${(e) => setName(e.target.value)} placeholder="Unique note name" autoFocus style="width:100%" />
@@ -2830,20 +2840,18 @@ function rankedSelect(options, current, emptyLabel, onChange) {
 function ModsField({ value, index, onChange }) {
     const mods = String(value ?? "").split(";").map((m) => m.trim()).filter(Boolean);
     const options = useMemo(() => (index?.inCollection("Items") ?? []).map((n) => ({ label: n.name, hint: linkLabel(asList(n.fm.cat)[0] ?? "") })), [index]);
-    const [k, setK] = useState(0); // remounts the picker after each add, so its box empties
     const set = (list) => onChange(list.join("; "));
     const add = (o) => {
         if (!o) return;
         const name = o.label.replace(/;/g, ",");
         const m = !o.free || index?.resolve(name) ? toLink(name) : name;
         set([...mods.filter((x) => linkText(x).toLowerCase() !== name.toLowerCase()), m]);
-        setK((x) => x + 1);
     };
     // one modifier per line, the box to add another below them
     return html`<div class="mods-field">
         ${mods.length > 0 && html`<ul class="mods-list">${mods.map((m) => { const note = isLink(m) && index?.resolve(m); return html`<li><span>${note ? html`<a href=${noteHref(note.path)} data-page>${linkText(m)}</a>` : linkText(m)}</span>
             <button type="button" class="chip-x" title="Remove" aria-label=${`Remove ${linkText(m)}`} onClick=${() => set(mods.filter((x) => x !== m))}>×</button></li>`; })}</ul>`}
-        <${Picker} key=${k} value="" options=${options} placeholder="Add a modifier: an item, or text like +2 sharpness" onChange=${add} /></div>`;
+        <${Picker} value="" clearOnPick options=${options} placeholder="Add a modifier: an item, or text like +2 sharpness" onChange=${add} /></div>`;
 }
 
 function LinesEditor({ behaviour, lines, setLines, index, novel, owner, createNotes, setCreateNotes, withTarget }) {
@@ -3247,11 +3255,11 @@ ${range("writerWidth", 480, 1600, 20, 760, (v) => `${v}px`)}
                 <label class="check"><input type="checkbox" checked=${!!a.speechColor} onChange=${(e) => change(e.target.checked ? { speechColor: "#2f6fb0" } : { speechColor: null })} /> Colour speech in quotes</label>
                 ${a.speechColor && html`<input type="color" value=${a.speechColor} onInput=${(e) => change({ speechColor: e.target.value })} aria-label="Speech colour" /><${ThemeSwatches} hex=${a.speechColor} />`}
             </div>
-            ${a.speechColor && [["speechItalic", "Speech in italics"], ["speechBold", "Speech in bold"], ["speechBoldItalic", "Speech in bold italics"]].map(([k, l]) => html`
+            ${a.speechColor && [["speechSingle", "In 'single' quotes"], ["speechItalic", "All in italics"], ["speechBold", "All in bold"], ["speechBoldItalic", "All in bold italics"]].map(([k, l]) => html`
                 <label>${l}</label>
                 <div class="appearance-range speech-colours">
                     <label class="check"><input type="checkbox" checked=${!!a[k]} onChange=${(e) => change({ [k]: e.target.checked ? a.speechColor : null })} /> Own colour</label>
-                    ${a[k] ? html`<input type="color" value=${a[k]} onInput=${(e) => change({ [k]: e.target.value })} aria-label=${l} /><${ThemeSwatches} hex=${a[k]} />` : html`<span class="muted small-note">${k === "speechBoldItalic" ? "as bold, else italics, else speech" : "same as speech"}</span>`}
+                    ${a[k] ? html`<input type="color" value=${a[k]} onInput=${(e) => change({ [k]: e.target.value })} aria-label=${l} /><${ThemeSwatches} hex=${a[k]} />` : html`<span class="muted small-note">${k === "speechBoldItalic" ? "as bold, else italics, else speech" : k === "speechSingle" ? "same as \"double\" quotes" : "same as speech"}</span>`}
                 </div>`)}
             <label>Your own groupings</label>
             <div class="speech-groups">

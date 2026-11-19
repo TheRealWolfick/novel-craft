@@ -574,7 +574,13 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
         && JSON.stringify(spoken(`'I can't,' she said of the dogs' leads.`)) === JSON.stringify([`'I can't,'`])
         && spoken(`'tis the season`).length === 0 && JSON.stringify(spoken(`“Outer ‘inner’ quote,” and "going on`)) === JSON.stringify([`“Outer ‘inner’ quote,”`, `"going on`]),
         "speech: outermost quotes only, apostrophes ignored, open double quotes run to the end", JSON.stringify(spoken(`'I can't,' she said of the dogs' leads.`)));
-    check(/<em><span class="be-speech" data-s="1">&quot;Hi&quot;<\/span><\/em>/.test(inlineHtml(`*"Hi"* he said`)), "speech in italics is marked inside the <em>", inlineHtml(`*"Hi"* he said`));
+    check(/<em><span class="be-speech be-em" data-s="1">&quot;Hi&quot;<\/span><\/em>/.test(inlineHtml(`*"Hi"* he said`)), "speech in italics is marked inside the <em>", inlineHtml(`*"Hi"* he said`));
+    {
+        const cls = (md) => [...new Set([...inlineHtml(md).matchAll(/class="(be-speech[^"]*)"/g)].map((m) => m[1]))];
+        const got = [cls(`"I *really* mean it"`), cls(`"*All of it,*" he said`), cls(`**"Loud"**`), cls(`'Thinking,' she thought`), cls(`“Curly”`), cls(`***"Both"***`)];
+        check(JSON.stringify(got) === JSON.stringify([["be-speech"], ["be-speech be-em"], ["be-speech be-strong"], ["be-speech be-single"], ["be-speech"], ["be-speech be-em be-strong"]]),
+            "speech: italic / bold colours only when all of it is formatted; single quotes marked apart, curly quotes like straight ones", JSON.stringify(got));
+    }
     {
         const { setSpeechGroups } = await import("../public/blocks.js");
         setSpeechGroups([{ open: "[", close: "]" }]);

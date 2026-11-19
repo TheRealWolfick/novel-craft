@@ -30,8 +30,9 @@ How the [writer](docs:writing-a-chapter) and its preview show a chapter. A sampl
 | Text size | The size of chapter text, 13–28px |
 | Paragraph spacing | The gap between paragraphs, 0–2.5 em (0.55 by default) |
 | Column width | The widest the text column gets, 480–1600px (760px by default). It never gets wider than the writer, so with the side drawer open beside it the column fits the space that is left. |
-| Speech colour | Dialogue in quotes in its own colour |
-| Speech in italics / bold / bold italics | An own colour for speech in that style (otherwise the speech colour) |
+| Speech colour | Dialogue in quotes in its own colour. Curly quotes (“ ” ‘ ’) count the same as straight ones |
+| In 'single' quotes | An own colour for speech in single quotes, e.g. thoughts (otherwise the same as double quotes) |
+| All in italics / bold / bold italics | An own colour for speech that is wholly in that style, every word of it. One stressed word in a line keeps the speech colour |
 | Your own groupings | Text between marks you choose, such as `[System notice]` or `<<thought>>`, in its own colour (up to 8) |
 
 ### Which quotes count as speech
