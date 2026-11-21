@@ -1239,6 +1239,18 @@ if (process.env.SETTINGS_DIR) {
         const prop = [...doc.querySelectorAll("main .np-prop")].find((r) => !r.classList.contains("ro") && !r.querySelector("input[type=checkbox]"));
         prop?.click(); await wait(300);
         check(!!prop?.querySelector("input, textarea"), "clicking a property opens it for editing");
+        // a link picked into a property shows as a chip once the row closes, before it is saved (this crashed the page)
+        [...doc.querySelectorAll("main .np-more")].find((b) => /empty field/.test(b.textContent))?.click(); await wait(200);
+        const linkRow = [...doc.querySelectorAll("main .np-prop")].find((r) => r.querySelector(".np-prop-k")?.title === "subplot-of");
+        if (linkRow) {
+            linkRow.click(); await wait(200);
+            const li = linkRow.querySelector("input");
+            li.focus(); li.value = sub.name; li.dispatchEvent(new w.Event("input", { bubbles: true })); await wait(200);
+            li.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); await wait(200);
+            li.blur(); linkRow.dispatchEvent(new w.FocusEvent("focusout", { bubbles: true, relatedTarget: doc.body })); await wait(300);
+            check(!doc.querySelector("main .crash") && !!doc.querySelector("main .np-note"), "a link picked into a property shows without breaking the page", doc.querySelector("main .crash")?.textContent);
+            [...doc.querySelectorAll("main .savebar button")].find((b) => b.textContent.trim() === "Discard")?.click(); await wait(200);
+        }
         w.location.hash = `#/note/${enc(sub.path)}`; await wait(1500);
         check(doc.querySelector("main .np-parent")?.textContent.includes(main.title) && doc.querySelector("main .np-side .np-pill.on")?.textContent === sub.title,
             "a subplot names its main plot and is marked among the subplots");

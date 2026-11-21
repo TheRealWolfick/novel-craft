@@ -1,5 +1,5 @@
 // Novel Craft front end: Preact + htm, no build step.
-import { h, render } from "preact";
+import { h, render, Component } from "preact";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "preact/hooks";
 import htm from "htm";
 import { parseOutline, serializeOutline } from "./outline.js";
@@ -468,7 +468,7 @@ function DrawerViewer({ index, d }) {
             ${pick && html`<div class="pick-banner"><span>Choosing for <b>${pick.label}</b>: press Add on a row, or open one and press Use this.</span>
                 <span class="row">${pick.collections.map((c) => html`<button class=${`small ${name === "c" && args.join("/") === c ? "on" : ""}`} onClick=${() => openInDrawer(`#/c/${encodeURIComponent(c)}`)}>${collectionLabel(c)}</button>`)}
                     <button class="small" onClick=${() => setItemPick(null)}>Cancel</button></span></div>`}
-            ${drawerPage(href, index, "drawer")}</div>`;
+            <${ErrorBoundary} reset=${href}>${drawerPage(href, index, "drawer")}<//></div>`;
 }
 
 /** A drawer page (#/note/…, #/chapter/…, #/c/…, an entry, a form, docs) as shown in the side drawer or a left tab */
@@ -512,7 +512,7 @@ export function LeftTab({ tab, index, active }) {
     else if (tab.startsWith("pane:novel:")) body = html`<${NovelDrawer} folder=${tab.slice(11)} index=${index} />`;
     else if (tab === "pane:ai") return html`<${AiPane} active=${active} />`;
     else body = html`<div class="drawer-body" data-drawer>${drawerPage(tab, index, "left")}</div>`;
-    return html`<div class="left-tab-pane" data-drawer ref=${scroller}>${body}</div>`;
+    return html`<div class="left-tab-pane" data-drawer ref=${scroller}><${ErrorBoundary} reset=${tab}>${body}<//></div>`;
 }
 
 // ------------------------------------------------------------------ lookup (drawer tab)
@@ -848,11 +848,34 @@ function ConfirmButton({ onConfirm, children, confirmLabel = "Click to confirm",
     return html`<button class=${`${cls} danger ${armed ? "armed" : ""}`} onClick=${click} onBlur=${disarm} ...${rest}>${armed ? confirmLabel : children}</button>`;
 }
 
+/**
+ * Keeps a crash in one page from taking the rest of the app (the drawer, the other tabs) with it: the page shows what
+ * went wrong and a Retry button instead. `reset` (a key such as the page's href) clears the error when it changes.
+ */
+class ErrorBoundary extends Component {
+    constructor(props) { super(props); this.state = { error: null }; }
+    componentDidCatch(error) { console.error(error); this.setState({ error }); }
+    componentDidUpdate(prev) { if (prev.reset !== this.props.reset && this.state.error) this.setState({ error: null }); }
+    render() {
+        if (!this.state.error) return this.props.children;
+        return html`<div class="warnbox crash">
+            <b>This page ran into a problem and stopped.</b> Nothing was lost on disk; the rest of the app still works.
+            <div class="muted small" style="margin:6px 0">${String(this.state.error?.message ?? this.state.error)}</div>
+            <button class="small" onClick=${() => this.setState({ error: null })}>Retry</button>
+        </div>`;
+    }
+}
+
 function Chip({ value, links, index, onRemove }) {
     if (!isLink(value)) return html`<span class="chip">${String(value)}${onRemove && html`<span class="x" onClick=${onRemove}>×</span>`}</span>`;
-    const resolved = links ? links[value] : index?.resolve(value) ? { path: index.resolve(value).path } : undefined;
+    // the page's resolved links, else the index; a link just typed or picked may be in neither until the note is saved
+    const known = links && value in links ? links[value] : undefined;
+    const resolved = known !== undefined ? known : index?.resolve(value) ? { path: index.resolve(value).path } : undefined;
     const label = linkLabel(value);
-    if (resolved === null || (links == null && !resolved)) return html`<span class="chip unresolved" title="No note with this name">${label}${onRemove && html`<span class="x" onClick=${onRemove}>×</span>`}</span>`;
+    if (!resolved?.path) {
+        const missing = known === null || (links == null && index && !resolved);
+        return html`<span class=${`chip ${missing ? "unresolved" : ""}`} title=${missing ? "No note with this name" : ""}>${label}${onRemove && html`<span class="x" onClick=${onRemove}>×</span>`}</span>`;
+    }
     return html`<a class="chip" href=${noteHref(resolved.path)}>${label}${onRemove && html`<span class="x" onClick=${(e) => { e.preventDefault(); onRemove(); }}>×</span>`}</a>`;
 }
 
@@ -4112,7 +4135,7 @@ function App() {
                 // the Tools pages have nothing to search or filter by novel: only the assistant's button, in the corner
                 ? html`<div class="topbar-float"><button class="bot-button" title="AI assistant" aria-label="AI assistant" onClick=${toggleAi}><${BotIcon} /></button></div>`
                 : html`<div class="topbar"><${Search} index=${index} /><${NovelFilter} index=${index} value=${novelFilter} onChange=${setNF} /><span class="grow" /><button class="bot-button" title="AI assistant" aria-label="AI assistant" onClick=${toggleAi}><${BotIcon} /></button></div>`}
-            <div class=${`view view-${route.name}`} key=${route.name === "docs" ? "docs" : route.name + (a ?? "")}>${view}</div>
+            <div class=${`view view-${route.name}`} key=${route.name === "docs" ? "docs" : route.name + (a ?? "")}><${ErrorBoundary} reset=${location.hash}>${view}<//></div>
         </main>
         ${!noVault && html`<div class=${`drawer-backdrop ${d.open || writer.open ? "on" : ""}`} onClick=${() => { collapseDrawer(); collapseWriter(); }} />
         <${WriterDrawer} index=${index} />

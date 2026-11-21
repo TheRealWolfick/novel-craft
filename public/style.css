@@ -1346,3 +1346,4 @@ textarea.np-sec-text { width: 100%; font-family: var(--font-read, var(--serif));
 .np-fields > .savebar.quiet { display: none; }
 .compare-row { margin: 4px 0 10px; }
 .np-parent .linkish, .np-sub-title.linkish { text-decoration: none; }
+.warnbox.crash { margin: 16px auto; max-width: 760px; }
