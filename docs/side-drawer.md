@@ -16,7 +16,7 @@ The drawer slides in from the right. Closed, it leaves a button per tab on the r
 | Taxonomy | Every taxonomy value, one group per facet |
 | Novel | The novel you're in: plan, plots, characters, world, scratchpad |
 
-<kbd>Ctrl</kbd>+<kbd>]</kbd> opens and closes it; <kbd>Escape</kbd> or a click beside it closes it. Closing never loses unsaved edits.
+<kbd>Ctrl</kbd>+<kbd>]</kbd> opens and closes it, and so do the » button and a click beside it. Escape doesn't close it (it's for cancelling things inside it: press it twice to discard a new block, note or entry). Closing never loses unsaved edits.
 
 Beside the [writer](docs:writing-a-chapter) the two share the window half and half; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> move the split and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\\</kbd> resets it.
 

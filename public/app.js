@@ -361,7 +361,8 @@ addEventListener("keydown", (e) => {
     toast(`Writer ${w}% · drawer ${100 - w}%${e.code === "Backslash" ? " (reset)" : ""}`);
 }, true);
 // (an Escape something already handled doesn't count, nor one from an element its handler has just removed)
-addEventListener("keydown", (e) => { if (e.key === "Escape" && !e.defaultPrevented && e.target.isConnected !== false && drawer.open && !document.querySelector(".lightbox") && !e.target.closest?.(".writer, .block-editor, .nblock.moving, .xterm")) collapseDrawer(); });
+// Escape never collapses the drawer (it cancels things inside it instead: see useEscapeTwice); the » button, the
+// backdrop and Ctrl+] do.
 
 // a renamed note's drawer page follows it
 function renameInDrawer(from, to) { if (drawer.recent.includes(from)) setDrawer({ ...drawer, recent: drawer.recent.map((h) => (h === from ? to : h)) }); }
@@ -1408,6 +1409,8 @@ const GRAMS = { g: 1, kg: 1000, t: 1e6 };
  * "<item> (Blueprint)" and links it from the item (`recipe`), then opens the item.
  */
 function RecipeCreator({ index, item }) {
+    const rootRef = useRef();
+    useEscapeTwice(true, () => { markDirty("page", `recipe:${item}`, false); go(noteHref(item)); }, rootRef);
     const { data: page, error } = useApi(`/api/note?${qs({ path: item })}`);
     const { data: cmp } = useApi(`/api/recipe/compare?${qs({ item })}`);
     const [form, setForm] = useState(null);
@@ -1456,7 +1459,7 @@ function RecipeCreator({ index, item }) {
         } catch (e) { setErr(e.message); }
         setBusy(false);
     };
-    return html`<div>
+    return html`<div ref=${rootRef}>
         <div class="muted"><a href=${noteHref(item)}>${page.name}</a></div>
         <h1>New recipe for ${page.fm.title || page.name}</h1>
         <div class="recipe-make">
@@ -1904,6 +1907,42 @@ const ICONS = {
 };
 
 /**
+ * While `active`, Escape pressed twice within 1.5 s calls `cancel` (the first press says so): discarding a new item
+ * being made. Listens in the capture phase, so it also works from inside editors that use Escape themselves. Only the
+ * form that holds the focus answers (or, with nothing focused, a visible one); dialogs keep Escape for themselves.
+ */
+export function useEscapeTwice(active, cancel, root) {
+    const fn = useRef(cancel);
+    fn.current = cancel;
+    useEffect(() => {
+        if (!active) return;
+        let armed = 0;
+        const k = (e) => {
+            if (e.key !== "Escape" || e.repeat || document.querySelector(".modal-back, .lightbox, .pick-modal")) return;
+            const el = root?.current, at = document.activeElement;
+            if (el && !(el.contains(at) || ((!at || at === document.body) && el.offsetParent && !el.closest("[inert]")))) return;
+            if (Date.now() - armed < 1500) { armed = 0; fn.current(); }
+            else { armed = Date.now(); toast("Press Escape again to discard"); }
+        };
+        addEventListener("keydown", k, true);
+        return () => removeEventListener("keydown", k, true);
+    }, [active]);
+}
+
+/**
+ * Double-click toggles editing on a panel that has an Edit button. Double-clicks on controls, links and (while editing)
+ * text fields are left alone, so selecting a word in the editor still works.
+ */
+export function dblToggle(fn) {
+    return (e) => {
+        if (e.target.closest("button, a, input, textarea, select, [contenteditable], .be-page, .be-toolbar, .picker")) return;
+        e.preventDefault();
+        window.getSelection?.()?.removeAllRanges();
+        fn(e);
+    };
+}
+
+/**
  * A note's body as blocks: the text before the first heading, then one block per "## " section (the `## Images`
  * section stays where it is; the gallery shows it). Each block can be edited (writer's block editor), moved (↑↓ in move
  * mode, Enter or Escape to finish) or deleted; "+ Add block" offers titles other notes of the collection use.
@@ -1919,6 +1958,7 @@ function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, 
     const [newTitle, setNewTitle] = useState("");
     const [busy, setBusy] = useState(false);
     const moveRef = useRef();
+    const rootRef = useRef();
     const dirtyKey = `blocks:${page.path}`;
     const changed = !!draft && (editing === "new" || draft.changed);
     useEffect(() => markDirty(scope, dirtyKey, changed), [changed]);
@@ -1943,6 +1983,7 @@ function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, 
     };
     const startEdit = (key, title, text) => { setMoving(null); setAdding(false); setEditing(key); setDraft({ title, text, changed: false }); };
     const stopEdit = () => { setEditing(null); setDraft(null); };
+    useEscapeTwice(editing === "new", () => stopEdit(), rootRef);
     const saveEdit = async () => {
         const has = doc.sections.length > 0;
         let ok;
@@ -2006,7 +2047,7 @@ function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, 
             onClick=${() => (moving?.i === i ? finishMove() : startMove(i))}>${ICONS.move}</button>
         <${ConfirmButton} class="icon danger" confirmLabel="Delete?" title=${`Delete ${title}`} aria-label=${`Delete ${title}`} disabled=${busy} onConfirm=${() => remove(i)}>${ICONS.trash}<//>
     </span>`;
-    const editor = (withTitle) => html`<div class="nblock-edit" onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); e.stopPropagation(); saveEdit(); } }}>
+    const editor = (withTitle) => html`<div class="nblock-edit" onDblClick=${dblToggle(() => (changed ? saveEdit() : stopEdit()))} onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); e.stopPropagation(); saveEdit(); } }}>
         ${withTitle && html`<input class="nblock-title-input" value=${draft.title} placeholder="Block title" aria-label="Block title"
             onInput=${(e) => setDraft({ ...draft, title: e.target.value, changed: true })} />`}
         <${BlockEditor} value=${draft.text} compact=${true} callouts=${callouts} sceneBreaks=${false} autoFocus=${true}
@@ -2019,8 +2060,8 @@ function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, 
     if (editing === "all") return html`<section class="panel nblock editing">
         <div class="nblock-head"><h3>Edit as one page</h3></div>${editor(false)}</section>`;
     const shown = list.filter((x) => !x.images);
-    return html`<div class="note-blocks">
-        ${(doc.pre.text.trim() || editing === "pre") && html`<section class="panel nblock pre">
+    return html`<div class="note-blocks" ref=${rootRef}>
+        ${(doc.pre.text.trim() || editing === "pre") && html`<section class="panel nblock pre" onDblClick=${editing != null ? undefined : dblToggle(() => startEdit("pre", "", doc.pre.text.replace(/^\s+/, "")))}>
             ${editing === "pre" ? editor(false) : html`<div class="nblock-head"><span />
                 <span class="nblock-tools">
                     <button class="icon" title="Edit" aria-label="Edit the text above the blocks" onClick=${() => startEdit("pre", "", doc.pre.text.replace(/^\s+/, ""))}>${ICONS.edit}</button>
@@ -2032,7 +2073,8 @@ function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, 
             const isMoving = moving?.i === i;
             if (editing === i) return html`<section key=${`e${i}`} class="panel nblock editing">${editor(true)}</section>`;
             return html`<section key=${x.title} ref=${isMoving ? moveRef : null} class=${`panel nblock ${isMoving ? "moving" : ""}`} tabIndex=${isMoving ? 0 : -1}
-                data-flip=${`nb|${x.title}`}
+                data-flip=${`nb|${x.title}`} title=${editing == null && !moving ? "Double-click to edit" : undefined}
+                onDblClick=${editing == null && !moving && !busy ? dblToggle(() => startEdit(i, x.title, doc.sections[i].text)) : undefined}
                 onKeyDown=${isMoving ? (e) => {
                     if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); step(e.key === "ArrowUp" ? -1 : 1); }
                     if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finishMove(); }
@@ -2257,6 +2299,7 @@ const coerce = (v) => (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v.trim())
 /** Create a data store note or a character (existing notes are edited in place on their page) */
 function NoteForm({ index, collection, novel, scope = "page" }) {
     const pick = useItemPick();
+    const formRef = useRef();
     const novelLinks = useNovelLinks(collection === "characters" ? novel : null);
     const schema = index?.schema;
     const spec = collection === "characters" ? schema?.characters : schema?.collections[collection];
@@ -2302,8 +2345,10 @@ function NoteForm({ index, collection, novel, scope = "page" }) {
         setBusy(false);
     };
     const title = collection === "characters" ? "New character" : `New ${spec.label ?? collection}`;
+    const cancel = () => { markDirty(scope, dirtyKey, false); scope === "drawer" ? (drawer.recent.length > 1 ? openInDrawer(drawer.recent[1]) : collapseDrawer()) : history.back(); };
+    useEscapeTwice(true, cancel, formRef);
     // data-drawer: notes linked from the form (chips in link fields) open in the side drawer, so the form stays
-    return html`<div data-drawer>
+    return html`<div data-drawer ref=${formRef}>
         <h1>${title}</h1>
         <div class="panel"><div class="formgrid">
             <label>File name</label><input value=${name} onInput=${(e) => setName(e.target.value)} placeholder="Unique note name" autoFocus style="width:100%" />
@@ -2313,7 +2358,7 @@ function NoteForm({ index, collection, novel, scope = "page" }) {
         </div></div>
         ${err && html`<p class="error">${err}</p>`}
         <div class="row"><button class="primary" disabled=${busy || !name.trim()} onClick=${save}>Create</button>
-            <button onClick=${() => (scope === "drawer" ? (drawer.recent.length > 1 ? openInDrawer(drawer.recent[1]) : collapseDrawer()) : history.back())}>Cancel</button></div>
+            <button onClick=${cancel} title="Cancel (Escape twice)">Cancel</button></div>
         ${generated.size > 0 && html`<p class="muted">Generated from ledgers (not editable here): ${[...generated].join(", ")}</p>`}
     </div>`;
 }
@@ -2783,7 +2828,8 @@ function EntryCard({ e, folder, behaviour, future, showOwner, onEdit = null }) {
         try { await api.send("DELETE", `/api/ledger/entry?${qs({ ledger: e.ledger, key: e.key })}`); toast("Deleted"); } catch (x) { toast(x.message); }
     };
     const copyLinked = async () => { const r = await api.get(`/api/callout?${qs({ ledger: e.ledger, key: e.key, linked: 1 })}`); copyText(r.text, `Copied ${r.count} linked callouts`); };
-    return html`<div class=${`entry ${future ? "future" : ""}`}>
+    const edit = () => { const p = { owner: e.owner, type: e.type, ledger: e.ledger, key: e.key }; onEdit ? onEdit(p) : go(entryHref(folder, p)); };
+    return html`<div class=${`entry ${future ? "future" : ""}`} onDblClick=${e.fields["mirror-of"] ? undefined : dblToggle(edit)}>
         <div class="spread">
             <h4><span class="badge">${e.key}</span> ${e.title || html`<span class="muted">untitled</span>`}
                 ${showOwner && html` <span class="muted">· <a href=${ownerHref(folder, e.owner)}>${e.owner}</a> · ${e.type}</span>`}</h4>
@@ -2792,7 +2838,7 @@ function EntryCard({ e, folder, behaviour, future, showOwner, onEdit = null }) {
                 <button class="small" onClick=${() => copyText(e.callout)}>⧉ Copy</button>
                 ${e.fields.ref && html`<button class="small" onClick=${copyLinked}>⧉ Linked</button>`}
                 <button class="small" onClick=${() => setShowText(!showText)}>${showText ? "Hide" : "Callout"}</button>
-                ${!e.fields["mirror-of"] && html`<button class="small" onClick=${() => { const p = { owner: e.owner, type: e.type, ledger: e.ledger, key: e.key }; onEdit ? onEdit(p) : go(entryHref(folder, p)); }}>Edit</button>`}
+                ${!e.fields["mirror-of"] && html`<button class="small" title="Edit (or double-click the entry)" onClick=${edit}>Edit</button>`}
                 <${ConfirmButton} title=${`Delete ${e.key} ${e.title}`} onConfirm=${del}>Delete<//>
             </div>
         </div>
@@ -3382,6 +3428,9 @@ function EntryEditor({ index, folder, params, embedded = false, onDone = null })
     // leaving the entry ends any item choosing it started in the drawer
     useEffect(() => () => { if (itemPick) setItemPick(null); }, []);
     const editKey = params.get("key");
+    const rootRef = useRef();
+    const cancelEntry = () => { if (embedded) markDirty("drawer", "ledger-entry", false); onDone ? onDone() : history.back(); };
+    useEscapeTwice(!editKey, cancelEntry, rootRef);
     const [owner, setOwner] = useState(params.get("owner") ?? "");
     const [typeName, setTypeName] = useState(params.get("type") ?? "Inventory");
     const { data: ownerData } = useApi(editKey && owner ? `/api/owner?${qs({ novel: folder, owner })}` : null);
@@ -3445,7 +3494,7 @@ function EntryEditor({ index, folder, params, embedded = false, onDone = null })
     // a state ledger for an owner with a stat template edits as a form prefilled with the previous values
     const statTemplate = type?.behaviour === "state" && !withTarget && preview?.stats?.template ? preview.stats.template : null;
     const otherLines = statTemplate ? lines.filter((l) => !fieldNamed(statTemplate, l.set)) : [];
-    return html`<div class=${embedded ? "entry-embedded" : ""}>
+    return html`<div class=${embedded ? "entry-embedded" : ""} ref=${rootRef}>
         ${!embedded && html`<div class="muted"><a href=${novelHref(folder)}>${novel.name}</a></div>`}
         ${embedded ? html`<h2 style="margin:4px 0 10px">${editKey ? `Edit ${typeName} entry ${editKey}` : `New ${typeName} entry`}</h2>` : html`<h1>${editKey ? `Edit entry ${editKey}` : "New entry"}</h1>`}
         <div class="grid2" style="grid-template-columns: minmax(0,1.4fr) minmax(0,1fr)">
@@ -3478,7 +3527,7 @@ function EntryEditor({ index, folder, params, embedded = false, onDone = null })
                 <div class="row">
                     <button class="primary" disabled=${busy || !owner} onClick=${() => save(true)}>Save & copy callout</button>
                     <button disabled=${busy || !owner} onClick=${() => save(false)}>Save</button>
-                    <button onClick=${() => { if (embedded) markDirty("drawer", "ledger-entry", false); onDone ? onDone() : history.back(); }}>Cancel</button>
+                    <button onClick=${cancelEntry} title=${editKey ? "Cancel" : "Cancel (Escape twice)"}>Cancel</button>
                 </div>
             </div>
             <div>

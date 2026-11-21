@@ -854,7 +854,7 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
                     }}
                     dangerouslySetInnerHTML=${{ __html: rendered.get(blockMarkdown(b, blocks, i)) ?? `<p class="muted">${b.kind === "p" ? "Image" : "Callout"}…</p>` }} />
             </div>` : showsLive(b) && editing !== b.id ? html`<div key=${b.id} class=${`be-row be-${b.kind} be-live ${b.kind === "h" ? `be-h${b.level}` : ""} ${b.sep.length > 1 || !isList(b) ? "" : "tight"}${selCls(i)}`}
-                style=${`--level:${b.level ?? 0}`}>
+                style=${`--level:${b.kind === "h" ? 0 : b.level ?? 0}`}>
                 ${gutter(b, numbers[i], () => replace(i, { ...b, checked: !b.checked }, { i }))}
                 <div class="be-text" lang="en" onClick=${(e) => {
                     if (shiftPick(i, e)) return;
@@ -867,7 +867,7 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
                     setEditing(b.id);
                 }} dangerouslySetInnerHTML=${{ __html: inlineHtml(b.text) || `<span class="be-empty">${i === 0 && blocks.length === 1 ? "Start writing…" : "\u200b"}</span>` }} />
             </div>` : html`<div key=${b.id} class=${`be-row be-${b.kind} ${b.kind === "h" ? `be-h${b.level}` : ""} ${b.kind === "quote" && /^\[!/.test(b.text) ? "be-callout" : ""} ${b.sep.length > 1 || !isList(b) ? "" : "tight"}${selCls(i)}`}
-                style=${`--level:${b.level ?? 0}`}>
+                style=${`--level:${b.kind === "h" ? 0 : b.level ?? 0}`}>
                 ${gutter(b, numbers[i], () => replace(i, { ...b, checked: !b.checked }, { i }))}
                 ${!compact && (b.kind === "p" || isList(b)) && html`<div class="be-mirror" aria-hidden="true" dangerouslySetInnerHTML=${{ __html: `${inlineHtml(b.text, { raw: true })}\u200b` }} />`}
                 <textarea class=${!compact && (b.kind === "p" || isList(b)) ? "be-over" : ""} ref=${(el) => { if (el) refs.current.set(b.id, el); else refs.current.delete(b.id); }} rows="1"
