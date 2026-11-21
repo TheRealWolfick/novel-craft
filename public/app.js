@@ -1661,7 +1661,40 @@ function RenameDialog({ path: p, title: title0 = "", withTitle = false, onDone, 
     </div>`;
 }
 
-/** Frontmatter of any note as an always-editable form; only changed keys are patched */
+/**
+ * A note's fields as a document: short fields as a property list (click one to edit it; empty ones fold into
+ * "+ N empty fields"), long text fields as sections that always show (a "-" when blank; the pencil or a double-click
+ * edits them), small fields grouped under a section (`groups` in the schema, e.g. a character's eye colour under
+ * Appearance) as a two-column list there. Technical and ledger-made fields are left to the Links & more tab. Edits
+ * collect until Save changes (Ctrl+S); only changed keys are patched.
+ */
+const DEFAULT_GROUPS = { characters: { appearance: ["gender", "height", "weight", "eye-color", "hair-color", "hair-style", "facial-hair", "attractiveness"] } };
+const PLAN_SECTIONS = { plots: ["plot"], volumes: ["description", "plan"], chapters: ["plan"] };
+const TECH_KEYS = new Set(["type", "created-date", "facet", "images"]);
+const SECTION_TITLES = { plot: "The plot" };
+const sectionTitle = (k) => SECTION_TITLES[k] ?? fieldLabel(k);
+/** The collection's summary spec: the schema's `summary`, else SUMMARY */
+function summarySpec(page, index) {
+    return index?.schema?.collections[page.collection]?.summary
+        ?? SUMMARY[page.collection] ?? (page.collection?.startsWith("Taxonomy/") ? SUMMARY.taxonomy : page.fm.type === "character" ? SUMMARY.characters : null);
+}
+/** Fields the Page tab leaves out (shown on Links & more): technical keys, ledger-made ones, a character's synced relations */
+const technicalField = (page, spec, k) => TECH_KEYS.has(k) || (spec?.generated ?? []).includes(k) || (page.fm.type === "character" && k.startsWith("relations/"));
+/** Which fields are sections (long text) and which small fields sit under a section */
+function docLayout(page, spec, index, keys, defs) {
+    const kind = page.plan ? null : page.fm.type === "character" ? "characters" : page.collection;
+    const fm = page.fm;
+    const isText = (k) => { const d = defs.has(k) ? defs.get(k) : fm[k]; return linkTargetOf(spec, k, fm[k]) == null && !Array.isArray(d) && typeof d !== "boolean" && typeof d !== "number"; };
+    const named = page.plan ? PLAN_SECTIONS[page.plan.kind] ?? [] : ["description", ...(summarySpec(page, index)?.sections ?? [])];
+    const long = (k) => typeof fm[k] === "string" && !isLink(fm[k]) && (fm[k].length > 120 || fm[k].includes("\n"));
+    const sections = [...new Set([...named.filter((k) => keys.includes(k)), ...keys.filter(long)])].filter((k) => isText(k) && !technicalField(page, spec, k));
+    const grouped = new Map();   // small field -> the section it sits under
+    for (const [sec, list] of Object.entries(spec?.groups ?? DEFAULT_GROUPS[kind] ?? {})) for (const k of asList(list)) if (keys.includes(k) && !sections.includes(k)) grouped.set(k, sec);
+    // a group whose section isn't a text field of the note still gets a section of its own (just the small fields)
+    for (const sec of new Set(grouped.values())) if (!sections.includes(sec)) sections.push(sec);
+    return { sections, grouped };
+}
+
 function FieldsEditor({ page, index, spec, scope, linkOptions }) {
     const [edits, setEdits] = useState({});
     const [baseMtime, setBaseMtime] = useState(null);
@@ -1669,11 +1702,15 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
     const [saved, setSaved] = useState({ mtime: 0, fm: {} });
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState("");
+    const [open, setOpen] = useState(null);         // the property being edited
+    const [openSec, setOpenSec] = useState(null);   // the section being edited
+    const [showEmpty, setShowEmpty] = useState(false);
+    const root = useRef();
     const fm = page.mtime >= saved.mtime ? page.fm : { ...page.fm, ...saved.fm };
     const mtime = Math.max(page.mtime, saved.mtime);
     const defs = new Map(spec?.fields ?? []);
     const generated = new Set(spec?.generated ?? []);
-    // stat template fields of a character sheet / creature note get typed inputs in their own block
+    // stat template fields of a character sheet / creature note get typed inputs in their own section
     const statsInfo = page.stats;
     const tplName = "stat-template" in edits ? edits["stat-template"] : fm["stat-template"] || statsInfo?.holder.template || "";
     const statTpl = statsInfo?.templates?.[tplName] ?? null;
@@ -1683,8 +1720,10 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
     const dirty = changed.length > 0;
     useEffect(() => markDirty(scope, page.path, dirty), [dirty]);
     useEffect(() => () => markDirty(scope, page.path, false), []);
+    // an opened property takes the focus
+    useEffect(() => { if (open) requestAnimationFrame(() => root.current?.querySelector(".np-prop.open input:not([type=checkbox]), .np-prop.open textarea")?.focus()); }, [open]);
     const edit = (k, v) => { if (baseMtime == null) setBaseMtime(mtime); setEdits((s) => ({ ...s, [k]: v })); };
-    const reset = () => { setEdits({}); setBaseMtime(null); setErr(""); };
+    const reset = () => { setEdits({}); setBaseMtime(null); setErr(""); setOpenSec(null); };
     const save = async () => {
         if (!dirty || busy) return;
         setBusy(true); setErr("");
@@ -1692,26 +1731,63 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
             const set = Object.fromEntries(changed.map((k) => [k, coerce(edits[k])]));
             const r = await api.send("PATCH", "/api/note", { path: page.path, set, baseMtime: baseMtime ?? mtime });
             setSaved({ mtime: r.mtime, fm: { ...(page.mtime >= saved.mtime ? {} : saved.fm), ...set } });
-            reset();
+            reset(); setOpen(null);
             toast("Saved");
         } catch (e) { setErr(e.message); }
         setBusy(false);
     };
     const readOnly = (k) => READONLY_KEYS.has(k) || generated.has(k) || (fm[k] && typeof fm[k] === "object" && asList(fm[k]).some((x) => x && typeof x === "object"));
+    const cur = (k) => (k in edits ? edits[k] : fm[k]);
+    const def = (k) => (defs.has(k) ? defs.get(k) : Array.isArray(fm[k]) ? [] : typeof fm[k] === "boolean" ? false : "");
     const input = (k) => {
-        const value = k in edits ? edits[k] : fm[k];
-        const def = defs.has(k) ? defs.get(k) : Array.isArray(fm[k]) ? [] : typeof fm[k] === "boolean" ? false : "";
         const target = linkTargetOf(spec, k, fm[k]);
-        return fieldInput({ key: k, def, target, value, index, options: linkOptionsFor(target, index, linkOptions), onChange: (v) => edit(k, v) });
+        return fieldInput({ key: k, def: def(k), target, value: cur(k), index, options: linkOptionsFor(target, index, linkOptions), onChange: (v) => edit(k, v) });
     };
-    return html`<div onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); save(); } }}>
-        <div class="formgrid">${keys.map((k) => html`
-            <label class=${changed.includes(k) ? "changed" : ""}>${k}</label>
-            ${readOnly(k) ? html`<div class="ro"><${Value} v=${fm[k]} links=${page.links} index=${index} /></div>` : input(k)}`)}
+    const { sections, grouped } = docLayout(page, spec, index, keys, defs);
+    const props = keys.filter((k) => !sections.includes(k) && !grouped.has(k) && !technicalField(page, spec, k));
+    const isFilled = (k) => filled(cur(k)) || k in edits || k === open;
+    const emptyCount = props.filter((k) => !isFilled(k)).length;
+    const blank = html`<span class="blank">-</span>`;
+    // a property: its value as text, an input once clicked (booleans are always a switch); leaving the row closes it
+    const row = (k) => {
+        const bool = typeof def(k) === "boolean" && !readOnly(k);
+        const editing = open === k && !readOnly(k);
+        return html`<div key=${k} class=${`np-prop ${changed.includes(k) ? "changed" : ""} ${editing ? "open" : ""} ${readOnly(k) ? "ro" : ""}`}
+            onClick=${(e) => { if (!readOnly(k) && !bool && !editing && !e.target.closest("a")) setOpen(k); }}
+            onFocusOut=${(e) => { if (editing && !e.currentTarget.contains(e.relatedTarget)) setOpen((o) => (o === k ? null : o)); }}
+            onKeyDown=${(e) => { if (e.key === "Escape" && editing) { e.stopPropagation(); setOpen(null); } }}>
+            <span class="np-prop-k" title=${k}>${fieldLabel(k)}</span>
+            <div class="np-prop-v">${editing || bool ? input(k) : filled(cur(k)) ? html`<${Value} v=${cur(k)} links=${page.links} index=${index} />` : blank}</div>
+        </div>`;
+    };
+    const section = (k) => {
+        const hasField = keys.includes(k);
+        const sub = [...grouped].filter(([, s]) => s === k).map(([f]) => f);
+        const editing = openSec === k;
+        const v = cur(k);
+        const toggle = () => setOpenSec(editing ? null : k);
+        return html`<section key=${k} class=${`np-sec ${changed.includes(k) ? "changed" : ""}`} onDblClick=${hasField && !readOnly(k) ? dblToggle(toggle) : undefined}>
+            <div class="np-sec-head"><h2>${sectionTitle(k)}</h2>
+                ${hasField && !readOnly(k) && (editing ? html`<button class="small" onClick=${toggle}>Done</button>`
+                    : html`<button class="icon" title=${`Edit ${sectionTitle(k)} (or double-click)`} aria-label=${`Edit ${sectionTitle(k)}`} onClick=${toggle}>${ICONS.edit}</button>`)}</div>
+            ${hasField && (editing
+                ? (k === "plan" ? html`<${PlanEditor} value=${v ?? ""} onChange=${(x) => edit(k, x)} />`
+                    : html`<${AutoTextarea} class="np-sec-text" value=${v} autoFocus=${true} onInput=${(e) => edit(k, e.target.value)} aria-label=${sectionTitle(k)} />`)
+                : !filled(v) ? html`<p class="np-prose blank">-</p>`
+                : k === "plan" ? html`<${PlanView} text=${String(v)} />`
+                : typeof v === "string" ? html`<p class="np-prose">${v}</p>` : html`<div class="np-prose"><${Value} v=${v} links=${page.links} index=${index} /></div>`)}
+            ${sub.length > 0 && html`<div class="np-mini">${sub.map(row)}</div>`}
+        </section>`;
+    };
+    return html`<div class="np-fields" ref=${root} onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); save(); } }}>
+        <div class="np-props">
+            ${props.filter((k) => showEmpty || isFilled(k)).map(row)}
+            ${emptyCount > 0 && html`<button class="np-more" onClick=${() => setShowEmpty(!showEmpty)}>${showEmpty ? "Hide empty fields" : `+ ${emptyCount} empty field${emptyCount === 1 ? "" : "s"}`}</button>`}
         </div>
-        ${statsInfo && html`<${SheetStats} info=${statsInfo} tpl=${statTpl} tplName=${tplName} fm=${fm} edits=${edits} edit=${edit} changed=${changed} index=${index} />`}
+        ${sections.map(section)}
+        ${statsInfo && html`<section class="np-sec"><${SheetStats} info=${statsInfo} tpl=${statTpl} tplName=${tplName} fm=${fm} edits=${edits} edit=${edit} changed=${changed} index=${index} /></section>`}
         ${err && html`<p class="error">${err}</p>`}
-        <div class=${`savebar ${dirty ? "dirty" : ""}`}>
+        <div class=${`savebar ${dirty ? "dirty" : "quiet"}`}>
             <button class="primary" disabled=${!dirty || busy} onClick=${save}>${busy ? "Saving…" : "Save changes"}</button>
             ${dirty && html`<button onClick=${reset}>Discard</button><span class="muted">${changed.length} changed · Ctrl+S</span>`}
         </div>
@@ -1739,31 +1815,6 @@ const SUMMARY = {
 };
 const fieldLabel = (k) => { const t = k.split("/").pop().replace(/-/g, " "); return t[0].toUpperCase() + t.slice(1); };
 const filled = (v) => !(v == null || v === "" || (Array.isArray(v) && !v.length));
-
-function NoteSummary({ page, index }) {
-    const fm = page.fm;
-    const spec = index?.schema?.collections[page.collection]?.summary
-        ?? SUMMARY[page.collection] ?? (page.collection?.startsWith("Taxonomy/") ? SUMMARY.taxonomy : fm.type === "character" ? SUMMARY.characters : null);
-    const facts = (spec?.facts ?? []).filter((k) => filled(fm[k]));
-    const sections = (spec?.sections ?? []).filter((k) => filled(fm[k]));
-    const value = (k) => k === "value" && filled(fm.currency) ? html`${fm.value} <${Value} v=${fm.currency} links=${page.links} index=${index} />`
-        : html`<${Value} v=${fm[k]} links=${page.links} index=${index} />`;
-    const text = (k) => (typeof fm[k] === "string" && !isLink(fm[k]) ? html`<p>${fm[k]}</p>` : value(k));
-    // characters: skills and relationships each get a box of their own, only when they have anything
-    const isChar = fm.type === "character";
-    const skills = isChar && filled(fm["character/skills"]);
-    const relations = isChar ? Object.keys(fm).filter((k) => k.startsWith("relations/") && filled(fm[k])) : [];
-    const main = filled(fm.description) || facts.length > 0 || sections.length > 0;
-    if (!main && !skills && !relations.length) return null;
-    return html`
-        ${main && html`<div class="panel note-summary">
-            ${filled(fm.description) && html`<p class="lead">${String(fm.description)}</p>`}
-            ${facts.length > 0 && html`<dl class="facts">${facts.map((k) => html`<div><dt>${fieldLabel(k)}</dt><dd>${value(k)}</dd></div>`)}</dl>`}
-            ${sections.map((k) => html`<h4>${fieldLabel(k)}</h4><div class="summary-section">${text(k)}</div>`)}
-        </div>`}
-        ${skills && html`<div class="panel note-summary"><h3>Skills</h3><div class="summary-section">${text("character/skills")}</div></div>`}
-        ${(page.relations || relations.length > 0) && html`<${RelationsBox} page=${page} index=${index} />`}`;
-}
 
 /**
  * A character's relationships: friendly, neutral and hostile, each with the name and the current note. From the
@@ -1816,6 +1867,17 @@ function ClassStrip({ page, index }) {
         <span class="rank">${n.fm.class}</span>${n.fm.title || n.name}</a>`)}</nav>`;
 }
 
+/** A [[link]]'s target note name (no alias, heading or folders), lower case, for matching */
+const linkKey = (v) => { const m = String(v ?? "").match(/^!?\[\[([^\]]+)\]\]$/); return (m ? m[1].split("|")[0].split("#")[0].split("/").pop() : String(v ?? "")).trim().toLowerCase(); };
+const SIDE_SHOWN = 3;
+
+/**
+ * A note as a document: a header (path, title, tabs, actions), then the page in the middle and a narrow column beside
+ * it, the two centred. Tabs: Page (fields, sections, text, images), for a novel's characters Relations, Inventory and
+ * Ledger at the chapter of the column's slider, and Links & more (links both ways, technical fields). The column holds
+ * what a note relates to: a character's stats, relations and inventory at a chapter; a plot's family (main plot and
+ * subplots, the open one marked); who holds an item and where it is used.
+ */
 function NoteView({ index, path, scope = "page" }) {
     const { data: page, error } = useApi(`/api/note?${qs({ path })}`);
     const { data: plan } = useApi(page?.plan ? `/api/plan?${qs({ novel: page.plan.novel })}` : null);
@@ -1824,34 +1886,29 @@ function NoteView({ index, path, scope = "page" }) {
         "@characters": plan.characters.map((c) => ({ label: c.name })),
     }, [plan]);
     const [renaming, setRenaming] = useState(false);
-    // a character in the drawer: its sheet and its ledgers as two tabs
-    const [charTab, setCharTabState] = useState(() => store.get("characterTab", "sheet"));
-    const setCharTab = (t) => { setCharTabState(t); if (t !== "entry") store.set("characterTab", t); };
-    // a ledger entry being written or edited from the Ledger tab: a third tab, kept while you look at the others
+    const [tab, setTabState] = useState(() => (store.get("characterTab", "page") === "ledger" ? "ledger" : "page"));
+    const setTab = (t) => { setTabState(t); if (t === "page" || t === "ledger") store.set("characterTab", t); };
+    // a ledger entry being written or edited from a character's tabs: a tab of its own, kept while you look at the others
     const [entryTab, setEntryTab] = useState(null); // query string of the entry editor, or null
-    const openEntry = (p) => { setEntryTab(qs(p)); setCharTab("entry"); };
-    const closeEntry = () => { setEntryTab(null); setCharTab("ledger"); };
+    const openEntry = (p) => { setEntryTab(qs(p)); setTab("entry"); };
+    const closeEntry = () => { setEntryTab(null); setTab("ledger"); };
     const pick = useItemPick();
+    const novel = page && index?.novels.find((n) => page.path.startsWith(`${n.folder}/`));
+    const isChar = page?.fm.type === "character" && !!novel;
     // a character's relation fields pick from the characters of its own novel
-    const charNovel = page?.fm.type === "character" ? index?.novels.find((n) => page.path.startsWith(`${n.folder}/`))?.folder : null;
-    const novelLinks = useNovelLinks(charNovel);
+    const novelLinks = useNovelLinks(page?.fm.type === "character" ? novel?.folder : null);
+    // a character's ledgers at the column's chapter (null: the latest)
+    const [at, setAt] = useState(null);
+    const { data: owned } = useApi(isChar ? `/api/owner?${qs({ novel: novel.folder, owner: page.name, at })}` : null);
+    const { data: stats } = useApi(isChar ? `/api/stats?${qs({ novel: novel.folder, owner: page.name, at })}` : null);
     if (!page) return html`<${Loading} error=${error} />`;
     const schema = index?.schema;
     const spec = page.plan?.spec ?? (page.collection ? schema?.collections[page.collection] : page.fm.type === "character" ? schema?.characters : null);
-    const novel = index?.novels.find((n) => page.path.startsWith(`${n.folder}/`));
-    const linkGroups = (groups) => Object.entries(groups).sort((a, b) => b[1].length - a[1].length).map(([c, list]) => html`<div style="margin-bottom:6px"><b class="muted">${c === "Unresolved" ? c : collectionLabel(c)} (${list.length})</b><div>${list.slice(0, 60).map((b) => b.path ? html`<a class="chip" href=${noteHref(b.path)}>${b.name}</a>` : html`<span class="chip muted">${b.name}</span>`)}${list.length > 60 ? html`<span class="muted"> +${list.length - 60} more</span>` : ""}</div></div>`);
-    const fields = html`<div class="panel">${page.fmError ? html`<p class="muted">Fix the frontmatter in Obsidian to edit fields here.</p>`
-        : html`<${FieldsEditor} key=${page.path} page=${page} index=${index} spec=${spec} scope=${scope} linkOptions=${linkOptions ?? novelLinks} />`}</div>`;
-    const usage = html`
-        ${page.heldBy?.length > 0 && html`<div class="panel"><h3>Held by</h3>${page.heldBy.map((x) => html`<div><a href=${`#/owner/${encodeURIComponent(x.novel)}/${encodeURIComponent(x.owner)}`}>${x.owner}</a> <span class="muted">${x.qtyText}${x.store !== "inventory" ? ` @ ${x.store}` : ""} · ${x.novel}</span></div>`)}</div>`}
-        ${page.whereUsed?.length > 0 && html`<div class="panel"><h3>Used in</h3><${WhereUsed} uses=${page.whereUsed} /></div>`}
-        ${page.creatureStats && html`<${CreatureNovels} page=${page} index=${index} />`}`;
-    const imageDrop = html`<div class="panel"><${ImageDrop} path=${page.path} /></div>`;
-    const content = blocksFor(page) ? html`<${NoteBlocks} key=${page.path} page=${page} scope=${scope} />` : html`
-        ${page.blueprint && html`<${BlueprintPanel} page=${page} index=${index} />`}
-        ${page.body.trim() && (page.plan
-            ? html`<details class="panel"><summary class="muted">Note body (not used by the plan, edit it in Obsidian)</summary><${Html} html=${page.html} /></details>`
-            : html`<div class="panel"><${Html} html=${page.html} /></div>`)}`;
+    const chapter = at ?? owned?.latestChapter ?? 0;
+    const ledgersOf = (behaviour) => (owned?.ledgers ?? []).filter((l) => l.computed.behaviour === behaviour);
+    const relLedger = ledgersOf("state").find((l) => l.computed.relations?.length) ?? owned?.ledgers.find((l) => /relation/i.test(l.type));
+    const stockLedgers = ledgersOf("stock");
+    const linkGroups = (groups) => Object.entries(groups).sort((a, b) => b[1].length - a[1].length).map(([c, list]) => html`<div class="np-linkgroup"><b>${c === "Unresolved" ? c : collectionLabel(c)} <span class="muted">${list.length}</span></b><div>${list.slice(0, 60).map((b) => b.path ? html`<a class="chip" href=${noteHref(b.path)}>${b.name}</a>` : html`<span class="chip muted">${b.name}</span>`)}${list.length > 60 ? html`<span class="muted"> +${list.length - 60} more</span>` : ""}</div></div>`);
     const linkedFrom = Object.values(page.backlinks).reduce((n, l) => n + l.length, 0);
     const deletable = !page.path.startsWith("90. Templater/") && !["config", "ledger"].includes(page.fm.type);
     const del = async () => {
@@ -1864,7 +1921,6 @@ function NoteView({ index, path, scope = "page" }) {
             else go(page.collection ? `#/c/${encodeURIComponent(page.collection)}` : novel ? `#/novel/${encodeURIComponent(novel.folder)}` : "#/");
         } catch (e) { toast(e.message); }
     };
-    const renameable = deletable;
     const renamed = (r) => {
         setRenaming(false);
         if (!r.renamed) return;
@@ -1874,49 +1930,195 @@ function NoteView({ index, path, scope = "page" }) {
         else location.replace(noteHref(r.path));
     };
     const startRename = () => { if (!dirtyForms.has(`${scope}:${page.path}`) || confirm("Renaming reloads this note. Discard unsaved changes?")) setRenaming(true); };
-    const backlinks = Object.keys(page.backlinks).length > 0 && html`<div class="panel"><h3>Linked from</h3>${linkGroups(page.backlinks)}</div>`;
-    const outlinks = Object.keys(page.outlinks ?? {}).length > 0 && html`<div class="panel"><h3>Links to</h3>${linkGroups(page.outlinks)}</div>`;
-    const charTabs = inDrawer(scope) && page.fm.type === "character" && !!novel;
-    const tabNow = charTab === "entry" && !entryTab ? "ledger" : charTab === "ledger" || charTab === "entry" ? charTab : "sheet";
-    return html`<div>
+    // opening another note from the page: in the drawer it becomes the drawer page, in a left tab that tab follows it
+    const openNote = (p) => (scope === "drawer" ? openInDrawer(noteHref(p)) : scope === "left" ? renameLeftTab(noteHref(page.path), noteHref(p)) : go(noteHref(p)));
+    const tabs = [["page", "Page"],
+        ...(isChar ? [["relations", "Relations"], ["inventory", "Inventory"], ["ledger", "Ledger"]] : []),
+        ...(entryTab ? [["entry", entryTabLabel(entryTab)]] : []),
+        ["links", "Links & more"]];
+    const tabNow = tabs.some(([k]) => k === tab) ? tab : "page";
+    const family = page.plan?.kind === "plots" ? plotFamily(plan, page) : null;
+    const usage = html`
+        ${page.heldBy?.length > 0 && html`<div class="np-side-sec"><h4>Held by</h4>${page.heldBy.map((x) => html`<div class="np-side-row"><a href=${ownerHref(x.novel, x.owner)}>${x.owner}</a><span class="muted">${x.qtyText}${x.store !== "inventory" ? ` @ ${x.store}` : ""}</span></div>`)}</div>`}
+        ${page.whereUsed?.length > 0 && html`<div class="np-side-sec"><h4>Used in</h4><${WhereUsed} uses=${page.whereUsed} /></div>`}
+        ${page.collection === "Items" && !page.blueprint && html`<div class="np-side-sec"><h4>Recipe</h4><button class="small-link linkish" onClick=${() => { if (inDrawer(scope)) collapseDrawer(); go(`#/newrecipe/${encodeURIComponent(page.path)}`); }}>Create recipe</button></div>`}
+        ${page.creatureStats && html`<${CreatureNovels} page=${page} index=${index} />`}`;
+    const side = isChar ? html`<${CharacterSide} owned=${owned} stats=${stats} chapter=${chapter} setAt=${setAt} relLedger=${relLedger} stockLedgers=${stockLedgers} index=${index} goTab=${setTab} />`
+        : family ? html`<${PlotFamily} family=${family} current=${page.path} open=${openNote} />`
+        : (page.heldBy?.length || page.whereUsed?.length || (page.collection === "Items" && !page.blueprint) || page.creatureStats) ? usage : null;
+    const content = blocksFor(page) ? html`<${NoteBlocks} key=${page.path} page=${page} scope=${scope} />` : html`
+        ${page.blueprint && html`<${BlueprintPanel} page=${page} index=${index} />`}
+        ${page.body.trim() && (page.plan
+            ? html`<details class="np-sec"><summary class="muted">Note body (not used by the plan, edit it in Obsidian)</summary><${Html} html=${page.html} /></details>`
+            : html`<div class="np-body"><${Html} html=${page.html} /></div>`)}`;
+    const technical = Object.keys(page.fm).filter((k) => technicalField(page, spec, k));
+    return html`<div class="np-note">
         ${renaming && html`<${RenameDialog} path=${page.path} onDone=${renamed} onClose=${() => setRenaming(false)} />`}
-        <div class="spread">
-            <div>
-                <div class="muted">${page.collection ? html`<a href=${`#/c/${encodeURIComponent(page.collection)}`}>${collectionLabel(page.collection)}</a>` : page.path.split("/").slice(0, -1).join(" / ")}</div>
-                <h1>${page.fm.title && page.fm.title !== page.name ? html`${page.fm.title} <span class="muted" style="font-size:14px">${page.name}</span>` : page.name}
-                    ${page.fm.status ? html` <span class="badge">${page.fm.status}</span>` : ""}</h1>
-            </div>
-            <div class="row">
-                ${page.fm.type === "character" && novel && !inDrawer(scope) && html`<button onClick=${() => go(`#/owner/${encodeURIComponent(novel.folder)}/${encodeURIComponent(page.name)}`)}>Ledgers</button>`}
+        <header class="np-head">
+            <div class="np-crumbs">${page.collection ? html`<a href=${`#/c/${encodeURIComponent(page.collection)}`}>${collectionLabel(page.collection)}</a>` : page.path.split("/").slice(0, -1).join(" / ")}</div>
+            <nav class="np-tabs" role="tablist">${tabs.map(([k, label]) => html`<button key=${k} role="tab" aria-selected=${tabNow === k} class=${`pill ${tabNow === k ? "on" : ""} ${k === "entry" ? "entry-tab" : ""}`} onClick=${() => setTab(k)}>${label}${k === "entry" && html`<span class="tab-x" role="button" title="Close without saving" aria-label="Close the entry" onClick=${(e) => { e.stopPropagation(); closeEntry(); }}>×</span>`}</button>`)}</nav>
+            <h1 class="np-title">${page.fm.title && page.fm.title !== page.name ? html`${page.fm.title} <span class="muted np-filename">${page.name}</span>` : page.name}
+                ${page.fm.status ? html` <span class="badge">${page.fm.status}</span>` : ""}</h1>
+            <div class="np-actions">
                 ${pickable(pick, page.collection) && html`<button class="primary" onClick=${() => pick.pick(page.name)}>Use this for ${pick.label}</button>`}
-                ${page.collection === "Items" && !page.blueprint && html`<button title="Make the recipe (blueprint) for this item" onClick=${() => { if (inDrawer(scope)) collapseDrawer(); go(`#/newrecipe/${encodeURIComponent(page.path)}`); }}>Create recipe</button>`}
-                ${["Items", "Materials"].includes(page.collection) && html`<button title="Copy as an item callout (like a game's item tooltip)" onClick=${() => copyText(itemCallout(page, spec), `Copied ${page.name} as a callout`)}>⧉ Copy callout</button>`}
-                ${renameable && html`<button title="Rename the file; links to it in the vault follow" onClick=${startRename}>Rename file</button>`}
-                ${deletable && html`<${ConfirmButton} class="" onConfirm=${del}
+                ${["Items", "Materials"].includes(page.collection) && html`<button class="small" title="Copy as an item callout (like a game's item tooltip)" onClick=${() => copyText(itemCallout(page, spec), `Copied ${page.name} as a callout`)}>⧉ Copy callout</button>`}
+                ${deletable && html`<button class="small" title="Rename the file; links to it in the vault follow" onClick=${startRename}>Rename file</button>`}
+                ${deletable && html`<${ConfirmButton} class="small" onConfirm=${del}
                     title=${`Move to the vault's .trash folder${linkedFrom ? `. ${linkedFrom} note${linkedFrom > 1 ? "s" : ""} link here and will show it as unresolved` : ""}${page.heldBy?.length ? ". Ledger lines still name it" : ""}`}>Delete<//>`}
             </div>
-        </div>
+        </header>
         ${page.fmError && html`<div class="warnbox">Frontmatter could not be read: ${page.fmError}</div>`}
-        ${charTabs && html`<div class="tabs note-tabs" role="tablist">
-            <button role="tab" aria-selected=${tabNow === "sheet"} class=${tabNow === "sheet" ? "on" : ""} onClick=${() => setCharTab("sheet")}>Character</button>
-            <button role="tab" aria-selected=${tabNow === "ledger"} class=${tabNow === "ledger" ? "on" : ""} onClick=${() => setCharTab("ledger")}>Ledger</button>
-            ${entryTab && html`<button role="tab" aria-selected=${tabNow === "entry"} class=${`entry-tab ${tabNow === "entry" ? "on" : ""}`} onClick=${() => setCharTab("entry")}>${entryTabLabel(entryTab)}
-                <span class="tab-x" role="button" title="Close without saving" aria-label="Close the entry" onClick=${(e) => { e.stopPropagation(); closeEntry(); }}>×</span></button>`}
-        </div>`}
-        ${charTabs && tabNow === "ledger" && html`<${OwnerView} key=${page.name} index=${index} folder=${novel.folder} owner=${page.name} params=${new URLSearchParams()} embedded=${true} onEntry=${openEntry} />`}
-        ${charTabs && entryTab && html`<div hidden=${tabNow !== "entry"}><${EntryEditor} key=${entryTab} index=${index} folder=${novel.folder} params=${new URLSearchParams(entryTab)} embedded=${true} onDone=${closeEntry} /></div>`}
-        <div hidden=${charTabs && tabNow !== "sheet"}>${inDrawer(scope)
-            // drawer: summary, content, then images on the left; frontmatter and links on the right
-            // (plan notes keep their fields, which are the plan, on the left)
-            ? html`<${ClassStrip} page=${page} index=${index} />
-            <div class="note-cols">
-                <div class="note-main">${page.plan ? fields : html`<${NoteSummary} page=${page} index=${index} />`}<${PowerLevels} page=${page} index=${index} />${usage}${content}<${Gallery} images=${page.images} />${imageDrop}</div>
-                <div class="note-side">${!page.plan && fields}${backlinks}${outlinks}</div>
-            </div>`
-            : html`<${Gallery} images=${page.images} />
-                <div class=${page.plan ? "" : "grid2"}>${fields}<div><${PowerLevels} page=${page} index=${index} />${usage}${imageDrop}</div></div>
-                ${content}${backlinks}${outlinks}`}</div>
+        <div class=${`np-cols ${side ? "" : "single"}`}>
+            <div class="np-main">
+                <div hidden=${tabNow !== "page"}>
+                    ${family?.parent && html`<div class="np-parent"><span class="muted">Subplot of</span><button class="linkish" onClick=${() => openNote(family.parent.path)}>${family.parent.title}</button></div>`}
+                    <${ClassStrip} page=${page} index=${index} />
+                    ${page.fmError ? html`<p class="muted">Fix the frontmatter in Obsidian to edit fields here.</p>`
+                        : html`<${FieldsEditor} key=${page.path} page=${page} index=${index} spec=${spec} scope=${scope} linkOptions=${linkOptions ?? novelLinks} />`}
+                    ${family && html`<${Subplots} family=${family} page=${page} open=${openNote} />`}
+                    <${PowerLevels} page=${page} index=${index} />
+                    ${content}
+                    <section class="np-sec"><div class="np-sec-head"><h2>Images</h2></div><${Gallery} images=${page.images} /><${ImageDrop} path=${page.path} /></section>
+                </div>
+                ${isChar && tabNow === "relations" && html`<${CharacterRelations} ledger=${relLedger} chapter=${chapter} index=${index} onEntry=${() => openEntry({ owner: page.name, type: relLedger?.type ?? "Relationships", chapter })} />`}
+                ${isChar && tabNow === "inventory" && html`<div class="np-tabpage">
+                    <div class="spread"><h2 class="np-h2">Held at chapter ${chapter}</h2><button class="small" onClick=${() => openEntry({ owner: page.name, type: stockLedgers[0]?.type ?? "Inventory", chapter })}>+ Inventory entry</button></div>
+                    ${stockLedgers.length ? stockLedgers.map((l) => html`${stockLedgers.length > 1 && html`<h3>${l.type}</h3>`}${holdingsTable(l.computed.stacks ?? [], index)}`) : html`<p class="muted">No inventory ledger yet.</p>`}</div>`}
+                ${isChar && tabNow === "ledger" && html`<${OwnerView} key=${page.name} index=${index} folder=${novel.folder} owner=${page.name} params=${new URLSearchParams()} embedded=${true} onEntry=${openEntry} chapter=${chapter} onChapter=${setAt} />`}
+                ${isChar && entryTab && html`<div hidden=${tabNow !== "entry"}><${EntryEditor} key=${entryTab} index=${index} folder=${novel.folder} params=${new URLSearchParams(entryTab)} embedded=${true} onDone=${closeEntry} /></div>`}
+                ${tabNow === "links" && html`<div class="np-tabpage np-links">
+                    <section><h2 class="np-h2">Linked from</h2>${linkedFrom ? linkGroups(page.backlinks) : html`<p class="muted">No notes link here.</p>`}</section>
+                    <section><h2 class="np-h2">Links to</h2>${Object.keys(page.outlinks ?? {}).length ? linkGroups(page.outlinks) : html`<p class="muted">This note links nowhere.</p>`}</section>
+                    <section><h2 class="np-h2">Technical fields</h2>
+                        <div class="np-prop ro"><span class="np-prop-k">file</span><div class="np-prop-v mono">${page.path}</div></div>
+                        ${technical.map((k) => html`<div class="np-prop ro" key=${k}><span class="np-prop-k mono" title=${k}>${k}</span><div class="np-prop-v">${filled(page.fm[k]) ? html`<${Value} v=${page.fm[k]} links=${page.links} index=${index} />` : html`<span class="blank">-</span>`}</div></div>`)}</section>
+                </div>`}
+            </div>
+            ${side && html`<aside class="np-side">${side}</aside>`}
+        </div>
     </div>`;
+}
+
+/** The column beside a character: the chapter slider, then stats, relations and what they carry at that chapter */
+function CharacterSide({ owned, stats, chapter, setAt, relLedger, stockLedgers, index, goTab }) {
+    if (!owned) return html`<div class="np-side-sec muted">Loading…</div>`;
+    const max = owned.latestChapter ?? 0;
+    const rel = relLedger?.computed.relations ?? [];
+    const order = { friendly: 0, neutral: 1, hostile: 2 };
+    const rels = [...rel].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3) || String(a.withName).localeCompare(String(b.withName)));
+    const held = stockLedgers.flatMap((l) => l.computed.stacks ?? []);
+    const t = stats?.template;
+    const statFields = t ? t.fields.filter((f) => stats.display[f.key]) : [];
+    const more = (n, label, tab) => n > SIDE_SHOWN && html`<button class="np-more" onClick=${() => goTab(tab)}>${label} →</button>`;
+    return html`
+        <div class="np-slider">
+            <label for=${`ch-${owned.owner ?? ""}`} class="spread"><span>Chapter</span><span><b>${chapter}</b> / ${max}</span></label>
+            <input id=${`ch-${owned.owner ?? ""}`} type="range" min="0" max=${max} value=${chapter} onInput=${(e) => setAt(Number(e.target.value))} aria-label="Chapter" />
+        </div>
+        ${statFields.length > 0 && html`<div class="np-side-sec"><h4>${t.name} stats</h4>
+            ${statFields.slice(0, 6).map((f) => html`<div class="np-side-row"><span>${f.label}</span><span class="muted">${f.type === "link" || f.type === "links" ? linkLabel(String(stats.values[f.key] ?? "")) : stats.display[f.key]}</span></div>`)}
+            ${statFields.length > 6 && html`<button class="np-more" onClick=${() => goTab("ledger")}>All ${statFields.length} stats →</button>`}</div>`}
+        ${rels.length > 0 && html`<div class="np-side-sec"><h4>Relations</h4>
+            ${rels.slice(0, SIDE_SHOWN).map((r) => html`<div class="np-side-row"><span class="linkish-text">${r.withName}</span><span class=${`muted rel-${r.status}`}>${r.status || "-"}</span></div>`)}
+            ${more(rels.length, `All ${rels.length} relations`, "relations")}</div>`}
+        ${held.length > 0 && html`<div class="np-side-sec"><h4>Carrying</h4>
+            ${held.slice(0, SIDE_SHOWN).map((s) => html`<div class="np-side-row">${s.itemPath ? html`<a href=${noteHref(s.itemPath)}>${s.itemName}</a>` : html`<span>${s.itemName}</span>`}<span class="muted">${s.qtyText}</span></div>`)}
+            ${more(held.length, `All ${held.length} items`, "inventory")}</div>`}
+        ${!statFields.length && !rels.length && !held.length && html`<p class="muted small">Nothing in the ledgers at this chapter yet.</p>`}`;
+}
+
+/** A character's relations at a chapter: friendly, neutral, hostile, each with its latest note and how it got there */
+function CharacterRelations({ ledger, chapter, index, onEntry }) {
+    const head = html`<div class="spread"><h2 class="np-h2">Relations at chapter ${chapter}</h2><button class="small" onClick=${onEntry}>+ Relationship entry</button></div>`;
+    const rel = ledger?.computed.relations ?? [];
+    if (!rel.length) return html`<div class="np-tabpage">${head}<p class="muted">No relationships in the ledgers yet.</p></div>`;
+    // every relation line up to the chapter, per person, in story order (for "2 earlier notes · neutral at ch. 3")
+    const history = new Map();
+    for (const e of [...(ledger.entries ?? [])].sort((a, b) => a.chapter - b.chapter)) {
+        if (e.chapter > chapter) continue;
+        for (const l of e.lines ?? []) if (l.with && /^relation/i.test(String(l.set ?? ""))) {
+            const k = linkKey(l.with);
+            if (!history.has(k)) history.set(k, []);
+            history.get(k).push({ chapter: e.chapter, value: l.value, note: l.note });
+        }
+    }
+    const groups = relationGroups(rel, index);
+    return html`<div class="np-tabpage">${head}
+        ${RELATION_SECTIONS.filter(([k]) => groups[k]?.length).map(([k, label]) => html`<section class=${`np-rel-group rel-${k}`}>
+            <h3>${label} <span class="muted">${groups[k].length}</span></h3>
+            ${groups[k].map((r) => {
+                const h = history.get(linkKey(r.with)) ?? [];
+                const prev = h.length > 1 ? h[h.length - 2] : null;
+                return html`<div class="np-rel">
+                    ${r.path ? html`<a class="np-rel-name" href=${noteHref(r.path)}>${r.name}</a>` : html`<span class="np-rel-name">${r.name}</span>`}
+                    <div><div class="np-rel-note">${r.note || html`<span class="blank">-</span>`}</div>
+                        ${prev && html`<div class="muted small">${h.length - 1} earlier note${h.length > 2 ? "s" : ""} · ${prev.value || "no standing"} at ch. ${prev.chapter}</div>`}</div>
+                    <span class="muted small">${r.chapter != null ? `ch. ${r.chapter}` : ""}</span>
+                </div>`;
+            })}
+        </section>`)}</div>`;
+}
+
+/** A plot's family from the novel's plots: its main plot (what its `subplot-of` names), the main plot's subplots, its own */
+function plotFamily(plan, page) {
+    const plots = plan?.plots ?? [];
+    if (!plots.length) return null;
+    const byName = new Map(plots.map((p) => [p.name.toLowerCase(), p]));
+    const parentOf = (p) => { const v = p.fm?.["subplot-of"]; return v ? byName.get(linkKey(asList(v)[0])) ?? null : null; };
+    const me = plots.find((p) => p.path === page.path);
+    if (!me) return null;
+    const parent = parentOf(me);
+    const main = parent ?? me;
+    return {
+        parent, main,
+        subplots: plots.filter((p) => parentOf(p)?.path === main.path).sort((a, b) => (b.rating?.class ?? 0) - (a.rating?.class ?? 0) || a.title.localeCompare(b.title)),
+        children: plots.filter((p) => parentOf(p)?.path === me.path).sort((a, b) => (b.rating?.class ?? 0) - (a.rating?.class ?? 0) || a.title.localeCompare(b.title)),
+    };
+}
+
+/** The column beside a plot: the main plot and its subplots as titles, the open one marked; a click opens another */
+function PlotFamily({ family, current, open }) {
+    const pill = (p) => html`<button key=${p.path} class=${`np-pill ${p.path === current ? "on" : ""}`} aria-current=${p.path === current ? "page" : undefined}
+        onClick=${() => p.path !== current && open(p.path)}>${p.title}</button>`;
+    return html`<div class="np-side-sec"><h4>Main plot</h4>${pill(family.main)}</div>
+        <div class="np-side-sec"><h4>Subplots</h4>${family.subplots.length ? family.subplots.map(pill) : html`<p class="muted small">None yet.</p>`}</div>`;
+}
+
+/** A plot's subplots on its page, each with its own text, edited here and saved to the subplot's note */
+function Subplots({ family, page, open }) {
+    const [editing, setEditing] = useState(null);   // path
+    const [draft, setDraft] = useState("");
+    const [busy, setBusy] = useState(false);
+    if (!family.children.length && family.parent) return null;
+    const save = async (p) => {
+        setBusy(true);
+        try { await api.send("PATCH", "/api/note", { path: p.path, set: { plot: draft }, baseMtime: p.mtime }); setEditing(null); toast(`Saved ${p.title}`); }
+        catch (e) { toast(e.message); }
+        setBusy(false);
+    };
+    const add = async () => {
+        const title = window.prompt("Title of the new subplot")?.trim();
+        if (!title) return;
+        try {
+            const r = await api.send("POST", "/api/plan/plot", { novel: page.plan.novel, title, fm: { "subplot-of": toLink(page.name) } });
+            toast(`Added ${title}`);
+            if (r?.path) open(r.path);
+        } catch (e) { toast(e.message); }
+    };
+    return html`<section class="np-sec">
+        <div class="np-sec-head"><h2>Subplots</h2><span class="muted small">plots whose “subplot of” is this one</span></div>
+        ${family.children.map((p) => html`<div key=${p.path} class="np-sub" onDblClick=${editing === p.path ? undefined : dblToggle(() => { setEditing(p.path); setDraft(String(p.fm.plot ?? "")); })}>
+            <div class="spread"><div class="row"><button class="linkish np-sub-title" onClick=${() => open(p.path)}>${p.title}</button>${p.rating && html`<span class="chip">${p.rating.title}</span>`}
+                ${asList(p.fm.characters).length > 0 && html`<span class="muted small">${asList(p.fm.characters).map(linkLabel).join(", ")}</span>`}</div>
+                ${editing !== p.path && html`<button class="icon" aria-label=${`Edit the text of ${p.title}`} title="Edit (or double-click)" onClick=${() => { setEditing(p.path); setDraft(String(p.fm.plot ?? "")); }}>${ICONS.edit}</button>`}</div>
+            ${editing === p.path ? html`<${AutoTextarea} class="np-sec-text" value=${draft} autoFocus=${true} onInput=${(e) => setDraft(e.target.value)} aria-label=${`The plot of ${p.title}`}
+                    onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); e.stopPropagation(); save(p); } if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
+                <div class="row" style="margin-top:6px"><button class="primary" disabled=${busy} onClick=${() => save(p)}>${busy ? "Saving…" : "Save"}</button><button onClick=${() => setEditing(null)}>Cancel</button><span class="muted small">Saved to ${p.name}</span></div>`
+                : html`<p class=${`np-prose ${filled(p.fm.plot) ? "" : "blank"}`}>${filled(p.fm.plot) ? String(p.fm.plot) : "-"}</p>`}
+        </div>`)}
+        ${!family.children.length && html`<p class="muted">No subplots yet.</p>`}
+        <button class="np-more" onClick=${add}>+ Add a subplot</button>
+    </section>`;
 }
 
 /** A power system's levels: taxonomy values whose `power-system` is this note, per taxonomy, sub-levels indented, with their numbers */
@@ -2898,10 +3100,14 @@ function EntryCard({ e, folder, behaviour, future, showOwner, onEdit = null }) {
 }
 
 /** An owner's ledgers and holdings at a chapter. `embedded`: inside a character's drawer page (its Ledger tab), without the heading and sheet */
-function OwnerView({ index, folder, owner, params, embedded = false, onEntry = null }) {
+function OwnerView({ index, folder, owner, params, embedded = false, onEntry = null, chapter: given = undefined, onChapter = null }) {
     // entries open in the drawer's entry tab when embedded there, else on their own page
     const toEntry = (p) => (onEntry ? onEntry(p) : go(entryHref(folder, p)));
-    const [at, setAt] = useState(params.get("at") ? Number(params.get("at")) : null);
+    // the chapter comes from outside when a note page's slider sets it (`chapter` + `onChapter`)
+    const [ownAt, setOwnAt] = useState(params.get("at") ? Number(params.get("at")) : null);
+    const controlled = given !== undefined && !!onChapter;
+    const at = controlled ? given : ownAt;
+    const setAt = controlled ? onChapter : setOwnAt;
     const [compare, setCompare] = useState(null);
     const [tab, setTab] = useState(params.get("type") ?? null);
     const [q, setQ] = useState("");
@@ -2935,10 +3141,10 @@ function OwnerView({ index, folder, owner, params, embedded = false, onEntry = n
             ${sheet.images[0] && html`<img src=${sheet.images[0]} style="height:110px;border-radius:6px" />`}
             <div style="flex:1"><dl class="fields">${["race", "member-of", "character/power-system", "character/level", "character/sub-level", "character/talent", "alive", "age-current"].filter((k) => sheet.fm[k] != null && sheet.fm[k] !== "").map((k) => html`<dt>${k}</dt><dd><${Value} v=${sheet.fm[k]} links=${sheet.links} /></dd>`)}</dl></div>
         </div></div>`}
-        <div class="panel slider">
-            <b>Chapter</b>
+        <div class=${controlled ? "row compare-row" : "panel slider"}>
+            ${!controlled && html`<b>Chapter</b>
             <input type="range" min="0" max=${data.latestChapter} value=${chapter} onInput=${(e) => setAt(Number(e.target.value))} />
-            <input type="number" min="0" value=${chapter} style="width:70px" onInput=${(e) => setAt(Number(e.target.value))} />
+            <input type="number" min="0" value=${chapter} style="width:70px" onInput=${(e) => setAt(Number(e.target.value))} />`}
             <label class="row muted"><input type="checkbox" style="width:auto" checked=${compare != null} onChange=${(e) => setCompare(e.target.checked ? Math.max(0, chapter - 1) : null)} /> compare with</label>
             ${compare != null && html`<input type="number" min="0" value=${compare} style="width:70px" onInput=${(e) => setCompare(Number(e.target.value))} />`}
         </div>

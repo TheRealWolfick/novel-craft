@@ -11,7 +11,7 @@ A novel's plan lives in three kinds of notes, all edited from the novel page:
 | --- | --- | --- |
 | Volume | Title, number, main plot and subplots, chapter range, description, outline | `Plan/Book Plan/` |
 | Chapter plan | The chapter's outline and working title | `Plan/Chapter Plans/` |
-| Plot | A plot idea: grade, characters, mood, text | `Plots/` |
+| Plot | A plot idea: grade, the plot it is a subplot of, characters, mood, text | `Plots/` |
 
 ## The grand plan
 
@@ -38,5 +38,7 @@ Until the chapter has a note, the plan's **Working title** is the chapter's titl
 ## Plot ideas
 
 The **Plots** tab sorts plot notes by their grade (the Rating taxonomy). Change a grade with the select on its card; **New plot** adds one. A volume's main plot and subplots are links to these notes.
+
+A plot can be a subplot of another: its **Subplot of** field names the main plot. A plot's page then shows the family in the column beside it: **Main plot**, then **Subplots**, with the plot you're on marked; click another to open it. A subplot's page names its main plot at the top. A main plot's page lists its subplots in a **Subplots** section, each with its text: the pencil or a double-click edits a subplot's text right there, and **Save** writes it to the subplot's own note. **+ Add a subplot** makes a new plot that is a subplot of this one.
 
 ![Plot ideas by grade](img/novel-plots.png)

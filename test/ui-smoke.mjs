@@ -143,8 +143,8 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     const drawerOpen = () => !!doc.querySelector(".drawer-wrap.open");
     const recent = () => [...doc.querySelectorAll(".drawer-recent button")].map((b) => b.title);
     check(drawerOpen() && w.location.hash === "#/c/Items" && recent().length === 1, "table link opens the drawer");
-    check(!!doc.querySelector(".drawer .note-cols .note-side .formgrid") && !doc.querySelector(".drawer .note-main .formgrid"),
-        "drawer note shows frontmatter in the right column");
+    check(!!doc.querySelector(".drawer .np-note .np-main .np-props .np-prop") && !doc.querySelector(".drawer .formgrid"),
+        "drawer note shows as a document: its fields as a property list");
     const first = recent()[0];
     const nested = [...doc.querySelectorAll(".drawer-body a.chip[href^='#/note/']")].find((a) => a.getAttribute("href") !== `#/${first}`);
     if (nested) {
@@ -177,7 +177,7 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     const next = strip().find((a) => !a.classList.contains("on"));
     next.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
     await wait(700);
-    check(doc.querySelector(".drawer .class-strip a.on")?.textContent === next.textContent && !!doc.querySelector(".drawer .note-main .note-summary"),
+    check(doc.querySelector(".drawer .class-strip a.on")?.textContent === next.textContent && !!doc.querySelector(".drawer .np-note .np-props"),
         "clicking a class opens it in the drawer with its summary");
     doc.querySelector(".drawer-tabs button[title^='Collapse']").click();
     await wait(300);
@@ -186,10 +186,11 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     const note = index.notes.find((n) => n.collection === "Items");
     w.location.hash = `#/note/${enc(note.path)}`;
     await wait(900);
-    const label = [...doc.querySelectorAll(".formgrid label")].find((l) => l.textContent === "description");
-    const ta = label?.nextElementSibling;
+    const descSec = [...doc.querySelectorAll("main .np-sec")].find((x) => x.querySelector("h2")?.textContent === "Description");
     const saveBtn = () => [...doc.querySelectorAll("button")].find((b) => b.textContent.trim() === "Save changes");
-    check(!!saveBtn()?.disabled, "Save changes is disabled until something changes");
+    check(!!descSec && !!saveBtn()?.disabled, "the description is a section, and Save changes is disabled until something changes");
+    descSec.querySelector(".np-sec-head button").click(); await wait(200);
+    const ta = descSec.querySelector("textarea");
     ta.value = "Smoke test description"; ta.dispatchEvent(new w.Event("input", { bubbles: true }));
     await wait(100);
     saveBtn().click();
@@ -401,12 +402,12 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
                 await wait(400);
                 const a = doc.createElement("a"); a.href = `#/note/${enc(heroPath)}`; a.textContent = hero;
                 doc.querySelector("[data-drawer]").append(a); a.click(); await wait(1500);
-                const tabs = () => [...doc.querySelectorAll(".drawer .note-tabs button")];
+                const tabs = () => [...doc.querySelectorAll(".drawer .np-tabs button")];
                 tabs().find((b) => b.textContent.trim() === "Ledger")?.click(); await wait(1200);
                 [...doc.querySelectorAll(".drawer button")].find((b) => /^New .*entry$/.test(b.textContent.trim()))?.click(); await wait(1200);
-                check(tabs().length === 3 && !!doc.querySelector(".drawer .entry-tab.on") && !!doc.querySelector(".drawer .entry-embedded"), "a new entry from the drawer's Ledger tab opens as a third tab", `${w.location.hash} open=${!!doc.querySelector(".drawer-wrap.open")} people=${doc.querySelectorAll(".people-list a").length} tabs=${tabs().map((b) => b.textContent).join(" | ")} btns=${[...doc.querySelectorAll(".drawer button")].map((b) => b.textContent.trim()).filter((t) => /entry/i.test(t)).join(",")}`);
+                check(tabs().length === 6 && !!doc.querySelector(".drawer .entry-tab.on") && !!doc.querySelector(".drawer .entry-embedded"), "a new entry from the drawer's Ledger tab opens as a third tab", `${w.location.hash} open=${!!doc.querySelector(".drawer-wrap.open")} people=${doc.querySelectorAll(".people-list a").length} tabs=${tabs().map((b) => b.textContent).join(" | ")} btns=${[...doc.querySelectorAll(".drawer button")].map((b) => b.textContent.trim()).filter((t) => /entry/i.test(t)).join(",")}`);
                 doc.querySelector(".drawer .entry-tab .tab-x")?.click(); await wait(300);
-                check(tabs().length === 2 && tabs().find((b) => b.classList.contains("on"))?.textContent.trim() === "Ledger", "closing the entry tab goes back to the Ledger tab");
+                check(tabs().length === 5 && tabs().find((b) => b.classList.contains("on"))?.textContent.trim() === "Ledger", "closing the entry tab goes back to the Ledger tab");
                 doc.querySelector(".drawer-backdrop")?.click(); await wait(300);
             }
             // from the chapter view in the drawer, a new ledger entry opens in the drawer and goes back to the chapter
@@ -1220,6 +1221,28 @@ if (process.env.SETTINGS_DIR) {
     doc.querySelector(".writer .left-tab-x").click(); await wait(400);
     check(!doc.querySelector(".writer .left-tabs"), "closing the last copied tab leaves only the writer");
     doc.querySelector(".drawer-tabs button[title^='Collapse']")?.click(); await wait(300);
+}
+// note pages as documents: a plot's family in the column and its subplots on its page; properties open on a click
+{
+    const doc = w.document;
+    const patch = (body) => realFetch(new URL("/api/note", BASE), { method: "PATCH", headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: JSON.stringify(body) });
+    let plan = null;
+    for (const n of index.novels) { const p = await get(`/api/plan?novel=${enc(n.folder)}`); if (p.plots?.length >= 2) { plan = p; break; } }
+    if (plan) {
+        const [main, sub] = plan.plots;
+        await patch({ path: sub.path, set: { "subplot-of": `[[${main.name}]]` } }); await wait(500);
+        w.location.hash = `#/note/${enc(main.path)}`; await wait(1500);
+        const pills = [...doc.querySelectorAll("main .np-side .np-pill")];
+        check(doc.querySelector("main .np-side .np-pill.on")?.textContent === main.title && pills.some((b) => b.textContent === sub.title)
+            && [...doc.querySelectorAll("main .np-sub .np-sub-title")].some((b) => b.textContent === sub.title),
+            "a main plot lists its subplots in the column (itself marked) and on its page", pills.map((b) => b.textContent).join(" | "));
+        const prop = [...doc.querySelectorAll("main .np-prop")].find((r) => !r.classList.contains("ro") && !r.querySelector("input[type=checkbox]"));
+        prop?.click(); await wait(300);
+        check(!!prop?.querySelector("input, textarea"), "clicking a property opens it for editing");
+        w.location.hash = `#/note/${enc(sub.path)}`; await wait(1500);
+        check(doc.querySelector("main .np-parent")?.textContent.includes(main.title) && doc.querySelector("main .np-side .np-pill.on")?.textContent === sub.title,
+            "a subplot names its main plot and is marked among the subplots");
+    }
 }
 // AI assistant (the test server runs with WB_AI_MOCK=1: a stand-in for Claude, no network)
 {

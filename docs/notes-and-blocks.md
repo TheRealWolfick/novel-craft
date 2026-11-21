@@ -6,13 +6,23 @@ order: 2
 blurb: Edit a note's fields in place, and add, edit, move or delete its blocks of
   information.
 ---
-Every note page has its frontmatter fields on one side and its content on the other: a summary, what links to it, images, and its blocks.
+Every note opens as a page you read like a document: its title and tabs on top, the note in the middle, and a narrow column beside it with what it relates to (who holds an item, a plot's main plot and subplots, a character's stats, relations and inventory). The same page shows in the side drawer and in a [left-drawer tab](docs:side-drawer#tabs-on-the-left); in a narrow space the column moves above the page.
+
+| Tab | Holds |
+| --- | --- |
+| Page | The fields, the long text fields as sections, the note's blocks and images |
+| Relations, Inventory, Ledger | A novel's characters only: see [characters](docs:characters#the-page) |
+| Links & more | Notes that link here and that this note links to, and technical fields (file, type, created date, fields the ledgers write) |
 
 ![The Cinder Reach: fields and blocks](img/note-world.png)
 
 ## Fields
 
-Fields are always editable. Link fields pick from the right collection (a location's `parent` from Locations, a category from its taxonomy), lists take several values, and changed fields are marked until you press **Save changes** (<kbd>Ctrl</kbd>+<kbd>S</kbd>). Only the fields you changed are written; everything else in the note stays as it was.
+Short fields are a list of properties under the title. Click one to edit it; it closes again when you click elsewhere. Empty ones fold into **+ N empty fields**. Link fields pick from the right collection (a location's `parent` from Locations, a category from its taxonomy), lists take several values.
+
+Long text fields (a description, a character's personality and appearance, a plot's text) are sections of the page instead: they always show, with a **-** when they're blank. The pencil or a double-click edits one; **Done** closes it. Which fields are sections comes from the collection's `summary.sections` in the [schema](docs:vault-conventions), and any field holding a long text becomes one too. Small fields can sit under a section as a two-column list: a character's eye colour, hair and height under **Appearance**, for example. A collection's `groups` in the schema sets these (`"groups": {"appearance": ["eye-color", "hair-color", "height"]}`).
+
+Changed fields are marked until you press **Save changes** (<kbd>Ctrl</kbd>+<kbd>S</kbd>), which appears once something has changed. Only the fields you changed are written; everything else in the note stays as it was.
 
 ## Blocks
 

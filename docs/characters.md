@@ -13,9 +13,21 @@ Each novel keeps its characters in its `Characters/` folder, one note (a sheet) 
 - On the novel page, press **New character**, or in the side drawer's Novel tab, **Characters → + New character**.
 - Give the note a name (it must be unique in the vault) and fill in the fields. Field order and defaults come from the data store schema.
 
-## The sheet
+## The page
 
-A character's note page shows its fields, editable in place, with **Save changes** (<kbd>Ctrl</kbd>+<kbd>S</kbd>). Fields named `relations/…` pick from the novel's characters and the factions. `relations/friendly`, `relations/neutral` and `relations/hostile` come from the character's [Relationships ledger](docs:ledgers#relationships), and the sheet's **Relationships** box shows each person with the current note.
+A character's page has its fields and sections like [any note](docs:notes-and-blocks), with **Save changes** (<kbd>Ctrl</kbd>+<kbd>S</kbd>). Personality and Appearance are sections, with the small appearance fields (gender, height, weight, eye and hair colour…) in two columns under Appearance.
+
+The column beside it starts with a **chapter slider**. Below it, at that chapter: the character's stats, their first three relations and the first three things they carry, each with a link to the full list. The slider also sets the chapter of three tabs:
+
+| Tab | Shows |
+| --- | --- |
+| Relations | Friendly, neutral and hostile, each person with their latest note, the chapter it is from, and how many earlier notes there were (and the standing before) |
+| Inventory | Everything held at the chapter, by where it's kept, with condition, rarity and modifiers |
+| Ledger | The [ledgers](docs:ledgers): stats panel, entries (later ones faded), comparing two chapters |
+
+**+ Relationship entry**, **+ Inventory entry** and the Ledger tab's **New entry** open the entry editor as a tab of its own; saving or **×** goes back.
+
+`relations/friendly`, `relations/neutral` and `relations/hostile` come from the character's [Relationships ledger](docs:ledgers#relationships); they are on the **Links & more** tab with the other fields the ledgers write.
 
 Below the fields, the body's `## Bio`, `### Appearance` and other sections are [blocks](docs:notes-and-blocks) you can edit, move and add to.
 
