@@ -956,7 +956,9 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     t2.value = "Spirit stones"; fire(t2, "input"); await wait(100);
     btn("Add", doc.querySelector("main .nblock.editing")).click(); await wait(900);
     check(/## Currency\nSpirit stones\n/.test(read()) && heads().includes("Currency"), "adding a block appends a section", JSON.stringify(read()));
-    // scratchpad: started from the novel page, ideas are blocks
+    // scratchpad: started from the novel page, ideas are blocks (one the vault already has is removed from the copy first)
+    const pad = `${COPY}/${novel.folder}/Plan/Scratchpad (${novel.name}).md`;
+    if (fs.existsSync(pad)) { fs.rmSync(pad); await wait(600); }
     w.location.hash = `#/novel/${enc(novel.folder)}`; await wait(900);
     [...doc.querySelectorAll(".tabs button")].find((b) => b.textContent.trim() === "Scratchpad").click(); await wait(400);
     btn("Start the scratchpad").click(); await wait(1200);
@@ -967,7 +969,6 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     st.value = "The mentor is the **villain**"; fire(st, "input"); await wait(100);
     check(!doc.querySelector("main .nblock.editing .be-toolbar button[aria-label='Callout']"), "the scratchpad editor has no callouts");
     btn("Add", doc.querySelector("main .nblock.editing")).click(); await wait(900);
-    const pad = `${COPY}/${novel.folder}/Plan/Scratchpad (${novel.name}).md`;
     check(fs.existsSync(pad) && fs.readFileSync(pad, "utf8").includes("## Twist\nThe mentor is the **villain**") && !!doc.querySelector("main .nblock strong"), "the scratchpad saves ideas as formatted blocks", fs.existsSync(pad) ? fs.readFileSync(pad, "utf8") : "no file");
 }
 // import data: identical files skip themselves, conflicts are decided, name clashes are skipped

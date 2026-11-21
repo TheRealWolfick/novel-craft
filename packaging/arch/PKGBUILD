@@ -37,16 +37,18 @@ package() {
 #!/bin/sh
 exec /usr/bin/$_electron --ozone-platform-hint=auto /usr/lib/$pkgname "\$@"
 SH
-    install -Dm644 "$_repo/electron/icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
-    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/$pkgname.desktop" <<DESKTOP
+    # the desktop knows the app as novel-craft (window app id, desktop file, icon); `world-builder` stays as a command too
+    ln -s "$pkgname" "$pkgdir/usr/bin/novel-craft"
+    install -Dm644 "$_repo/electron/icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/novel-craft.svg"
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/novel-craft.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Novel Craft
 Comment=Worldbuilding, chapter writing and ledgers for your Obsidian vault
-Exec=$pkgname %U
-Icon=$pkgname
+Exec=novel-craft %U
+Icon=novel-craft
 Terminal=false
 Categories=Office;WordProcessor;
-StartupWMClass=$pkgname
+StartupWMClass=novel-craft
 DESKTOP
 }

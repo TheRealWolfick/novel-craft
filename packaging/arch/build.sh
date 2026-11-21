@@ -14,5 +14,5 @@ mv "$PKG" "$HERE/"
 cd "$HERE" && rm -rf .build
 echo "Built packaging/arch/$PKG"
 # the package must hold everything the app loads (a missing folder is caught here, not after installing)
-node "$HERE/check.mjs" "$HERE/$PKG"
+node "$WB_REPO/scripts/check-package.mjs" "$HERE/$PKG"
 [ "$1" = "--no-install" ] || sudo pacman -U "$PKG"

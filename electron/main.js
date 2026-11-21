@@ -6,8 +6,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-app.setName("world-builder");
-app.setDesktopName?.("world-builder.desktop");
+// The desktop sees "novel-craft" (window app id / WM class, novel-craft.desktop); the data folder keeps its old name,
+// so window size and browser storage (theme, last page, drawers) carry over from World Builder installs.
+app.setPath("userData", path.join(app.getPath("appData"), "world-builder"));
+app.setName("novel-craft");
+app.setDesktopName?.("novel-craft.desktop");
 
 // one window: starting it again focuses the running one
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
@@ -27,7 +30,7 @@ function createWindow(url) {
     win = new BrowserWindow({
         x: s.x, y: s.y, width: s.width ?? 1600, height: s.height ?? 1000, minWidth: 700, minHeight: 500,
         title: "Novel Craft", backgroundColor: "#17161a", autoHideMenuBar: true, show: false,
-        icon: path.join(HERE, "icon.svg"),
+        icon: path.join(HERE, "icon.png"),
         // hidden (screenshots): rendered off screen, so frames are still painted
         webPreferences: { preload: path.join(HERE, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true, ...(process.env.WB_HIDDEN ? { offscreen: true } : {}) },
     });

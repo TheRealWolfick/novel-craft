@@ -71,9 +71,23 @@ Design how each kind of callout looks, pick the app's colour, fonts and text siz
 | --- | --- |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/callout-designer.dark.png"><img alt="Callout designer" src="docs/img/callout-designer.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/settings.dark.png"><img alt="Settings" src="docs/img/settings.png"></picture> |
 
-## Install
+## Download
 
-Novel Craft runs on your own computer; nothing is sent anywhere. You need **[Node.js](https://nodejs.org) 20 or newer** and **[git](https://git-scm.com)**. It is developed and tested on Linux; macOS and Windows should work with the browser or `npx electron` options below.
+Novel Craft runs on your own computer; nothing is sent anywhere. Get the file for your system from the **[latest release](https://github.com/TheRealWolfick/novel-craft/releases/latest)**:
+
+| System | File | First start |
+| --- | --- | --- |
+| Linux | `.AppImage` (any distribution) or `.deb` (Debian, Ubuntu, Mint…) | AppImage: make it executable (`chmod +x Novel-Craft-*.AppImage`) and run it. It needs FUSE 2 (`sudo apt install libfuse2`, `sudo pacman -S fuse2`, `sudo dnf install fuse-libs`); without it, run it with `--appimage-extract-and-run`. Deb: `sudo apt install ./Novel-Craft-*.deb` |
+| Windows | `.exe` installer | The installer isn't signed, so Windows SmartScreen says "Windows protected your PC": click **More info → Run anyway**. |
+| macOS | `.dmg` (`arm64` for Apple silicon, `x64` for Intel Macs) | The app isn't notarized by Apple. Drag it to Applications and open it; macOS refuses the first time. Then open **System Settings → Privacy & Security** and click **Open Anyway** (or run `xattr -dr com.apple.quarantine "/Applications/Novel Craft.app"` in Terminal). |
+
+Each release lists `SHA256SUMS`, and every file has a GitHub build attestation: `gh attestation verify <file> --repo TheRealWolfick/novel-craft` confirms it was built from this repository by its release workflow.
+
+> Novel Craft is developed and tested on Linux. The Windows and macOS builds are made by the same workflow but get less testing, and the AI assistant's **Claude Code** mode (a terminal inside the app) needs Linux for now: on Windows and macOS use the Anthropic or OpenAI API or a local model instead.
+
+## Install from source
+
+You need **[Node.js](https://nodejs.org) 20 or newer** and **[git](https://git-scm.com)**.
 
 ### 1. Get it
 
@@ -91,7 +105,7 @@ Pick one:
   ```sh
   sudo pacman -S electron43        # once, if you don't have it
   sh packaging/arch/build.sh       # builds and installs; run it again after updating
-  world-builder
+  novel-craft                      # (world-builder works too)
   ```
 - **As a desktop app (any system).** Runs the checkout with Electron (downloaded the first time):
   ```sh
@@ -123,6 +137,8 @@ npm run demo -- ~/World-Builder-Demo
 ```
 
 ### Updating
+
+A downloaded app: get the new file from the [releases](https://github.com/TheRealWolfick/novel-craft/releases) and install it over the old one; your settings and vault stay as they are. From source:
 
 ```sh
 git pull && npm install

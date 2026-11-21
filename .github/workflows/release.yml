@@ -1,0 +1,84 @@
+# Builds Novel Craft for Linux (AppImage, .deb), Windows (installer) and macOS (.dmg, arm64 + x64, unsigned) and puts
+# them on a draft GitHub Release with SHA256SUMS and build attestations. Runs when a version tag is pushed:
+#   (bump "version" in package.json, commit)  git tag v1.0.0 && git push origin v1.0.0
+# then review the draft on GitHub and press Publish. "Run workflow" by hand builds the files without a release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: --linux
+          - os: windows-latest
+            target: --win
+          - os: macos-latest
+            target: --mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          v="v$(node -p 'require("./package.json").version')"
+          [ "$v" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME but package.json says $v"; exit 1; }
+      - run: npm ci
+      - name: Syntax check
+        shell: bash
+        run: for f in server.js lib/*.js public/*.js electron/main.js scripts/*.js scripts/*.mjs; do node --check "$f"; done
+      - name: Build
+        run: npx electron-builder ${{ matrix.target }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"   # no paid certificates: Windows unsigned, macOS signed ad hoc (scripts/adhoc-sign.cjs)
+      - name: Package check (every file the app loads is in it)
+        if: runner.os == 'Linux'
+        run: node scripts/check-package.mjs dist/linux-unpacked/resources/app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.exe
+            dist/*.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # the draft release
+      id-token: write        # build attestations
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --draft --generate-notes --title "Novel Craft ${GITHUB_REF_NAME#v}"
