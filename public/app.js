@@ -385,19 +385,20 @@ addEventListener("keydown", (e) => {
 // Escape never collapses the drawer (it cancels things inside it instead: see useEscapeTwice); the » button, the
 // backdrop and Ctrl+] do.
 
-// Alt+← / Alt+→ go back / forward in the place you last clicked or typed in: the left drawer, the right drawer or the
-// page. A closed drawer is never that place (the page is, then). The page uses the browser's history.
-let navPlace = "main";
-const placeOf = (el) => (el?.closest?.(".writer-wrap") ? "left" : el?.closest?.(".drawer-wrap") ? "right" : "main");
-addEventListener("pointerdown", (e) => { navPlace = placeOf(e.target); }, true);
-addEventListener("focusin", (e) => { navPlace = placeOf(e.target); }, true);
+// Alt+← / Alt+→ go back / forward: with no drawer open in the page (the browser's history), with one open in that
+// drawer, with both open in the one you last clicked or typed in
+let lastDrawer = "right";
+const placeOf = (el) => (el?.closest?.(".writer-wrap") ? "left" : el?.closest?.(".drawer-wrap") ? "right" : null);
+addEventListener("pointerdown", (e) => { lastDrawer = placeOf(e.target) ?? lastDrawer; }, true);
+addEventListener("focusin", (e) => { lastDrawer = placeOf(e.target) ?? lastDrawer; }, true);
 addEventListener("keydown", (e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight") || e.defaultPrevented) return;
     // the terminal, the map editor and (on macOS, where Option+arrow moves by word) text fields keep the keys
     if (e.target.closest?.(".xterm, .map-editor")) return;
     if (/Mac/.test(navigator.platform) && e.target.closest?.("input, textarea, [contenteditable]")) return;
     const dir = e.key === "ArrowLeft" ? -1 : 1;
-    const place = navPlace === "left" && writerNow().open ? "left" : navPlace === "right" && drawer.open ? "right" : "main";
+    const left = writerNow().open, right = drawer.open;
+    const place = left && right ? lastDrawer : left ? "left" : right ? "right" : "main";
     e.preventDefault();
     if (place === "left") { if (!leftGo(dir)) toast(dir < 0 ? "Nothing to go back to in the left drawer" : "Nothing to go forward to"); }
     else if (place === "right") { if (!drawerGo(dir)) toast(dir < 0 ? "Nothing to go back to in the drawer" : "Nothing to go forward to"); }
