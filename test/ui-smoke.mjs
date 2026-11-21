@@ -1234,7 +1234,7 @@ if (process.env.SETTINGS_DIR) {
         w.location.hash = `#/note/${enc(main.path)}`; await wait(1500);
         const pills = [...doc.querySelectorAll("main .np-side .np-pill")];
         check(doc.querySelector("main .np-side .np-pill.on")?.textContent === main.title && pills.some((b) => b.textContent === sub.title)
-            && [...doc.querySelectorAll("main .np-sub .np-sub-title")].some((b) => b.textContent === sub.title),
+            && [...doc.querySelectorAll("main .np-plot .np-plot-link")].some((b) => b.textContent === sub.title),
             "a main plot lists its subplots in the column (itself marked) and on its page", pills.map((b) => b.textContent).join(" | "));
         const prop = [...doc.querySelectorAll("main .np-prop")].find((r) => !r.classList.contains("ro") && !r.querySelector("input[type=checkbox]"));
         prop?.click(); await wait(300);
@@ -1260,7 +1260,7 @@ if (process.env.SETTINGS_DIR) {
             w.location.hash = `#/note/${enc(vol.path)}`; await wait(1500);
             const mainTitle = doc.querySelectorAll("main .np-side .np-side-sec")[0]?.querySelector(".np-pill")?.textContent;
             const secs = [...doc.querySelectorAll("main .np-sec .np-sec-head h2")].map((h) => h.textContent);
-            check(!!mainTitle && secs.includes("Main plot") && secs.includes("Subplots") && doc.querySelector("main .np-sub .np-sub-title")?.textContent === mainTitle,
+            check(!!mainTitle && secs.includes("Plots") && doc.querySelector("main .np-plot .np-plot-link")?.textContent === mainTitle,
                 "a volume shows its main plot and subplots in its column and with their text on its page", JSON.stringify({ mainTitle, secs }));
         }
     }

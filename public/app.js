@@ -1691,7 +1691,16 @@ function RenameDialog({ path: p, title: title0 = "", withTitle = false, onDone, 
  * Appearance) as a two-column list there. Technical and ledger-made fields are left to the Links & more tab. Edits
  * collect until Save changes (Ctrl+S); only changed keys are patched.
  */
-const DEFAULT_GROUPS = { characters: { appearance: ["gender", "height", "weight", "eye-color", "hair-color", "hair-style", "facial-hair", "attractiveness"] } };
+const DEFAULT_GROUPS = { characters: {
+    bio: ["race", "alive", "age-introduced", "age-current", "age", "member-of", "wealth", "character/power-system", "character/talent", "role"],
+    appearance: ["gender", "height", "weight", "eye-color", "hair-color", "hair-style", "facial-hair", "bust-size", "attractiveness"],
+} };
+// list fields that read better as a section of their own (a list under a heading) than as a property
+const DEFAULT_LIST_SECTIONS = { characters: ["character/skills"] };
+// fields the page never shows (only Links & more): leftovers, or covered elsewhere (ledgers, stat templates); a schema
+// collection's `hidden` replaces the list for it
+const DEFAULT_HIDDEN = { characters: ["chapter-introduced", "chapter-updated", "character/level", "character/sub-level", "items", "inventory"] };
+const HIDDEN_EVERYWHERE = new Set(["cssclasses"]);
 const PLAN_SECTIONS = { plots: ["plot"], volumes: ["description", "plan"], chapters: ["plan"] };
 const TECH_KEYS = new Set(["type", "created-date", "facet", "images"]);
 const SECTION_TITLES = { plot: "The plot" };
@@ -1702,19 +1711,24 @@ function summarySpec(page, index) {
         ?? SUMMARY[page.collection] ?? (page.collection?.startsWith("Taxonomy/") ? SUMMARY.taxonomy : page.fm.type === "character" ? SUMMARY.characters : null);
 }
 /** Fields the Page tab leaves out (shown on Links & more): technical keys, ledger-made ones, a character's synced relations */
-const technicalField = (page, spec, k) => TECH_KEYS.has(k) || (spec?.generated ?? []).includes(k) || (page.fm.type === "character" && k.startsWith("relations/"));
+const kindOf = (page) => (page.plan ? null : page.fm.type === "character" ? "characters" : page.collection);
+const technicalField = (page, spec, k) => TECH_KEYS.has(k) || HIDDEN_EVERYWHERE.has(k) || (spec?.generated ?? []).includes(k)
+    || asList(spec?.hidden ?? DEFAULT_HIDDEN[kindOf(page)]).includes(k) || (page.fm.type === "character" && k.startsWith("relations/"));
 /** Which fields are sections (long text) and which small fields sit under a section */
 function docLayout(page, spec, index, keys, defs) {
-    const kind = page.plan ? null : page.fm.type === "character" ? "characters" : page.collection;
+    const kind = kindOf(page);
     const fm = page.fm;
     const isText = (k) => { const d = defs.has(k) ? defs.get(k) : fm[k]; return linkTargetOf(spec, k, fm[k]) == null && !Array.isArray(d) && typeof d !== "boolean" && typeof d !== "number"; };
     const named = page.plan ? PLAN_SECTIONS[page.plan.kind] ?? [] : ["description", ...(summarySpec(page, index)?.sections ?? [])];
     const long = (k) => typeof fm[k] === "string" && !isLink(fm[k]) && (fm[k].length > 120 || fm[k].includes("\n"));
+    const lists = asList(spec?.listSections ?? DEFAULT_LIST_SECTIONS[kind]).filter((k) => keys.includes(k));
     const sections = [...new Set([...named.filter((k) => keys.includes(k)), ...keys.filter(long)])].filter((k) => isText(k) && !technicalField(page, spec, k));
+    for (const k of lists) if (!sections.includes(k) && !technicalField(page, spec, k)) sections.push(k);
     const grouped = new Map();   // small field -> the section it sits under
     for (const [sec, list] of Object.entries(spec?.groups ?? DEFAULT_GROUPS[kind] ?? {})) for (const k of asList(list)) if (keys.includes(k) && !sections.includes(k)) grouped.set(k, sec);
-    // a group whose section isn't a text field of the note still gets a section of its own (just the small fields)
-    for (const sec of new Set(grouped.values())) if (!sections.includes(sec)) sections.push(sec);
+    // a group whose section isn't a text field of the note still gets a section of its own (just the small fields),
+    // first on the page (a character's Bio)
+    sections.unshift(...[...new Set(grouped.values())].filter((sec) => !sections.includes(sec)));
     return { sections, grouped };
 }
 
@@ -1796,10 +1810,13 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
                     : html`<button class="icon" title=${`Edit ${sectionTitle(k)} (or double-click)`} aria-label=${`Edit ${sectionTitle(k)}`} onClick=${toggle}>${ICONS.edit}</button>`)}</div>
             ${hasField && (editing
                 ? (k === "plan" ? html`<${PlanEditor} value=${v ?? ""} onChange=${(x) => edit(k, x)} />`
+                    : Array.isArray(def(k)) || linkTargetOf(spec, k, fm[k]) != null ? html`<div class="np-sec-input">${input(k)}</div>`
                     : html`<${AutoTextarea} class="np-sec-text" value=${v} autoFocus=${true} onInput=${(e) => edit(k, e.target.value)} aria-label=${sectionTitle(k)} />`)
                 : !filled(v) ? html`<p class="np-prose blank">-</p>`
                 : k === "plan" ? html`<${PlanView} text=${String(v)} />`
-                : typeof v === "string" ? html`<p class="np-prose">${v}</p>` : html`<div class="np-prose"><${Value} v=${v} links=${page.links} index=${index} /></div>`)}
+                : typeof v === "string" ? html`<p class="np-prose">${v}</p>`
+                : Array.isArray(v) ? html`<ul class="np-list">${v.map((x) => html`<li>${isLink(x) ? html`<${Chip} value=${x} links=${page.links} index=${index} />` : String(x)}</li>`)}</ul>`
+                : html`<div class="np-prose"><${Value} v=${v} links=${page.links} index=${index} /></div>`)}
             ${sub.length > 0 && html`<div class="np-mini">${sub.map(row)}</div>`}
         </section>`;
     };
@@ -1999,7 +2016,7 @@ function NoteView({ index, path, scope = "page" }) {
                     <${ClassStrip} page=${page} index=${index} />
                     ${page.fmError ? html`<p class="muted">Fix the frontmatter in Obsidian to edit fields here.</p>`
                         : html`<${FieldsEditor} key=${page.path} page=${page} index=${index} spec=${spec} scope=${scope} linkOptions=${linkOptions ?? novelLinks} />`}
-                    ${family && html`<${PagePlots} page=${page} plan=${plan} family=${family} open=${openNote} />`}
+                    ${family && html`<${PagePlots} page=${page} family=${family} open=${openNote} />`}
                     <${PowerLevels} page=${page} index=${index} />
                     ${content}
                     <section class="np-sec"><div class="np-sec-head"><h2>Images</h2></div><${Gallery} images=${page.images} /><${ImageDrop} path=${page.path} /></section>
@@ -2126,10 +2143,11 @@ function PlotFamily({ family, current, open }) {
 }
 
 /**
- * Plots shown on another note's page with their own text (a plot's subplots, a volume's main plot and subplots), each
- * edited here (pencil or double-click) and saved to that plot's note. `onAdd` adds one.
+ * Plots shown on another note's page with their own text (a plot's subplots, a volume's main plot and subplots): each
+ * a heading of the page (`level` 3 or 4) with its grade and characters beside it, then its text, edited here (pencil or
+ * double-click) and saved to that plot's note.
  */
-function PlotTexts({ title, hint = "", plots, open, onAdd = null, addLabel = "+ Add a subplot", empty = "No subplots yet." }) {
+function PlotTexts({ plots, open, level = 3 }) {
     const [editing, setEditing] = useState(null);   // path
     const [draft, setDraft] = useState("");
     const [busy, setBusy] = useState(false);
@@ -2140,20 +2158,19 @@ function PlotTexts({ title, hint = "", plots, open, onAdd = null, addLabel = "+ 
         catch (e) { toast(e.message); }
         setBusy(false);
     };
-    return html`<section class="np-sec">
-        <div class="np-sec-head"><h2>${title}</h2>${hint && html`<span class="muted small">${hint}</span>`}</div>
-        ${plots.map((p) => html`<div key=${p.path} class="np-sub" onDblClick=${editing === p.path ? undefined : dblToggle(() => start(p))}>
-            <div class="spread"><div class="row"><button class="linkish np-sub-title" onClick=${() => open(p.path)}>${p.title}</button>${p.rating && html`<span class="chip">${p.rating.title}</span>`}
-                ${asList(p.fm.characters).length > 0 && html`<span class="muted small">${asList(p.fm.characters).map(linkLabel).join(", ")}</span>`}</div>
-                ${editing !== p.path && html`<button class="icon" aria-label=${`Edit the text of ${p.title}`} title="Edit (or double-click)" onClick=${() => start(p)}>${ICONS.edit}</button>`}</div>
-            ${editing === p.path ? html`<${AutoTextarea} class="np-sec-text" value=${draft} autoFocus=${true} onInput=${(e) => setDraft(e.target.value)} aria-label=${`The plot of ${p.title}`}
-                    onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); e.stopPropagation(); save(p); } if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
-                <div class="row" style="margin-top:6px"><button class="primary" disabled=${busy} onClick=${() => save(p)}>${busy ? "Saving…" : "Save"}</button><button onClick=${() => setEditing(null)}>Cancel</button><span class="muted small">Saved to ${p.name}</span></div>`
-                : html`<p class=${`np-prose ${filled(p.fm.plot) ? "" : "blank"}`}>${filled(p.fm.plot) ? String(p.fm.plot) : "-"}</p>`}
-        </div>`)}
-        ${!plots.length && html`<p class="muted">${empty}</p>`}
-        ${onAdd && html`<button class="np-more" onClick=${onAdd}>${addLabel}</button>`}
-    </section>`;
+    const H = `h${level}`;
+    return plots.map((p) => html`<div key=${p.path} class=${`np-plot lvl-${level}`} onDblClick=${editing === p.path ? undefined : dblToggle(() => start(p))}>
+        <div class="np-plot-head">
+            <${H} class="np-plot-title"><button class="np-plot-link" onClick=${() => open(p.path)} title=${`Open ${p.title}`}>${p.title}</button></${H}>
+            <span class="muted small">${[p.rating?.title, asList(p.fm.characters).map(linkLabel).join(", ")].filter(Boolean).join(" · ")}</span>
+            <span class="grow" />
+            ${editing !== p.path && html`<button class="icon" aria-label=${`Edit the text of ${p.title}`} title="Edit (or double-click)" onClick=${() => start(p)}>${ICONS.edit}</button>`}
+        </div>
+        ${editing === p.path ? html`<${AutoTextarea} class="np-sec-text" value=${draft} autoFocus=${true} onInput=${(e) => setDraft(e.target.value)} aria-label=${`The plot of ${p.title}`}
+                onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); e.stopPropagation(); save(p); } if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
+            <div class="row" style="margin-top:6px"><button class="primary" disabled=${busy} onClick=${() => save(p)}>${busy ? "Saving…" : "Save"}</button><button onClick=${() => setEditing(null)}>Cancel</button><span class="muted small">Saved to ${p.name}</span></div>`
+            : html`<p class=${`np-prose ${filled(p.fm.plot) ? "" : "blank"}`}>${filled(p.fm.plot) ? String(p.fm.plot) : "-"}</p>`}
+    </div>`);
 }
 
 /** Make a plot (asks for its title), optionally a subplot of `parent`; resolves to its path */
@@ -2167,12 +2184,18 @@ async function newPlot(novel, parent = null) {
     } catch (e) { toast(e.message); return null; }
 }
 
-/** The plot parts of a plot's or volume's page: a plot's subplots; a volume's main plot and subplots */
-function PagePlots({ page, plan, family, open }) {
+/**
+ * The plot parts of a plot's or volume's page, as headings of the page: a plot's subplots under "Subplots"; a volume's
+ * plots under "Plots": the main plot as a subheading, its subplots as sub-subheadings
+ */
+function PagePlots({ page, family, open }) {
     if (page.plan?.kind === "plots") {
         if (!family.children.length && family.parent) return null;   // a subplot without subplots of its own
-        return html`<${PlotTexts} title="Subplots" hint="plots whose “subplot of” is this one" plots=${family.children} open=${open}
-            onAdd=${async () => { const p = await newPlot(page.plan.novel, page.name); if (p) open(p); }} />`;
+        return html`<section class="np-sec">
+            <div class="np-sec-head"><h2>Subplots</h2><span class="muted small">plots whose “subplot of” is this one</span></div>
+            ${family.children.length ? html`<${PlotTexts} plots=${family.children} open=${open} level=${3} />` : html`<p class="muted">No subplots yet.</p>`}
+            <button class="np-more" onClick=${async () => { const p = await newPlot(page.plan.novel, page.name); if (p) open(p); }}>+ Add a subplot</button>
+        </section>`;
     }
     // a volume: a new subplot is a subplot of its main plot, or, with no main plot yet, listed in the volume's subplots
     const addSub = async () => {
@@ -2183,9 +2206,13 @@ function PagePlots({ page, plan, family, open }) {
             try { await api.send("PATCH", "/api/note", { path: page.path, set: { subplots: [...asList(page.fm.subplots), toLink(name)] } }); } catch (e) { toast(e.message); }
         }
     };
-    return html`
-        <${PlotTexts} title="Main plot" plots=${family.main ? [family.main] : []} open=${open} empty="No main plot yet: choose one in the Plot field above." />
-        <${PlotTexts} title="Subplots" hint=${family.main ? `listed in the volume, or a subplot of ${family.main.title}` : "listed in the volume"} plots=${family.subplots} open=${open} onAdd=${addSub} />`;
+    return html`<section class="np-sec">
+        <div class="np-sec-head"><h2>Plots</h2><span class="muted small">${family.main ? `the main plot, then its subplots (listed in the volume, or a subplot of ${family.main.title})` : "choose the main plot in the Plot field above"}</span></div>
+        ${family.main && html`<${PlotTexts} plots=${[family.main]} open=${open} level=${3} />`}
+        ${family.subplots.length > 0 && html`<div class=${family.main ? "np-plot-children" : ""}><${PlotTexts} plots=${family.subplots} open=${open} level=${family.main ? 4 : 3} /></div>`}
+        ${!family.main && !family.subplots.length && html`<p class="muted">No plots yet.</p>`}
+        <button class="np-more" onClick=${addSub}>+ Add a subplot</button>
+    </section>`;
 }
 
 /** A power system's levels: taxonomy values whose `power-system` is this note, per taxonomy, sub-levels indented, with their numbers */

@@ -977,6 +977,8 @@ button.icon.danger:hover { color: var(--bad); }
 .nblock-title-input { width: 100%; font: 600 16px var(--serif); margin-bottom: 8px; }
 .nblock-actions { margin-top: 8px; }
 .nblock-add { margin: 2px 0 14px; flex-wrap: wrap; }
+.np-main .note-blocks { margin-top: 46px; }
+.np-main .nblock-add { margin-top: 22px; }
 .nblock-add input { flex: 1; min-width: 160px; }
 .nblock-suggest { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .nblock-suggest .chip { cursor: pointer; border-style: dashed; }
@@ -1307,7 +1309,7 @@ html.covered { overflow: hidden; }
 .blank { color: var(--muted); }
 .np-more { border: 0; background: none; color: var(--muted); padding: 6px 8px; font-size: 13px; }
 .np-more:hover { color: var(--accent); }
-.np-sec { margin-top: 28px; }
+.np-sec { margin-top: 46px; }
 .np-sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-bottom: 10px; }
 .np-sec-head h2, .np-h2 { font: 600 21px/1.25 var(--serif); margin: 0; }
 .np-sec.changed > .np-sec-head h2 { color: var(--accent); }
@@ -1347,3 +1349,19 @@ textarea.np-sec-text { width: 100%; font-family: var(--font-read, var(--serif));
 .compare-row { margin: 4px 0 10px; }
 .np-parent .linkish, .np-sub-title.linkish { text-decoration: none; }
 .warnbox.crash { margin: 16px auto; max-width: 760px; }
+/* linked plots on a plot's or volume's page: headings of the page, not cards */
+.np-plot { margin-top: 18px; }
+.np-plot-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.np-plot-title { margin: 0; font-family: var(--serif); font-weight: 600; }
+h3.np-plot-title { font-size: 18.5px; }
+h4.np-plot-title { font-size: 16px; }
+.np-plot-link { all: unset; cursor: pointer; color: var(--text); }
+.np-plot-link:hover { color: var(--accent); text-decoration: underline; }
+.np-plot .np-prose { margin-top: 4px; }
+.np-plot-children { margin-left: 18px; padding-left: 14px; border-left: 2px solid var(--line); }
+.np-plot-head .icon { align-self: center; }
+/* a list field as a section (a character's skills) */
+.np-list { margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.7; }
+.np-list .chip { all: unset; color: var(--accent); cursor: pointer; }
+.np-list a.chip:hover { text-decoration: underline; }
+.np-sec-input { margin-top: 4px; }
