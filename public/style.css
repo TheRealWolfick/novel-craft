@@ -7,7 +7,7 @@
    forces light or dark, otherwise the OS setting decides. */
 :root {
     --bg: #f7f6f3; --panel: #ffffff; --panel-2: #f0eee9; --text: #23211d; --muted: #6f6a60; --line: #e2dfd8;
-    --accent: var(--novel-accent, var(--app-accent, #6a4fc4)); --on-accent: #ffffff;
+    --accent: var(--novel-accent, var(--app-accent, #6a4fc4)); --on-accent: #ffffff; --app-accent-now: var(--app-accent, #6a4fc4);
     --ok: #2f7d4f; --warn: #a65b00; --bad: #b3261e;
     --chip: #ece9e2; --radius: 8px; --mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
     --serif: "Newsreader", "Iowan Old Style", Georgia, serif;
@@ -18,7 +18,7 @@
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
         --bg: #17161a; --panel: #1f1e23; --panel-2: #27262c; --text: #e8e6e3; --muted: #9a958c; --line: #34323a;
-        --accent: var(--novel-accent-dark, var(--app-accent-dark, #b195f5)); --on-accent: #17161a;
+        --accent: var(--novel-accent-dark, var(--app-accent-dark, #b195f5)); --on-accent: #17161a; --app-accent-now: var(--app-accent-dark, #b195f5);
         --ok: #6cc28f; --warn: #e2a24b; --bad: #f08a80; --chip: #2d2c33;
         --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--panel));
         --speech: var(--speech-dark); --speech-em: var(--speech-em-dark); --speech-strong: var(--speech-strong-dark); --speech-strong-em: var(--speech-strong-em-dark); --speech-single: var(--speech-single-dark);
@@ -27,7 +27,7 @@
 }
 :root[data-theme="dark"] {
     --bg: #17161a; --panel: #1f1e23; --panel-2: #27262c; --text: #e8e6e3; --muted: #9a958c; --line: #34323a;
-    --accent: var(--novel-accent-dark, var(--app-accent-dark, #b195f5)); --on-accent: #17161a;
+    --accent: var(--novel-accent-dark, var(--app-accent-dark, #b195f5)); --on-accent: #17161a; --app-accent-now: var(--app-accent-dark, #b195f5);
     --ok: #6cc28f; --warn: #e2a24b; --bad: #f08a80; --chip: #2d2c33;
     --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--panel));
     --speech: var(--speech-dark); --speech-em: var(--speech-em-dark); --speech-strong: var(--speech-strong-dark); --speech-strong-em: var(--speech-strong-em-dark); --speech-single: var(--speech-single-dark);
@@ -54,12 +54,13 @@ button:disabled { opacity: .5; cursor: default; }
 
 .layout { display: grid; grid-template-columns: 250px 1fr; min-height: 100vh; }
 .sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 14px 10px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
-.sidebar .brand { font-weight: 700; font-size: 15px; padding: 0 8px 10px; }
+.sidebar .brand { font-weight: 700; font-size: 18px; padding: 0 8px 10px; }
 .sidebar h4 { margin: 0; }
 .sidebar .side-section + .side-section { margin-top: 18px; }
 .sidebar .side-head { all: unset; box-sizing: border-box; width: 100%; display: flex; justify-content: space-between; align-items: center; cursor: pointer;
-    color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: 4px 8px; border-radius: 6px; }
-.sidebar .side-head:hover { color: var(--text); background: var(--panel-2); }
+    color: var(--app-accent-now); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; padding: 4px 8px; border-radius: 6px; }
+/* section headings in the app's colour (not a novel's), so they stand out from the links under them on every page */
+.sidebar .side-head:hover { color: var(--app-accent-now); background: var(--panel-2); }
 .sidebar .side-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .sidebar .side-head .caret { font-size: 10px; transition: transform .15s; }
 .sidebar .side-section.open .caret { transform: rotate(90deg); }
