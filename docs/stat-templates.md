@@ -33,6 +33,8 @@ A choice can also **follow** a number field: each option applies from its lowest
 
 ## Values over the story
 
+On a character's page the stats are a **Stats** section of their own, never mixed in with the other fields; a character without a template (assigned, or the novel's default) shows no stats at all. Blank stats are hidden unless the template has **show empty fields in panels** on; **+ N empty stats** shows them so you can fill them in.
+
 A character's sheet holds the starting values. A **Stats** ledger entry changes them from a chapter on; the entry editor shows the template as a form with the previous values filled in, and only changed fields become lines. Values that break the template (over the maximum, not a choice) are refused. A number or resource can also **change by** an amount, such as a reward of `+50` qi or a cost of `-20`: the form's *change by* box writes the line `[set:: stats/qi] [add:: 50]` (a value written `+50` means the same), which adds to whatever the value was at that point, so earlier entries can be edited without redoing later ones. Choices that follow a number update with it, and can be set themselves (the number moves to the level's lowest value) or unlinked from it: see [Levels and mastery systems](docs:levels-and-mastery#overflow-special-constitutions-and-deficiencies).
 
 The owner page's stats panel shows the values at any chapter, ready to copy into the text.

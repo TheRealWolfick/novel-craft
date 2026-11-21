@@ -1714,7 +1714,8 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
     const statsInfo = page.stats;
     const tplName = "stat-template" in edits ? edits["stat-template"] : fm["stat-template"] || statsInfo?.holder.template || "";
     const statTpl = statsInfo?.templates?.[tplName] ?? null;
-    const statKeys = new Set(statTpl?.fields.map((f) => f.key) ?? []);
+    // stat values are never plain fields: without a template they don't show at all, with one they are its section
+    const statKeys = new Set([...(statTpl?.fields ?? []), ...Object.values(statsInfo?.templates ?? {}).flatMap((t) => t?.fields ?? [])].map((f) => f.key));
     const keys = [...defs.keys(), ...Object.keys(fm).filter((k) => !defs.has(k))].filter((k) => k !== "images" && k !== "stat-template" && !statKeys.has(k));
     const changed = Object.keys(edits).filter((k) => !sameValue(edits[k], fm[k]));
     const dirty = changed.length > 0;
@@ -1785,7 +1786,7 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
             ${emptyCount > 0 && html`<button class="np-more" onClick=${() => setShowEmpty(!showEmpty)}>${showEmpty ? "Hide empty fields" : `+ ${emptyCount} empty field${emptyCount === 1 ? "" : "s"}`}</button>`}
         </div>
         ${sections.map(section)}
-        ${statsInfo && html`<section class="np-sec"><${SheetStats} info=${statsInfo} tpl=${statTpl} tplName=${tplName} fm=${fm} edits=${edits} edit=${edit} changed=${changed} index=${index} /></section>`}
+        ${statsInfo && statTpl && html`<section class="np-sec"><${SheetStats} info=${statsInfo} tpl=${statTpl} tplName=${tplName} fm=${fm} edits=${edits} edit=${edit} changed=${changed} index=${index} /></section>`}
         ${err && html`<p class="error">${err}</p>`}
         <div class=${`savebar ${dirty ? "dirty" : "quiet"}`}>
             <button class="primary" disabled=${!dirty || busy} onClick=${save}>${busy ? "Saving…" : "Save changes"}</button>
@@ -2624,7 +2625,13 @@ function SheetStats({ info, tpl, tplName, fm, edits, edit, changed, index }) {
     const chosen = "stat-template" in edits ? edits["stat-template"] : fm["stat-template"] ?? "";
     const typed = (f) => fromText(f, f.key in edits ? edits[f.key] : fm[f.key]);
     const values = tpl ? Object.fromEntries(tpl.fields.map((f) => [f.key, managed.has(f.key) ? info.values?.[f.key] : typed(f)])) : {};
-    const sections = tpl ? [...new Set(tpl.fields.map((f) => f.section))] : [];
+    // blank stats stay hidden unless the template says to show empty fields (or you ask for them, to fill them in)
+    const [showAll, setShowAll] = useState(false);
+    const isBlank = (f) => !(f.key in edits) && (managed.has(f.key) ? !displayValue(tpl, f, info.values ?? values) : !filled(fm[f.key]) && !(info.origin?.[f.key]?.from === "source"));
+    const hiding = tpl && !tpl["show-empty"] && !showAll;
+    const shown = tpl ? tpl.fields.filter((f) => !hiding || !isBlank(f)) : [];
+    const hidden = tpl && !tpl["show-empty"] ? tpl.fields.filter(isBlank).length : 0;
+    const sections = [...new Set(shown.map((f) => f.section))];
     return html`<div class="sheet-stats">
         <div class="spread"><h3 style="margin:0">Stats</h3>
             <label class=${`row muted ${changed.includes("stat-template") ? "changed" : ""}`}>Template
@@ -2634,7 +2641,7 @@ function SheetStats({ info, tpl, tplName, fm, edits, edit, changed, index }) {
                 </select></label></div>
         ${!tpl ? html`<p class="muted">${Object.keys(info.templates ?? {}).length ? "Choose a template to give this note stats." : "This novel has no stat templates yet (novel page, Stats tab)."}</p>`
         : html`${info.problems?.length > 0 && html`<div class="warnbox">${info.problems.map((p) => html`<div>${p}</div>`)}</div>`}
-            ${sections.map((s) => html`${s && html`<h4 class="stat-section">${s}</h4>`}<div class="formgrid">${tpl.fields.filter((f) => f.section === s).map((f) => {
+            ${sections.map((s) => html`${s && html`<h4 class="stat-section">${s}</h4>`}<div class="formgrid">${shown.filter((f) => f.section === s).map((f) => {
                 const o = info.origin?.[f.key];
                 const err = !managed.has(f.key) && !isDerived(f) && statError(index, f, values[f.key]);
                 return html`<label class=${changed.includes(f.key) ? "changed" : ""} title=${f.key}>${f.label}</label>
@@ -2644,7 +2651,8 @@ function SheetStats({ info, tpl, tplName, fm, edits, edit, changed, index }) {
                         : html`<${StatInput} field=${f} value=${values[f.key]} onChange=${(v) => edit(f.key, v)} index=${index} template=${tpl} values=${values} />
                             ${o?.from === "source" && !(f.key in edits) && html`<span class="muted stat-was">prefilled from ${o.field}: ${displayValue(tpl, f, info.values ?? {})}</span>`}`}
                         ${err && html`<div class="error">${err}</div>`}</div>`;
-            })}</div>`)}`}
+            })}</div>`)}
+            ${hidden > 0 && html`<button class="np-more" onClick=${() => setShowAll(!showAll)}>${showAll ? "Hide empty stats" : `+ ${hidden} empty stat${hidden === 1 ? "" : "s"}`}</button>`}`}
     </div>`;
 }
 
