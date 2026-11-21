@@ -12,8 +12,8 @@ You need [Node.js](https://nodejs.org) 20 or newer and [git](https://git-scm.com
 ## Getting the app
 
 ```
-git clone https://github.com/TheRealWolfick/world-builder.git
-cd world-builder
+git clone https://github.com/TheRealWolfick/novel-craft.git
+cd novel-craft
 npm install
 ```
 

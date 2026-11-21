@@ -8,7 +8,7 @@ import htm from "htm";
 import { api, toast, store, Loading } from "./app.js";
 
 const html = htm.bind(h);
-export const STARTER_DATA = "https://github.com/TheRealWolfick/world-builder-data";
+export const STARTER_DATA = "https://github.com/TheRealWolfick/novel-craft-data";
 
 export function ImportView() {
     const [source, setSource] = useState(() => store.get("importSource", ""));

@@ -22,7 +22,9 @@ const target = args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--dat
 if (!target) { console.log("Usage: node scripts/demo-vault.js <new folder> [--data <starter dataset>]"); process.exit(2); }
 const ROOT = path.resolve(target.replace(/^~(?=\/)/, process.env.HOME));
 if (fs.existsSync(ROOT) && fs.readdirSync(ROOT).filter((f) => f !== ".obsidian").length) { console.error(`${ROOT} is not empty`); process.exit(1); }
-const DATA = opt("data") ?? (fs.existsSync(path.join(process.env.HOME, "Projects/world-builder-data")) ? path.join(process.env.HOME, "Projects/world-builder-data") : "https://github.com/TheRealWolfick/world-builder-data");
+// a local checkout of the starter data when there is one (either name), else the GitHub repo
+const LOCAL_DATA = ["novel-craft-data", "world-builder-data"].map((d) => path.join(process.env.HOME, "Projects", d)).find((d) => fs.existsSync(d));
+const DATA = opt("data") ?? LOCAL_DATA ?? "https://github.com/TheRealWolfick/novel-craft-data";
 
 await fsp.mkdir(path.join(ROOT, ".obsidian"), { recursive: true });
 const DS = "80. Global Data Store";

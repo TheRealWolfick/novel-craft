@@ -5,7 +5,7 @@ kind: guide
 order: 3
 blurb: Add a dataset from GitHub, decide what happens to files you already have, and import updates later without losing your own edits.
 ---
-A dataset is a set of notes, taxonomy, templates and attachments laid out at their vault paths, usually shared as a GitHub repository. A new vault starts empty: importing the [Novel Craft starter data](https://github.com/TheRealWolfick/world-builder-data) gives it the data store schema, ledger types and a basic taxonomy.
+A dataset is a set of notes, taxonomy, templates and attachments laid out at their vault paths, usually shared as a GitHub repository. A new vault starts empty: importing the [Novel Craft starter data](https://github.com/TheRealWolfick/novel-craft-data) gives it the data store schema, ledger types and a basic taxonomy.
 
 ## Checking a dataset
 

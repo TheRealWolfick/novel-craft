@@ -126,7 +126,7 @@
  {
   "name": "import-check",
   "hash": "#/import",
-  "do": "type($(\".import-source input\"), \"https://github.com/TheRealWolfick/world-builder-data\"); await w(200); btn(\"Check\").click(); await w(6000);"
+  "do": "type($(\".import-source input\"), \"https://github.com/TheRealWolfick/novel-craft-data\"); await w(200); btn(\"Check\").click(); await w(6000);"
  },
  {
   "name": "map-assets",

@@ -78,8 +78,8 @@ Novel Craft runs on your own computer; nothing is sent anywhere. You need **[Nod
 ### 1. Get it
 
 ```sh
-git clone https://github.com/TheRealWolfick/world-builder.git
-cd world-builder
+git clone https://github.com/TheRealWolfick/novel-craft.git
+cd novel-craft
 npm install
 ```
 
@@ -107,7 +107,7 @@ Pick one:
 ### 3. First steps
 
 1. **Choose your vault.** On first start the app shows its Settings page: type the path of your Obsidian vault or browse to it (folders Obsidian has opened are marked "vault").
-2. **Import the starter data.** Open **Tools → Import data** and press **Use the Novel Craft starter data**, then **Check** and **Import**. This adds the data store schema, ledger types and a basic taxonomy ([world-builder-data](https://github.com/TheRealWolfick/world-builder-data)). Nothing you already have is overwritten without asking.
+2. **Import the starter data.** Open **Tools → Import data** and press **Use the Novel Craft starter data**, then **Check** and **Import**. This adds the data store schema, ledger types and a basic taxonomy ([novel-craft-data](https://github.com/TheRealWolfick/novel-craft-data)). Nothing you already have is overwritten without asking.
 3. **Add a novel** (a folder named like `1. My Novel` with a `config.md`), with Templater's novel script if you use it, or:
    ```sh
    npm run scaffold -- ~/path/to/vault --novel "My Novel" --world "My World"

@@ -1031,7 +1031,7 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
         "renaming an imported note keeps later imports pointing at it", JSON.stringify({ f3, counts: r3.counts }));
 }
 // a new vault has no data until a dataset is imported (the starter data repository, when it is on this machine)
-const STARTER = `${process.env.HOME}/Projects/world-builder-data`;
+const STARTER = ["novel-craft-data", "world-builder-data"].map((d) => `${process.env.HOME}/Projects/${d}`).find((d) => fs.existsSync(d)) ?? `${process.env.HOME}/Projects/novel-craft-data`;
 if (process.env.SETTINGS_DIR && fs.existsSync(STARTER)) {
     const send = (method, p, body) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: body && JSON.stringify(body) }).then(async (r) => ({ status: r.status, ...(await r.json()) }));
     const empty = `${process.env.SETTINGS_DIR}/Empty Vault`;
