@@ -18,7 +18,7 @@ A world export holds everything needed to rebuild the world in another vault: th
 
 ![The export dialog with linked notes included](img/world-export.png)
 
-Built-in stamps are not copied: every World Builder has them, so the export names them by their content hash. Your own stamps and derived textures go with the world.
+Built-in stamps are not copied: every Novel Craft has them, so the export names them by their content hash. Your own stamps and derived textures go with the world.
 
 ## Importing
 

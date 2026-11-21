@@ -32,7 +32,7 @@ Click a character on the novel page's **Characters & ledgers** tab. The owner pa
 - The **transfer-out** action, with a receiver, gives an item to another owner: their ledger gets the matching entry automatically.
 - The preview shows the entry's callout and what the owner holds before and after.
 
-Entries in the same chapter are numbered across all of a novel's ledgers, so they keep their order on the chapter page.
+Entries in the same chapter are numbered across all of a novel's ledgers, so they keep their order on the chapter page. From a chapter opened in the side drawer (under its plan), **New entry** and **Edit** open the entry editor in the drawer too; saving or cancelling goes back to the chapter.
 
 ## Relationships
 

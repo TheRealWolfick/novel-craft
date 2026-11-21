@@ -37,13 +37,11 @@ export const STYLE_GROUPS = [
         ["titlePrefix", "Text before the title", "text"], ["titlePrefixColor", "Colour of that text", "color"],
     ]],
     ["Text", [
-        ["textColor", "Text", "color"], ["contentBackground", "Body background", "color"], ["contentOpacity", "Body background strength", "range", [0, 1, 0.01]],
-        ["italic", "Italic", "bool"], ["lineHeight", "Line height", "range", [1, 2.4, 0.05]], ["paragraphGap", "Gap between paragraphs (em)", "range", [0, 2, 0.05]],
-        ["textAlign", "Alignment", "choice", ["left", "justify", "center"]], ["indent", "Indent later paragraphs (em)", "range", [0, 3, 0.1]],
+        ["contentBackground", "Body background", "color"], ["contentOpacity", "Body background strength", "range", [0, 1, 0.01]],
         ["boldColor", "Bold text and labels", "color"], ["linkColor", "Links", "color"], ["highlight", "==Highlights==", "choice", ["mark", "underline"]],
-        ["h4Color", "#### headings", "color"], ["h4Underline", "#### underline", "color"], ["h4Case", "#### case", "choice", ["none", "uppercase"]],
-        ["h5Color", "##### headings", "color"],
     ]],
+    // body text, headings and lists, each with the same controls (the designer shows them as tabs: TEXT_ELEMENTS)
+    ["Text elements", null],
     ["Effects", [
         ["grid", "Grid pattern", "bool"], ["gridColor", "Grid colour", "color"], ["gridOpacity", "Grid strength", "range", [0, 0.3, 0.005]], ["gridSize", "Grid size (px)", "range", [6, 60, 1]],
         ["ruled", "Ruled lines (one per line of text)", "bool"], ["ruleColor", "Rule colour", "color"], ["ruleOpacity", "Rule strength", "range", [0, 0.6, 0.01]],
@@ -51,6 +49,32 @@ export const STYLE_GROUPS = [
         ["inset", "Paper shading (inner shadow)", "bool"],
     ]],
 ];
+/**
+ * Text elements and the key of each of their settings: body text (its keys are the older textColor, italic, textAlign,
+ * indent, paragraphGap and lineHeight, so saved styles keep working), # to ######, bullet and numbered lists. Every
+ * element has the same controls; headings add an underline, lists their marker, its colour and the gap between items.
+ */
+const ELEMENT_KEYS = (e) => e === "p"
+    ? { Color: "textColor", Size: "pSize", Weight: "pWeight", Italic: "italic", Case: "pCase", Align: "textAlign", Indent: "indent", Before: "paragraphGap", After: "pAfter", LineHeight: "lineHeight", Spacing: "pSpacing" }
+    : Object.fromEntries(["Color", "Size", "Weight", "Italic", "Case", "Align", "Indent", "Before", "After", "LineHeight", "Spacing",
+        ...(/^h/.test(e) ? ["Underline"] : ["Marker", "MarkerColor", "Gap"])].map((k) => [k, `${e}${k}`]));
+const ELEMENT_LABELS = { p: "Body text", h1: "H1", h2: "H2", h3: "H3", h4: "H4", h5: "H5", h6: "H6", ul: "Bullet list", ol: "Numbered list" };
+export const TEXT_ELEMENTS = Object.entries(ELEMENT_LABELS).map(([e, label]) => {
+    const k = ELEMENT_KEYS(e), list = e === "ul" || e === "ol";
+    const fields = [
+        [k.Color, "Colour", "color"], [k.Size, "Size (em)", "range", [0.5, 2.6, 0.01]], [k.Weight, "Weight", "choice", ["300", "400", "600", "700"]],
+        [k.Italic, "Italic", "bool"], [k.Case, "Case", "choice", ["none", "uppercase", "small-caps"]], [k.Align, "Alignment", "choice", ["left", "center", "right", "justify"]],
+        [k.Indent, e === "p" ? "First-line indent, later paragraphs (em)" : list ? "List indent (em)" : "Indent (em)", "range", [0, 4, 0.05]],
+        [k.Before, e === "p" ? "Space between paragraphs (em)" : "Space before (em)", "range", [0, 3, 0.05]], [k.After, "Space after (em)", "range", [0, 3, 0.05]],
+        [k.LineHeight, e === "p" ? "Line height" : "Line height (0: as the body text)", "range", [e === "p" ? 1 : 0, 2.6, 0.05]],
+        [k.Spacing, "Letter spacing (px)", "range", [0, 4, 0.1]],
+        ...(k.Underline ? [[k.Underline, "Underline", "color"]] : []),
+        ...(list ? [[k.Marker, e === "ul" ? "Bullet style" : "Number style", "choice", e === "ul" ? ["disc", "circle", "square", "dash", "arrow", "check", "none"] : ["decimal", "lower-alpha", "upper-alpha", "lower-roman", "upper-roman"]],
+            [k.MarkerColor, e === "ul" ? "Bullet colour" : "Number colour", "color"], [k.Gap, "Gap between items (em)", "range", [0, 1.5, 0.02]]] : []),
+    ];
+    return [e, label, fields];
+});
+STYLE_GROUPS.find((g) => g[0] === "Text elements")[1] = TEXT_ELEMENTS.flatMap(([, , fs]) => fs);
 export const COLOR_KEYS = new Set(STYLE_GROUPS.flatMap(([, fs]) => fs.filter((f) => f[2] === "color").map((f) => f[0])));
 
 /** Settings every style starts from */
@@ -61,7 +85,16 @@ export const BASE_STYLE = {
     titleShow: true, titlePosition: "top", titleBackground: "", titleFade: false, titleColor: "", titleSize: 1, titleWeight: "600", titleCase: "none",
     titleAlign: "left", titleSpacing: 0, titlePrefix: "", titlePrefixColor: "",
     textColor: "", contentBackground: "", contentOpacity: 0, italic: false, lineHeight: 1.55, paragraphGap: 0.6, textAlign: "left", indent: 0,
-    boldColor: "", linkColor: "", highlight: "mark", h4Color: "", h4Underline: "", h4Case: "none", h5Color: "",
+    boldColor: "", linkColor: "", highlight: "mark",
+    // body text beyond the older keys above
+    pSize: 1, pWeight: "400", pCase: "none", pAfter: 0, pSpacing: 0,
+    // headings and lists (see TEXT_ELEMENTS)
+    ...Object.fromEntries([["h1", 1.5, 0.9, 0.4], ["h2", 1.3, 0.9, 0.4], ["h3", 1.15, 0.9, 0.4], ["h4", 1.1, 1, 0.4], ["h5", 1, 0.8, 0.2], ["h6", 0.9, 0.8, 0.2]].flatMap(([h, size, before, after]) => [
+        [`${h}Color`, ""], [`${h}Size`, size], [`${h}Weight`, "700"], [`${h}Italic`, false], [`${h}Case`, "none"], [`${h}Align`, "left"], [`${h}Indent`, 0],
+        [`${h}Before`, before], [`${h}After`, after], [`${h}LineHeight`, 1.3], [`${h}Spacing`, 0], [`${h}Underline`, ""]])),
+    ...Object.fromEntries(["ul", "ol"].flatMap((l) => [
+        [`${l}Color`, ""], [`${l}Size`, 1], [`${l}Weight`, "400"], [`${l}Italic`, false], [`${l}Case`, "none"], [`${l}Align`, "left"], [`${l}Indent`, 1.4],
+        [`${l}Before`, 0.4], [`${l}After`, 0.4], [`${l}LineHeight`, 0], [`${l}Spacing`, 0], [`${l}Marker`, l === "ul" ? "disc" : "decimal"], [`${l}MarkerColor`, ""], [`${l}Gap`, 0.15]])),
     grid: false, gridColor: "#4a9eff", gridOpacity: 0.03, gridSize: 20, ruled: false, ruleColor: "#b08d57", ruleOpacity: 0.13,
     quoteMark: false, quoteMarkColor: "", inset: false, css: "", dark: {},
 };
@@ -75,9 +108,7 @@ const cardCss = (tag) => [
     "& > .callout-title { padding: 11px 16px 9px; border-bottom: 1px solid var(--co-border); border-radius: 0; }",
     tag ? `& > .callout-title::before { content: '${tag}'; display: block; margin-bottom: 1px; font-size: .62em; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--co-prefix); }` : "",
     "& > .callout-content { padding: 8px 16px 12px; }",
-    "& h4 { font-size: .74em; letter-spacing: .14em; margin: 12px 0 4px; padding-bottom: 3px; border-bottom-color: color-mix(in srgb, var(--co-h4-line) 35%, transparent); }",
-    "& h5 { margin: 10px 0 2px; }",
-    "& ul { margin: 4px 0; padding-left: 1.2em; } & li::marker { color: var(--co-bold); }",
+    "& h4 { padding-bottom: 3px; border-bottom-color: color-mix(in srgb, var(--co-h4-line) 35%, transparent); }",
     "& code { font-size: .88em; padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--co-text) 8%, transparent); }",
 ].filter(Boolean).join(" ");
 const CARD = ({ label, tag, accent, accentDark, tint, tintDark, extra = {}, dark = {}, css = "" }) => ({
@@ -85,10 +116,11 @@ const CARD = ({ label, tag, accent, accentDark, tint, tintDark, extra = {}, dark
     background: "#ffffff", background2: tint, gradientAngle: 180, borderColor: "#dfe3ea", borderWidth: 1,
     shadowColor: "#1d2b4a", shadowSize: 16, shadowOpacity: 0.09,
     titleColor: "#1b2333", titleSize: 1.05, titleWeight: "700", titleSpacing: 0.1, titlePrefixColor: accent,
-    textColor: "#2a3140", boldColor: accent, linkColor: accent, h4Color: accent, h4Underline: accent, h4Case: "uppercase", h5Color: "#1b2333",
+    textColor: "#2a3140", boldColor: accent, linkColor: accent, h4Color: accent, h4Underline: accent, h4Case: "uppercase", h4Size: 0.74, h4Before: 0.9, h4After: 0.3, h5Color: "#1b2333", h5Before: 0.7, h5After: 0.1,
+    ulMarkerColor: accent, olMarkerColor: accent, ulIndent: 1.2, olIndent: 1.2, h4Spacing: 1.6,
     ...extra,
     dark: { background: "#181c24", background2: tintDark, borderColor: "#2b3240", shadowColor: "#000000", titleColor: "#eef2f8", titlePrefixColor: accentDark,
-        textColor: "#d8dee9", boldColor: accentDark, linkColor: accentDark, h4Color: accentDark, h4Underline: accentDark, h5Color: "#eef2f8", ...dark },
+        textColor: "#d8dee9", boldColor: accentDark, linkColor: accentDark, h4Color: accentDark, h4Underline: accentDark, h5Color: "#eef2f8", ulMarkerColor: accentDark, olMarkerColor: accentDark, ...dark },
     css: [cardCss(tag), css].filter(Boolean).join(" "),
 });
 
@@ -111,7 +143,7 @@ export const DEFAULT_STYLES = {
         background: "#ffffff", background2: "#f4f7fc", gradientAngle: 180, borderColor: "#dde3ee", borderWidth: 1,
         shadowColor: "#1d2b4a", shadowSize: 18, shadowOpacity: 0.1,
         titleColor: "#1b2436", titleSize: 1.1, titleWeight: "700", titleSpacing: 0.2, titlePrefixColor: "#3461c4",
-        textColor: "#263042", boldColor: "#3461c4", h4Color: "#3461c4", lineHeight: 1.45,
+        textColor: "#263042", boldColor: "#3461c4", h4Color: "#3461c4", h4Size: 0.72, h4Case: "uppercase", h4Spacing: 1.8, h4Before: 0.9, h4After: 0.3, ulMarkerColor: "#3461c4", olMarkerColor: "#3461c4", lineHeight: 1.45,
         css: "& > .callout-title { padding: 12px 16px 10px; border-bottom: 1px solid var(--co-border); border-radius: 0; }"
             + " & > .callout-title::before { content: 'Status'; display: block; margin-bottom: 1px; font-size: .6em; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: var(--co-prefix); }"
             + " & > .callout-content { padding: 4px 16px 12px; }"
@@ -122,10 +154,9 @@ export const DEFAULT_STYLES = {
             + " & tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--co-text) 4.5%, transparent); }"
             + " & td:first-child { color: color-mix(in srgb, var(--co-text) 70%, transparent); }"
             + " & td:nth-child(2) { color: var(--co-bold); white-space: nowrap; font-size: .8em; letter-spacing: -.5px; text-align: right; }"
-            + " & td:last-child { text-align: right; font-weight: 600; white-space: nowrap; }"
-            + " & h4 { font-size: .72em; letter-spacing: .16em; text-transform: uppercase; margin: 12px 0 4px; }",
+            + " & td:last-child { text-align: right; font-weight: 600; white-space: nowrap; }",
         dark: { background: "#181d27", background2: "#10141c", borderColor: "#2a3343", shadowColor: "#000000", titleColor: "#eef2f8",
-            titlePrefixColor: "#86a8ff", textColor: "#d9e0ec", boldColor: "#86a8ff", h4Color: "#86a8ff" },
+            titlePrefixColor: "#86a8ff", textColor: "#d9e0ec", boldColor: "#86a8ff", h4Color: "#86a8ff", ulMarkerColor: "#86a8ff", olMarkerColor: "#86a8ff" },
     },
     // a notification: a slimmer card with an accent bar, like a toast
     sysnotify: CARD({ label: "System notification", tag: "Notification", accent: "#0d8a84", accentDark: "#4fd1c5", tint: "#f2fbfa", tintDark: "#121c1e",
@@ -205,7 +236,8 @@ function colorVars(s, dark) {
         `--co-title: ${c("titleColor") || "inherit"}`, `--co-prefix: ${c("titlePrefixColor") || "inherit"}`,
         `--co-text: ${c("textColor") || "inherit"}`, `--co-body: ${c("contentBackground") ? hexA(c("contentBackground"), s.contentOpacity) : "transparent"}`,
         `--co-bold: ${c("boldColor") || "inherit"}`, `--co-link: ${c("linkColor") || "var(--accent)"}`,
-        `--co-h4: ${c("h4Color") || "inherit"}`, `--co-h4-line: ${c("h4Underline") || "transparent"}`, `--co-h5: ${c("h5Color") || "inherit"}`,
+        ...[1, 2, 3, 4, 5, 6].flatMap((n) => [`--co-h${n}: ${c(`h${n}Color`) || "inherit"}`, `--co-h${n}-line: ${c(`h${n}Underline`) || "transparent"}`]),
+        ...["ul", "ol"].flatMap((l) => [`--co-${l}: ${c(`${l}Color`) || "inherit"}`, `--co-${l}-marker: ${c(`${l}MarkerColor`) || "currentColor"}`]),
         `--co-grid: ${hexA(c("gridColor"), s.gridOpacity)}`, `--co-rule: ${hexA(c("ruleColor"), s.ruleOpacity)}`, `--co-qmark: ${c("quoteMarkColor") || "currentColor"}`,
     ].join("; ");
 }
@@ -254,11 +286,39 @@ export function calloutCss(styles, { scope = "", obsidian = false } = {}) {
             if (s.quoteMark) out.push(`${sel} > .callout-content::before { content: "\\201C"; position: absolute; top: -0.3em; left: -0.32em; font-size: 4em; line-height: 1; font-style: normal; color: var(--co-qmark); opacity: .3; pointer-events: none; }`);
         }
         out.push(`${sel} strong { color: var(--co-bold); } ${sel} a { color: var(--co-link); text-decoration: none; }`);
-        out.push(`${sel} h4 { color: var(--co-h4); font-size: 1.1em; margin: 1em 0 .4em; text-transform: ${s.h4Case}; ${s.h4Underline ? "border-bottom: 1px solid var(--co-h4-line); padding-bottom: 4px;" : ""} } ${sel} h5 { color: var(--co-h5); font-size: 1em; margin: .8em 0 .2em; }`);
+        out.push(elementCss(sel, s, blockquote));
         out.push(`${sel} img { display: block; margin: 1em auto; max-width: 80%; }`);
         if (s.highlight === "underline") out.push(`${sel} mark { background: none; color: inherit; text-decoration: underline currentColor 1.5px; text-underline-offset: .2em; }`);
         if (s.css?.trim()) out.push(scopeCss(s.css, sel));
         if (obsidian && !blockquote) out.push(obsidianFixes(sel, s));
+    }
+    return out.join("\n");
+}
+
+/** The rules for the text elements (body text, headings, lists) from their settings */
+const caseCss = (c) => `text-transform: ${c === "uppercase" ? "uppercase" : "none"}; font-variant: ${c === "small-caps" ? "small-caps" : "normal"};`;
+const UL_MARKERS = { disc: "disc", circle: "circle", square: "square", dash: '"– "', arrow: '"→ "', check: '"✓ "', none: "none" };
+function elementCss(sel, s, blockquote) {
+    const v = (k, d) => (s[k] === "" || s[k] == null ? d : s[k]);
+    const scope = blockquote ? sel : `${sel} > .callout-content`;
+    const out = [];
+    // body text: size, weight, case, letter spacing, space after (colour, italic, alignment, line height, indent and
+    // the space between paragraphs are the callout's own settings, set above)
+    out.push(`${scope} p { font-size: ${v("pSize", 1)}em; font-weight: ${v("pWeight", "400")}; ${caseCss(s.pCase)} letter-spacing: ${v("pSpacing", 0)}px; margin-bottom: ${v("pAfter", 0)}em; }`);
+    for (const n of [1, 2, 3, 4, 5, 6]) {
+        const h = `h${n}`, line = s[`${h}Underline`] || s.dark?.[`${h}Underline`];
+        out.push(`${sel} ${h} { color: var(--co-${h}); font-size: ${v(`${h}Size`, 1)}em; font-weight: ${v(`${h}Weight`, "700")}; ${s[`${h}Italic`] ? "font-style: italic;" : ""}
+            ${caseCss(s[`${h}Case`])} text-align: ${v(`${h}Align`, "left")}; padding-left: ${v(`${h}Indent`, 0)}em; margin: ${v(`${h}Before`, 0.8)}em 0 ${v(`${h}After`, 0.3)}em;
+            line-height: ${Number(s[`${h}LineHeight`]) > 0 ? s[`${h}LineHeight`] : "inherit"}; letter-spacing: ${v(`${h}Spacing`, 0)}px;
+            ${line ? `border-bottom: 1px solid var(--co-${h}-line); padding-bottom: 4px;` : "border-bottom: 0;"} }`);
+    }
+    for (const l of ["ul", "ol"]) {
+        out.push(`${sel} ${l} { color: var(--co-${l}); font-size: ${v(`${l}Size`, 1)}em; font-weight: ${v(`${l}Weight`, "400")}; ${s[`${l}Italic`] ? "font-style: italic;" : ""}
+            ${caseCss(s[`${l}Case`])} text-align: ${v(`${l}Align`, "left")}; padding-left: ${v(`${l}Indent`, 1.4)}em; margin: ${v(`${l}Before`, 0.4)}em 0 ${v(`${l}After`, 0.4)}em;
+            ${Number(s[`${l}LineHeight`]) > 0 ? `line-height: ${s[`${l}LineHeight`]};` : ""} letter-spacing: ${v(`${l}Spacing`, 0)}px;
+            list-style-type: ${l === "ul" ? UL_MARKERS[s.ulMarker] ?? "disc" : v("olMarker", "decimal")}; }
+            ${sel} ${l} > li + li, ${sel} ${l} > li > ul, ${sel} ${l} > li > ol { margin-top: ${v(`${l}Gap`, 0.15)}em; } ${sel} ${l} > li::marker { color: var(--co-${l}-marker); }
+            ${sel} ${l} ${l} { margin: 0; font-size: 1em; }`);
     }
     return out.join("\n");
 }
@@ -283,14 +343,14 @@ function obsidianFixes(sel, s) {
 
 /**
  * An Obsidian CSS snippet for callout styles (all but "any other callout" and plain quotes, which would restyle
- * every callout and quote in the vault). Sizes follow Obsidian's text size the way World Builder's follow the
+ * every callout and quote in the vault). Sizes follow Obsidian's text size the way Novel Craft's follow the
  * chapter text size.
  */
 export function obsidianCss(styles, { skip = ["default", "quote"] } = {}) {
     const picked = Object.fromEntries(Object.entries(styles).filter(([k]) => !skip.includes(k)));
     return [
         "/*",
-        " * World Builder callouts for Obsidian, made by World Builder's callout designer.",
+        " * Novel Craft callouts for Obsidian, made by Novel Craft's callout designer.",
         " * Put this file in your vault's .obsidian/snippets/ folder and turn it on under",
         " * Settings → Appearance → CSS snippets. Light and dark follow Obsidian's theme;",
         " * text sizes are multiples of your editor text size.",
@@ -313,6 +373,12 @@ function scopeCss(css, sel) {
 }
 
 /** Example markdown for the designer's preview */
+/** A sample with every heading level and both kinds of list, for trying the Headings and Lists settings */
+export function richSampleFor(type) {
+    const head = type === "quote" ? "" : `> [!${type === "default" ? "note" : type}] ${type === "default" ? "Note" : type[0].toUpperCase() + type.slice(1)}\n`;
+    return `${head}> # Heading 1\n> ## Heading 2\n> ### Heading 3\n> #### Heading 4\n> ##### Heading 5\n> ###### Heading 6\n> A line of text with **bold** and a [[link]].\n>\n> - First item\n> - Second item\n>     - A nested item\n>\n> 1. First step\n> 2. Second step`;
+}
+
 export function sampleFor(type) {
     if (type === "quote") return "> The rain had not stopped for three days.\n> Nobody in the village remembered a summer like it.";
     if (type === "journal") return "> [!journal] Wade's journal\n> I found the clearing again today. The stones were warm, though the sun had long set.\n>\n> Tomorrow I will bring Hilda.";

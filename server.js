@@ -1,4 +1,4 @@
-// World Builder: browse and edit the Obsidian data store and novel ledgers in a web browser.
+// Novel Craft: browse and edit the Obsidian data store and novel ledgers in a web browser.
 // Usage: node server.js [--vault <path>] [--port 4321] [--host 127.0.0.1]
 import http from "node:http";
 import fs from "node:fs";
@@ -51,7 +51,7 @@ const VAULT_SOURCES = [["--vault", arg("vault")], ["settings", readSettings().va
 const startSource = VAULT_SOURCES.find(([, v]) => v);
 // the AI assistant: its tools read the open vault's services
 const assistant = new Assistant({ settingsFile: SETTINGS_FILE, readSettings, writeSettings, ctx: () => ({ vault, novels, store, plans, worlds, search, stats }) });
-// Claude Code: World Builder's MCP server, and the terminal it runs in (the AI tab); proposals it makes open in the app
+// Claude Code: Novel Craft's MCP server, and the terminal it runs in (the AI tab); proposals it makes open in the app
 const mcp = new McpServer(assistant, { onProposal: (p) => { const msg = `event: proposal\ndata: ${JSON.stringify(p)}\n\n`; for (const res of clients) res.write(msg); } });
 const terminal = new Terminal();
 // Claude Code ends with the app (quitting, Ctrl+C, a service stop), never left running on its own
@@ -262,7 +262,7 @@ const routes = {
         if (!b.styles || typeof b.styles !== "object") throw fail(400, "Missing styles");
         if (vault.notes.has(CALLOUT_STYLES_NOTE)) await patchNote(vault, CALLOUT_STYLES_NOTE, { set: { "callout-styles": b.styles }, baseMtime: b.baseMtime });
         else await createNote(vault, CALLOUT_STYLES_NOTE, { type: "config", "callout-styles": b.styles },
-            "Callout styles for World Builder's callout designer (Tools → Callout designer). Edit them there.\n");
+            "Callout styles for Novel Craft's callout designer (Tools → Callout designer). Edit them there.\n");
         return { mtime: vault.notes.get(CALLOUT_STYLES_NOTE)?.mtime ?? null };
     },
     // dataset import: download and compare, preview a conflict, write
@@ -713,7 +713,7 @@ export async function start({ port = PORT, host = HOST, fallback = false } = {})
     try { await listen(port); } catch (e) { if (!fallback || e.code !== "EADDRINUSE") throw e; await listen(0); }
     const actual = server.address().port;
     listenPort = actual;
-    console.log(`World Builder: http://${host === "0.0.0.0" ? "localhost" : host}:${actual}  (${vault ? `vault: ${vault.root}, ${vault.notes.size} notes` : "no vault yet: open Settings"})`);
+    console.log(`Novel Craft: http://${host === "0.0.0.0" ? "localhost" : host}:${actual}  (${vault ? `vault: ${vault.root}, ${vault.notes.size} notes` : "no vault yet: open Settings"})`);
     return { port: actual, server };
 }
 

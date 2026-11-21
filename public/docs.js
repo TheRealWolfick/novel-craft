@@ -87,8 +87,8 @@ function DocsNav({ idx, current, active }) {
 function DocsHome({ idx }) {
     const byId = useMemo(() => new Map(idx.pages.map((p) => [p.id, p])), [idx]);
     return html`<article class="doc-prose doc-home">
-        <p class="doc-kicker">World Builder docs</p>
-        <h1>How to use World Builder</h1>
+        <p class="doc-kicker">Novel Craft docs</p>
+        <h1>How to use Novel Craft</h1>
         <p class="doc-lead">Guides walk through a task from start to finish with screenshots. References list every field, option and shortcut of one part of the app. Pick a topic, or search with <kbd>/</kbd>.</p>
         ${idx.start.length > 0 && html`<h2>Start here</h2>
             <div class="doc-cards three">${idx.start.map((id, i) => { const p = byId.get(id); return p && html`<a key=${id} class="doc-card start" href=${pageHref(id)}>

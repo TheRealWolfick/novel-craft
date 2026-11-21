@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Write the Obsidian CSS snippet for World Builder's callouts (system, status, sysnotify, inventory, item, blueprint,
+// Write the Obsidian CSS snippet for Novel Craft's callouts (system, status, sysnotify, inventory, item, blueprint,
 // journal, pencil): the built-in looks, or with --vault the looks as saved in that vault's callout designer.
 //
 //   node scripts/obsidian-snippets.js [--vault <vault folder>] [--out <file>]

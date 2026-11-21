@@ -4,7 +4,7 @@ import { h } from "preact";
 import { useState, useEffect, useMemo } from "preact/hooks";
 import htm from "htm";
 import { api, useApi, toast, store, Loading, ConfirmButton, markDirty, copyText } from "./app.js";
-import { STYLE_GROUPS, COLOR_KEYS, DEFAULT_STYLES, BASE_STYLE, calloutCss, compactStyles, sampleFor, obsidianCss } from "./callout-style.js";
+import { STYLE_GROUPS, TEXT_ELEMENTS, COLOR_KEYS, DEFAULT_STYLES, BASE_STYLE, calloutCss, compactStyles, sampleFor, richSampleFor, obsidianCss } from "./callout-style.js";
 
 const html = htm.bind(h);
 
@@ -33,7 +33,9 @@ export function CalloutDesigner() {
     const [mode, setMode] = useState("light");
     const [busy, setBusy] = useState(false);
     const [find, setFind] = useState("");
-    const [openGroups, setOpenGroups] = useState(() => new Set(store.get("coGroups", ["Box", "Title"])));
+    const [element, setElementState] = useState(() => store.get("coElement", "p"));
+    const setElement = (e) => { setElementState(e); store.set("coElement", e); };
+    const [openGroups, setOpenGroups] = useState(() => new Set(store.get("coGroups", ["Box", "Title", "Text elements"])));
     const toggleGroup = (g) => setOpenGroups((o) => { const n = new Set(o); n.has(g) ? n.delete(g) : n.add(g); store.set("coGroups", [...n]); return n; });
     useEffect(() => { if (data && !draft) { setDraft(clone(data.styles)); setBase(JSON.stringify(data.styles)); } }, [data]);
     const dirty = !!draft && JSON.stringify(draft) !== base;
@@ -100,13 +102,14 @@ export function CalloutDesigner() {
             <button class="co-add" onClick=${addType}>+ New type</button>
         </nav>
         <div class="co-main">
-            <div class="spread co-head">
-                <div><h1>Callout designer</h1>
-                    <p class="muted" style="margin-top:0">How callouts look in the writer, notes and previews. Saved in <code>${data.note}</code>. Colours can differ in dark mode; text sizes are multiples of the chapter text size (Settings → Chapter text).</p></div>
-                <div class="row">
+            <div class="co-head">
+                <h1>Callout designer</h1>
+                <p class="muted" style="margin-top:0">How callouts look in the writer, notes and previews. Saved in <code>${data.note}</code>. Colours can differ in dark mode; text sizes are multiples of the chapter text size (Settings → Chapter text).</p>
+                <div class="row co-actions">
                     <button title="These looks as an Obsidian CSS snippet: save it in the vault's .obsidian/snippets folder and turn it on under Settings → Appearance → CSS snippets"
                         onClick=${() => copyText(obsidianCss(draft), "Copied the Obsidian snippet: save it as .obsidian/snippets/world-builder-callouts.css")}>Copy Obsidian snippet</button>
-                    ${dirty && html`<button onClick=${() => setDraft(JSON.parse(base))}>Discard</button>`}
+                    <span class="grow" />
+                    <button disabled=${!dirty} onClick=${() => setDraft(JSON.parse(base))}>Discard</button>
                     <button class="primary" disabled=${!dirty || busy} onClick=${save}>${busy ? "Saving…" : "Save styles"}</button>
                 </div>
             </div>
@@ -119,8 +122,10 @@ export function CalloutDesigner() {
                     ${mode === "dark" && html`<p class="muted small-note co-dark-note">Editing dark mode colours. Colours you leave alone use the light mode ones.</p>`}
                     <div class="co-field"><span>Name</span><input value=${st.label ?? ""} onInput=${(e) => set("label", e.target.value)} /></div>
                     ${STYLE_GROUPS.map(([group, fields]) => html`<section class=${`co-group ${openGroups.has(group) ? "open" : ""}`} key=${group}>
-                        <button class="co-group-head" aria-expanded=${openGroups.has(group)} onClick=${() => toggleGroup(group)}><span class="caret" aria-hidden="true">▸</span>${group}<span class="muted n">${fields.length}</span></button>
-                        ${openGroups.has(group) && html`<div class="co-group-body">${fields.map(([k, label, kind, opt]) => html`<${StyleField} key=${k} k=${k} label=${label} kind=${kind} opt=${opt} value=${valueOf(k)}
+                        <button class="co-group-head" aria-expanded=${openGroups.has(group)} onClick=${() => toggleGroup(group)}><span class="caret" aria-hidden="true">▸</span>${group}<span class="muted n">${group === "Text elements" ? `${TEXT_ELEMENTS.length} kinds` : fields.length}</span></button>
+                        ${openGroups.has(group) && html`<div class="co-group-body">
+                            ${group === "Text elements" && html`<div class="co-tabs" role="tablist" aria-label="Text element">${TEXT_ELEMENTS.map(([e, label]) => html`<button role="tab" aria-selected=${element === e} class=${element === e ? "on" : ""} onClick=${() => setElement(e)}>${label}</button>`)}</div>`}
+                            ${(group === "Text elements" ? (TEXT_ELEMENTS.find(([e]) => e === element) ?? TEXT_ELEMENTS[0])[2] : fields).map(([k, label, kind, opt]) => html`<${StyleField} key=${k} k=${k} label=${label} kind=${kind} opt=${opt} value=${valueOf(k)}
                             overridden=${mode === "dark" && COLOR_KEYS.has(k) && !!st.dark?.[k]} dark=${mode === "dark" && COLOR_KEYS.has(k)}
                             onChange=${(v) => set(k, v)} onClearDark=${() => clearDark(k)} />`)}</div>`}
                     </section>`)}
@@ -195,7 +200,8 @@ function PreviewPane({ type, sampleKey }) {
         <details class="co-sample panel" open>
             <summary>Sample text</summary>
             <textarea rows="7" spellcheck="false" value=${sample} onInput=${(e) => setSample(e.target.value)} />
-            <button class="small" onClick=${() => setSample(sampleFor(type))}>Reset sample</button>
+            <div class="row"><button class="small" onClick=${() => setSample(sampleFor(type))}>Reset sample</button>
+                <button class="small" title="A sample with every heading level and both kinds of list" onClick=${() => setSample(richSampleFor(type))}>Headings and lists</button></div>
         </details>
     </section>`;
 }

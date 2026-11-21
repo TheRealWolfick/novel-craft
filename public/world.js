@@ -99,7 +99,7 @@ function ExportDialog({ world, title, onClose }) {
             ${!pv ? html`<${Loading} error=${error} />` : html`<ul class="export-summary">
                 <li><b>${pv.locations}</b> locations, <b>${pv.maps}</b> maps${pv.attachments ? html`, <b>${pv.attachments}</b> attached files` : ""}</li>
                 ${linked && html`<li><b>${pv.linked}</b> linked notes${pv.linked ? html` <span class="muted">(${Object.entries(pv.linkedByCollection).map(([c, n]) => `${n} ${c.replace(/^Taxonomy\//, "")}`).join(", ")})</span>` : ""}</li>`}
-                <li><b>${pv.stamps.own}</b> of your own stamps go with it; <b>${pv.stamps.builtin}</b> built-in stamps are named by their hash (every World Builder has them)</li>
+                <li><b>${pv.stamps.own}</b> of your own stamps go with it; <b>${pv.stamps.builtin}</b> built-in stamps are named by their hash (every Novel Craft has them)</li>
                 ${pv.textures > 0 && html`<li><b>${pv.textures}</b> derived textures</li>`}
             </ul>`}
             <section class="export-way recommended">
@@ -412,7 +412,7 @@ function MapsList({ data }) {
 /**
  * Your own stamps and derived textures, with the maps that use them: delete (stamps go to the vault's .trash; maps keep
  * drawing a deleted stamp from their own copy), or export a selection as a pack others import with Import data.
- * Built-in stamps and textures are the base set every World Builder has.
+ * Built-in stamps and textures are the base set every Novel Craft has.
  */
 export function MapAssetsView() {
     const { data, error } = useApi("/api/map-assets");
@@ -432,7 +432,7 @@ export function MapAssetsView() {
     return html`<div class="assets-page">
         <h1>Map assets</h1>
         <p class="muted" style="margin-top:0">Every stamp and derived texture is known by a hash of its content, so a map finds a stamp you moved or renamed, an import never copies one you already have, and a map keeps drawing a stamp you deleted from its own saved copy.
-            Built-in: <b>${data.builtin.stamps}</b> stamps and <b>${data.builtin.textures}</b> textures (every World Builder has them). Add packs with <a href="#/import">Import data</a>.</p>
+            Built-in: <b>${data.builtin.stamps}</b> stamps and <b>${data.builtin.textures}</b> textures (every Novel Craft has them). Add packs with <a href="#/import">Import data</a>.</p>
         <div class="row assets-bar">
             <input class="grow" type="search" placeholder="Filter by name or set" value=${filter} onInput=${(e) => setFilter(e.target.value)} aria-label="Filter assets" />
             <input value=${packName} onInput=${(e) => setPackName(e.target.value)} aria-label="Pack name" style="width:220px" />

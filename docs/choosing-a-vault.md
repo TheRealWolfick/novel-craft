@@ -6,7 +6,7 @@ order: 2
 blurb: Point the app at your Obsidian vault on the Settings page, or try it on the
   demo vault.
 ---
-The vault is the folder Obsidian opens: the one that holds your notes and a hidden `.obsidian` folder. World Builder works on that folder directly.
+The vault is the folder Obsidian opens: the one that holds your notes and a hidden `.obsidian` folder. Novel Craft works on that folder directly.
 
 ## Choosing it
 

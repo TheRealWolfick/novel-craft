@@ -5,12 +5,12 @@ kind: guide
 order: 3
 blurb: Add a dataset from GitHub, decide what happens to files you already have, and import updates later without losing your own edits.
 ---
-A dataset is a set of notes, taxonomy, templates and attachments laid out at their vault paths, usually shared as a GitHub repository. A new vault starts empty: importing the [World Builder starter data](https://github.com/TheRealWolfick/world-builder-data) gives it the data store schema, ledger types and a basic taxonomy.
+A dataset is a set of notes, taxonomy, templates and attachments laid out at their vault paths, usually shared as a GitHub repository. A new vault starts empty: importing the [Novel Craft starter data](https://github.com/TheRealWolfick/world-builder-data) gives it the data store schema, ledger types and a basic taxonomy.
 
 ## Checking a dataset
 
 1. Open [Import data](app:#/import) (sidebar → Tools).
-2. Paste the repository's URL, or press **Use the World Builder starter data**. A branch or sub folder works too: `https://github.com/owner/repo/tree/branch/folder`.
+2. Paste the repository's URL, or press **Use the Novel Craft starter data**. A branch or sub folder works too: `https://github.com/owner/repo/tree/branch/folder`.
 3. Press **Check**. The app downloads the repository and compares every file with your vault. Nothing is written yet.
 
 ![Checking the starter data against a vault that already has it](img/import-check.png)

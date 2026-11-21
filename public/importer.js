@@ -77,7 +77,7 @@ export function ImportView() {
                 <button class="primary" disabled=${busy || !source.trim()} onClick=${run}>${busy && !check ? "Downloading…" : "Check"}</button>
             </label>
             <p class="muted small-note">A branch or folder works too: <code>https://github.com/owner/repo/tree/branch/folder</code>. A folder on this computer can be given as a path (<code>~/datasets/mine</code>).
-                ${" "}<button class="linkish" onClick=${() => setSource(STARTER_DATA)}>Use the World Builder starter data</button> (schema, ledger types, basic taxonomy).</p>
+                ${" "}<button class="linkish" onClick=${() => setSource(STARTER_DATA)}>Use the Novel Craft starter data</button> (schema, ledger types, basic taxonomy).</p>
             <div class=${`drop import-drop ${over ? "over" : ""}`} onClick=${() => fileInput.current.click()}
                 onDragOver=${(e) => { e.preventDefault(); setOver(true); }} onDragLeave=${() => setOver(false)}
                 onDrop=${(e) => { e.preventDefault(); setOver(false); upload(e.dataTransfer.files?.[0]); }}>
@@ -153,7 +153,7 @@ function AssetsStep({ a, extract, setExtract, texChoice, setTexChoice }) {
             ${a.embedded.length > 0 && html`<li><label class="row"><input type="checkbox" style="width:auto" checked=${extract} onChange=${(e) => setExtract(e.target.checked)} />
                 Add the ${a.embedded.length} stamp${a.embedded.length === 1 ? "" : "s"} only the maps carry to your library (<i>${a.embedded.slice(0, 4).map((e) => e.name).join(", ")}${a.embedded.length > 4 ? "…" : ""}</i>)</label>
                 <div class="muted small-note">Without them the maps still show these stamps, but you can't place them elsewhere.</div></li>`}
-            ${a.missingBuiltin.length > 0 && html`<li class="warn-text">${a.missingBuiltin.length} built-in stamp${a.missingBuiltin.length === 1 ? " is" : "s are"} missing from this version of World Builder (${a.missingBuiltin.slice(0, 4).map((x) => x.name).join(", ")}): the maps show their saved copies.</li>`}
+            ${a.missingBuiltin.length > 0 && html`<li class="warn-text">${a.missingBuiltin.length} built-in stamp${a.missingBuiltin.length === 1 ? " is" : "s are"} missing from this version of Novel Craft (${a.missingBuiltin.slice(0, 4).map((x) => x.name).join(", ")}): the maps show their saved copies.</li>`}
             ${newTex.length > 0 && html`<li>${newTex.length} texture${newTex.length === 1 ? "" : "s"} new to you (${newTex.map((t) => t.name).join(", ")}) ${newTex.every((t) => (texChoice[t.id] ?? "add") === "add") ? "are added to your textures" : ""}.
                 <button class="linkish" onClick=${() => setTexChoice({ ...texChoice, ...Object.fromEntries(newTex.map((t) => [t.id, (texChoice[t.id] ?? "add") === "add" ? "skip" : "add"])) })}>${newTex.every((t) => (texChoice[t.id] ?? "add") === "add") ? "Don't add them" : "Add them"}</button></li>`}
         </ul>

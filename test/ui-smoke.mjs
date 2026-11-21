@@ -409,6 +409,18 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
                 check(tabs().length === 2 && tabs().find((b) => b.classList.contains("on"))?.textContent.trim() === "Ledger", "closing the entry tab goes back to the Ledger tab");
                 doc.querySelector(".drawer-backdrop")?.click(); await wait(300);
             }
+            // from the chapter view in the drawer, a new ledger entry opens in the drawer and goes back to the chapter
+            {
+                w.location.hash = "#/c/Items"; await wait(1200);
+                const a = doc.createElement("a"); a.href = `#/chapter/${enc(statNovel.folder)}/24`; a.textContent = "ch";
+                doc.querySelector("[data-drawer]").append(a); a.click(); await wait(1500);
+                [...doc.querySelectorAll(".drawer-body button")].find((b) => b.textContent.trim() === "New entry")?.click(); await wait(1500);
+                check(w.location.hash === "#/c/Items" && !!doc.querySelector(".drawer-wrap.open .drawer-body .entry-embedded") && /New entry · ch 24/.test(doc.querySelector(".drawer-recent button.on")?.textContent ?? ""),
+                    "New entry in the drawer's chapter view opens the entry editor in the drawer", `${w.location.hash} ${doc.querySelector(".drawer-recent button.on")?.textContent}`);
+                [...doc.querySelectorAll(".drawer-body .entry-embedded button")].find((b) => b.textContent.trim() === "Cancel")?.click(); await wait(1200);
+                check(/Chapter 24/.test(doc.querySelector(".drawer-recent button.on")?.textContent ?? ""), "cancelling goes back to the chapter in the drawer");
+                doc.querySelector(".drawer-backdrop")?.click(); await wait(300);
+            }
             const ledTxt = fs.readFileSync(`${COPY}/${statNovel.folder}/Ledgers/${hero} - Stats.md`, "utf8");
             check(/\[set:: stage\] \[value:: WB Qi Condensation\] \[link:: off\]/.test(ledTxt), "unlinking is a ledger line", ledTxt.slice(-500));
             // the ledger filter hides entries (and stats rows) that don't match
@@ -1378,7 +1390,7 @@ if (process.env.SETTINGS_DIR) {
         const idle = readScreen(mk(53, [[10, "❯ hello there", true], [11, "  and more", true], [12, "  Claude's answer"], [49, rule], [50, '❯ Try "create a util logging.py that..."'], [51, rule], [52, "  ⏵⏵ auto mode on"]]));
         check(idle.cover === 49 && !idle.prompt && idle.bubbles.length === 1 && idle.bubbles[0].n === 2, "Claude Code's own input area is covered and your messages become bubbles", JSON.stringify(idle));
     }
-    // Claude Code: the terminal (here `cat`), its workspace, and World Builder's MCP server
+    // Claude Code: the terminal (here `cat`), its workspace, and Novel Craft's MCP server
     if (process.env.SETTINGS_DIR) {
         const ts = await get("/api/terminal/status");
         const started = await (await send("POST", "/api/terminal/start", { cols: 90, rows: 20 })).json();
@@ -1403,7 +1415,7 @@ if (process.env.SETTINGS_DIR) {
         const token = mcpCfg.mcpServers["world-builder"].headers.Authorization.slice(7);
         check(ts.workspace === ws && cfg.permissions.allow.includes("mcp__world-builder") && cfg.permissions.deny.includes(`Read(/${COPY}/**)`) && cfg.permissions.deny.includes(`Edit(/${COPY}/**)`) && cfg.permissions.deny.includes("Bash")
             && /127\.0\.0\.1:\d+\/mcp$/.test(mcpCfg.mcpServers["world-builder"].url) && (fs.statSync(`${ws}/mcp.json`).mode & 0o777) === 0o600 && /Never read, search or edit the vault's files/.test(fs.readFileSync(`${ws}/CLAUDE.md`, "utf8")),
-            "the workspace allows World Builder's tools and refuses the vault's files and shell commands", JSON.stringify(cfg));
+            "the workspace allows Novel Craft's tools and refuses the vault's files and shell commands", JSON.stringify(cfg));
         await send("POST", "/api/terminal/stop");
         check(!(await get("/api/terminal/status")).running, "the session can be ended");
         // the MCP server
@@ -1429,6 +1441,35 @@ if (process.env.SETTINGS_DIR) {
         await wait(300);
         await send("POST", "/api/ai/proposal/reject", { id: pid2, which: "all" });
         check(/1\. rejected[\s\S]*decided on every change/.test((await waiting).content[0].text) && !fs.readFileSync(`${COPY}/${item2.path}`, "utf8").includes("WB-MCP"), "proposal_status waits for the decision and reports it");
+        // ledger entries over MCP: read them in full, change one in part, delete one
+        {
+            let led = null, nv = null;
+            for (const n of index.novels) { const x = await get(`/api/novel?folder=${enc(n.folder)}`); const l = x.ledgers.find((y) => y.type === "Stats" && y.entries >= 2); if (l) { led = l; nv = x; break; } }
+            check(!!led, "the vault copy has a Stats ledger with entries for the ledger tools");
+            if (led) {
+                const owner = led.owner.replace(/^\[\[|\]\]$/g, "");
+                const read = await call("tools/call", { name: "ledger_entries", arguments: { novel: nv.folder, owner, ledger: "Stats" } });
+                const keys = [...read.content[0].text.matchAll(/^### (\d+(?:\.\d+)?\.\d+) /gm)].map((m) => m[1]);
+                check(!read.isError && keys.length >= 2 && /^- \{"set":/m.test(read.content[0].text), "ledger_entries gives an owner's entries with their lines", read.content[0].text.slice(0, 300));
+                const file = `${COPY}/${led.path}`;
+                const before = fs.readFileSync(file, "utf8");
+                const k = keys.at(-1);
+                const linesOf = (txt, key) => txt.split(new RegExp(`^## ${key.replace(".", "\\.")} `, "m"))[1]?.split(/^#{1,2} /m)[0].split("\n").filter((x) => x.startsWith("- ")).join("\n");
+                const ed = await call("tools/call", { name: "propose_changes", arguments: { title: "Edit", changes: [{ action: "ledger_entry", novel: nv.folder, owner, ledger: "Stats", entry: k, title: "WB renamed entry" }] } });
+                const eid = /Proposal id: (\w+)/.exec(ed.content[0].text)?.[1];
+                await send("POST", "/api/ai/proposal/apply", { id: eid, which: "all" });
+                const after = fs.readFileSync(file, "utf8");
+                check(!!eid && new RegExp(`^## ${k.replace(".", "\\.")} WB renamed entry$`, "m").test(after) && linesOf(after, k) === linesOf(before, k), "changing an entry's title over MCP keeps its lines", ed.content[0].text.slice(0, 200));
+                const del = await call("tools/call", { name: "propose_changes", arguments: { title: "Delete", changes: [{ action: "delete_ledger_entry", novel: nv.folder, owner, ledger: "Stats", entry: k }] } });
+                const did = /Proposal id: (\w+)/.exec(del.content[0].text)?.[1];
+                const pend = did && await get(`/api/ai/proposal?id=${did}`);
+                check(pend?.changes[0].action === "delete_ledger_entry" && /callout/.test(pend.changes[0].calloutHtml) && fs.readFileSync(file, "utf8").includes("WB renamed entry"), "a delete is proposed with the entry's callout, and nothing is removed yet");
+                await send("POST", "/api/ai/proposal/apply", { id: did, which: "all" });
+                check(!fs.readFileSync(file, "utf8").includes("WB renamed entry"), "applying it deletes the entry");
+                const bad = await call("tools/call", { name: "propose_changes", arguments: { title: "Bad", changes: [{ action: "delete_ledger_entry", novel: nv.folder, owner, ledger: "Stats", entry: "999.9" }] } });
+                check(bad.isError && /has no Stats entry 999\.9/.test(bad.content[0].text), "deleting an entry that isn't there is refused with the entries there are");
+            }
+        }
     }
     // the API key: checked, kept owner-only in secrets.json, never sent back whole
     if (process.env.SETTINGS_DIR) {

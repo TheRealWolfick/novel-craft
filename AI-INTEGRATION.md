@@ -1,20 +1,20 @@
 # The AI integration and Anthropic's terms
 
-Why World Builder's Claude features are built the way they are, what Anthropic's terms say about it, and the rules any change must keep. Read this before changing anything in `lib/ai*.js`, `lib/mcp.js`, `lib/claude-code.js`, `public/ai.js` or `public/terminal.js`.
+Why Novel Craft's Claude features are built the way they are, what Anthropic's terms say about it, and the rules any change must keep. Read this before changing anything in `lib/ai*.js`, `lib/mcp.js`, `lib/claude-code.js`, `public/ai.js` or `public/terminal.js`.
 
 This is the project's own reading of public documents, written down so they don't have to be re-read every time. It is not legal advice. Anthropic can change its terms; the "Checked" date below says when this was last compared with them.
 
 **Checked:** 2026-11-16, against the four pages under [Sources](#sources).
 
-## The three ways World Builder talks to Claude
+## The three ways Novel Craft talks to Claude
 
 | Mode (Settings → AI assistant) | Who signs in | Billed to | How the app reaches Claude |
 | --- | --- | --- | --- |
-| **Claude Code (your subscription)**, the default | The user, inside Claude Code itself | The user's own Claude plan | Starts the user's own, unmodified `claude` in a terminal in the AI tab; World Builder is an MCP server it connects to |
+| **Claude Code (your subscription)**, the default | The user, inside Claude Code itself | The user's own Claude plan | Starts the user's own, unmodified `claude` in a terminal in the AI tab; Novel Craft is an MCP server it connects to |
 | **Sign in with Anthropic (API)** | The user, through Anthropic's `ant` CLI (`ant auth login`) | The user's Anthropic API account | The official Anthropic SDK with that sign-in profile |
 | **API key** | The user pastes their own API key | The user's Anthropic API account | The official Anthropic SDK |
 
-Nobody's requests ever go through anyone else's account: every user of World Builder uses their own plan or API account.
+Nobody's requests ever go through anyone else's account: every user of Novel Craft uses their own plan or API account.
 
 ## What the terms say
 
@@ -39,11 +39,11 @@ Nobody's requests ever go through anyone else's account: every user of World Bui
 
 ## How the Claude Code mode stays inside them
 
-- **Unmodified binary, the user's own sign-in.** World Builder finds the `claude` the user installed and runs it as it is, in a terminal. Claude Code signs in by itself, with the user's own plan; World Builder never sees, reads, stores or passes on that sign-in (no credentials file is read, no token is handled). This is the case the legal page allows explicitly.
+- **Unmodified binary, the user's own sign-in.** Novel Craft finds the `claude` the user installed and runs it as it is, in a terminal. Claude Code signs in by itself, with the user's own plan; Novel Craft never sees, reads, stores or passes on that sign-in (no credentials file is read, no token is handled). This is the case the legal page allows explicitly.
 - **The user drives it by hand.** It is an interactive terminal session: every message is typed or clicked by the user. The app doesn't script conversations, run Claude Code in the background, or use headless mode (`claude -p`), which is the Agent SDK path the terms point to API keys for. The text box, clickable links, bubbles and command buttons only make typing and reading easier; each one sends exactly what the user chose to send.
-- **No intermediating.** World Builder doesn't proxy Claude Code's traffic, offer a Claude.ai login, pool accounts, charge for use, or show plan usage by reading the sign-in: the Usage button types `/usage` into Claude Code, which answers itself.
-- **World Builder is a tool provider, not a Claude client.** In this mode it is an ordinary MCP server (a standard Claude Code feature) that Claude Code connects to with a per-install token. Claude Code calls World Builder, not the other way round.
-- **Each user, their own account.** World Builder is distributed as software people run on their own computers; it doesn't host Claude for anyone.
+- **No intermediating.** Novel Craft doesn't proxy Claude Code's traffic, offer a Claude.ai login, pool accounts, charge for use, or show plan usage by reading the sign-in: the Usage button types `/usage` into Claude Code, which answers itself.
+- **Novel Craft is a tool provider, not a Claude client.** In this mode it is an ordinary MCP server (a standard Claude Code feature) that Claude Code connects to with a per-install token. Claude Code calls Novel Craft, not the other way round.
+- **Each user, their own account.** Novel Craft is distributed as software people run on their own computers; it doesn't host Claude for anyone.
 
 The API modes are the plain case: the official SDK with the user's own API key or `ant` sign-in, billed to their API account.
 
@@ -52,15 +52,15 @@ The API modes are the plain case: the official SDK with the user's own API key o
 Keep all of these unless Anthropic's terms change (check the sources again) or Anthropic approves something in writing:
 
 1. **Never read, store, copy or send Claude.ai / subscription credentials or session tokens** (`~/.claude/.credentials.json`, the keychain entry, OAuth tokens). This includes reading them to show usage, to call an Anthropic endpoint directly, or to "help" sign-in.
-2. **Never offer a Claude.ai login in World Builder**, and never sign in to Claude Code on the user's behalf.
+2. **Never offer a Claude.ai login in Novel Craft**, and never sign in to Claude Code on the user's behalf.
 3. **Never modify, patch, wrap or bundle the Claude Code binary.** Start the user's installed `claude` as it is; command-line flags documented by Claude Code (`--settings`, `--mcp-config`, `--strict-mcp-config`, `--continue`, `--resume`) are fine.
 4. **Subscription use stays interactive and user-driven.** No `claude -p`, `--print`, `--output-format stream-json`, Agent SDK, or other programmatic driving with the subscription login: not for background summaries, the planned summary index, batch jobs, or a chat view that hides the terminal. (A chat-style view over headless mode was considered and turned down for this reason, 2026-11-16.) Features like that use the API modes, or a local model.
 5. **Typing for the user only on their action.** Buttons may type a command or message into the terminal when the user clicks them; nothing may send input to Claude Code by itself (on a timer, on vault changes, in a loop).
 6. **No proxying or sharing.** Never route one person's requests through another person's plan or API account, never run Claude Code for someone else (a server, a shared install), never resell or meter Claude use.
-7. **Don't use Anthropic's names or logos as the product's name** (the Claude Code and Agent SDK pages forbid naming a product "Claude Code" or similar). "Works with Claude Code" in descriptions is fine; the app is World Builder.
+7. **Don't use Anthropic's names or logos as the product's name** (the Claude Code and Agent SDK pages forbid naming a product "Claude Code" or similar). "Works with Claude Code" in descriptions is fine; the app is Novel Craft.
 8. **API keys stay the user's own** and stay on their computer (`secrets.json`, owner-only), never sent anywhere but Anthropic's API.
 
-The workspace's own guard rails (connected to World Builder only, the vault's files and shell commands refused, every change through the review panel) are about the user's manuscript, not the terms, but they are part of the same design: see the AI assistant section of `CLAUDE.md`.
+The workspace's own guard rails (connected to Novel Craft only, the vault's files and shell commands refused, every change through the review panel) are about the user's manuscript, not the terms, but they are part of the same design: see the AI assistant section of `CLAUDE.md`.
 
 ## If something here needs to change
 

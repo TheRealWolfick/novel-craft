@@ -1,4 +1,4 @@
-// World Builder front end: Preact + htm, no build step.
+// Novel Craft front end: Preact + htm, no build step.
 import { h, render } from "preact";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "preact/hooks";
 import htm from "htm";
@@ -41,7 +41,7 @@ events.onmessage = (e) => {
     vaultVersion = JSON.parse(e.data).version;
     versionListeners.forEach((f) => f(vaultVersion));
 };
-// Claude Code (through World Builder's MCP server) proposed changes: open them for review in the drawer
+// Claude Code (through Novel Craft's MCP server) proposed changes: open them for review in the drawer
 events.addEventListener?.("proposal", (e) => {
     const p = JSON.parse(e.data);
     openInDrawer(`#/proposal/${p.id}`);
@@ -390,9 +390,12 @@ function browseItems({ label, collections = ["Items", "Materials", "Recipes"], p
 }
 
 const parseDrawerHref = (href) => href.replace(/^#\//, "").split("/").map(decodeURIComponent);
+/** "#/entry/<folder>?owner=…&chapter=…" -> {folder, params} (the query is split off before decoding, so values keep their & and =) */
+const entryParams = (href) => { const [f, q = ""] = href.replace(/^#\/entry\//, "").split("?"); return { folder: decodeURIComponent(f), params: new URLSearchParams(q) }; };
 function drawerLabel(href, index) {
     const [name, ...args] = parseDrawerHref(href);
     if (name === "chapter") return `Chapter ${args[1]}`;
+    if (name === "entry") { const p = entryParams(href).params; return p.get("key") ? `Edit entry ${p.get("key")}` : `New entry${p.get("chapter") ? ` · ch ${p.get("chapter")}` : ""}`; }
     if (name === "newchar") return "New character";
     if (name === "proposal") return "Review changes";
     if (name === "docs") return `Docs: ${(args[0] ?? "").split("?")[0].replace(/-/g, " ")}`;
@@ -461,6 +464,10 @@ function DrawerViewer({ index, d }) {
                 <span class="row">${pick.collections.map((c) => html`<button class=${`small ${name === "c" && args.join("/") === c ? "on" : ""}`} onClick=${() => openInDrawer(`#/c/${encodeURIComponent(c)}`)}>${collectionLabel(c)}</button>`)}
                     <button class="small" onClick=${() => setItemPick(null)}>Cancel</button></span></div>`}
             ${name === "chapter" ? html`<${ChapterView} folder=${args[0]} n=${args[1]} scope="drawer" />`
+            // a ledger entry written from the chapter view in the drawer; saving or cancelling goes back to that chapter
+            : name === "entry" ? (() => { const { folder, params } = entryParams(href); const ch = params.get("chapter");
+                return html`<${EntryEditor} index=${index} folder=${folder} params=${params} embedded=${true}
+                    onDone=${() => (ch ? openInDrawer(chapterHref(folder, ch)) : collapseDrawer())} />`; })()
             : name === "c" ? html`<${CollectionView} index=${index} collection=${args.join("/")} novelFilter="" scope="drawer" />`
             : name === "new" ? html`<${NoteForm} index=${index} collection=${args.join("/")} scope="drawer" />`
             : name === "newchar" ? html`<${NoteForm} index=${index} collection="characters" novel=${args[0]} scope="drawer" />`
@@ -944,14 +951,14 @@ function Sidebar({ index, novelFolder }) {
     const [theme, setThemeState] = useState(store.get("theme", "system"));
     const [newTax, setNewTax] = useState(false);
     const setTheme = (m) => { setThemeState(m); store.set("theme", m); applyTheme(m); };
-    if (!index) return html`<nav class="sidebar"><div class="brand">World Builder</div>
+    if (!index) return html`<nav class="sidebar"><div class="brand">Novel Craft</div>
         <div class="side-section"><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a><a class=${route0() === "docs" ? "active" : ""} href="#/docs"><span>Docs</span></a></div></nav>`;
     const cols = Object.keys(index.schema.collections);
     const main = cols.filter((c) => !c.startsWith("Taxonomy/"));
     const tax = cols.filter((c) => c.startsWith("Taxonomy/"));
     const section = (id, title, items) => html`<${SideSection} id=${id} title=${title} closed=${closed} toggle=${toggle}>${items}<//>`;
     return html`<nav class="sidebar">
-        <div class="brand"><a href="#/" style="padding:0">World Builder</a></div>
+        <div class="brand"><a href="#/" style="padding:0">Novel Craft</a></div>
         ${section("novels", "Novels", index.novels.map((n) => html`<a class=${`novel-link ${n.folder === novelFolder ? "active" : ""}`} href=${`#/novel/${encodeURIComponent(n.folder)}`}>
             <span class="novel-dot" style=${`--dot:${novelColour(index, n.folder)}`} aria-hidden="true" /><span class="name">${n.name}</span><span class="count">${n.number}</span></a>`))}
         <a class=${`side-pill ${route0() === "world" || route0() === "map" ? "active" : ""}`} href="#/world">World builder<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18" /></svg></a>
@@ -1080,7 +1087,7 @@ function Home({ index }) {
     if (!index) return html`<${Loading} />`;
     const cols = Object.keys(index.schema.collections).filter((c) => !c.startsWith("Taxonomy/"));
     return html`<div>
-        <h1>World Builder</h1>
+        <h1>Novel Craft</h1>
         <p class="muted">${index.notes.length} data store notes across ${cols.length} collections.</p>
         <div class="cards">
             ${cols.map((c) => html`<a class="card" href=${`#/c/${encodeURIComponent(c)}`}><div class="body"><h3>${c}</h3><p>${index.counts[c] ?? 0} entries</p></div></a>`)}
@@ -3080,12 +3087,13 @@ function ChapterView({ folder, n, scope = "page" }) {
         <div class="spread" style="margin-top:18px">
             <h2 style="margin:0">Ledger entries <span class="muted" style="font-size:13px">${data.entries.length}</span></h2>
             <div class="row">
-                <button class="primary" onClick=${() => go(entryHref(folder, { chapter: num }))}>New entry</button>
+                <button class="primary" onClick=${() => (scope === "drawer" ? openInDrawer : go)(entryHref(folder, { chapter: num }))}>New entry</button>
                 <button disabled=${!entries.length} onClick=${() => copyText(entries.map((e) => e.callout).join("\n\n"), `Copied ${entries.length} callouts`)}>⧉ Copy all</button>
             </div>
         </div>
         ${types.length > 1 && html`<div class="row" style="margin:10px 0">${[["", "All"], ...types.map((t) => [t, t])].map(([t, label]) => html`<a class=${`chip ${type === t ? "on" : ""}`} href="javascript:" onClick=${() => setType(t)}>${label}</a>`)}</div>`}
-        <div style="margin-top:10px">${entries.length ? entries.map((e) => html`<${EntryCard} e=${e} folder=${folder} behaviour=${beh(e.type)} showOwner=${true} />`) : html`<p class="muted">No entries in this chapter.</p>`}</div>
+        <div style="margin-top:10px">${entries.length ? entries.map((e) => html`<${EntryCard} e=${e} folder=${folder} behaviour=${beh(e.type)} showOwner=${true}
+            onEdit=${scope === "drawer" ? (p) => openInDrawer(entryHref(folder, { ...p, chapter: num })) : null} />`) : html`<p class="muted">No entries in this chapter.</p>`}</div>
     </div>`;
 }
 
@@ -3402,6 +3410,10 @@ function EntryEditor({ index, folder, params, embedded = false, onDone = null })
         }
     }, [novel, ownerData]);
 
+    // in the drawer, an entry with something in it counts as unsaved (switching drawer pages asks first)
+    const started = !!entry && (!!entry.title?.trim() || lines.some((l) => l.item || l.set || l.with) || !!entry.body?.trim());
+    useEffect(() => { if (embedded) markDirty("drawer", "ledger-entry", started); }, [started]);
+    useEffect(() => () => { if (embedded) markDirty("drawer", "ledger-entry", false); }, []);
     const type = novel?.ledgerTypes[typeName];
     const payload = useMemo(() => entry && ({
         novel: folder, owner, type: typeName, replaceKey: editKey ?? undefined, baseMtime: baseMtime ?? undefined,
@@ -3423,6 +3435,7 @@ function EntryEditor({ index, folder, params, embedded = false, onDone = null })
             const r = await api.send("POST", "/api/ledger/entry", payload);
             if (copy) await copyText(r.linkedCallout || r.callout, "Saved and copied callout");
             else toast("Saved");
+            if (embedded) markDirty("drawer", "ledger-entry", false);
             if (onDone) onDone(); else go(ownerHref(folder, owner) + `?type=${encodeURIComponent(typeName)}`);
         } catch (e) { setErr(e.message); }
         setBusy(false);
@@ -3465,7 +3478,7 @@ function EntryEditor({ index, folder, params, embedded = false, onDone = null })
                 <div class="row">
                     <button class="primary" disabled=${busy || !owner} onClick=${() => save(true)}>Save & copy callout</button>
                     <button disabled=${busy || !owner} onClick=${() => save(false)}>Save</button>
-                    <button onClick=${() => (onDone ? onDone() : history.back())}>Cancel</button>
+                    <button onClick=${() => { if (embedded) markDirty("drawer", "ledger-entry", false); onDone ? onDone() : history.back(); }}>Cancel</button>
                 </div>
             </div>
             <div>
@@ -3690,7 +3703,7 @@ function SettingsView({ settings }) {
             ${settings.vault
                 ? html`<p><code>${settings.vault}</code></p>
                     <p class="muted">${settings.notes} notes · ${SOURCES[settings.source] ?? settings.source}${settings.looksLikeVault ? "" : " · no .obsidian folder here, so Obsidian hasn't opened it as a vault"}</p>
-                    ${!settings.hasSchema && html`<p class="muted">This vault has no <code>90. Templater/Data Store Schema.md</code> yet. <a href="#/import">Import a dataset</a> (for example the World Builder starter data) to add the schema, ledger types and a basic taxonomy.</p>`}
+                    ${!settings.hasSchema && html`<p class="muted">This vault has no <code>90. Templater/Data Store Schema.md</code> yet. <a href="#/import">Import a dataset</a> (for example the Novel Craft starter data) to add the schema, ledger types and a basic taxonomy.</p>`}
                     ${settings.overridden && html`<p class="muted">The app was started with <code>--vault</code>, which wins over a folder chosen here when it restarts.</p>`}`
                 : html`<p>${settings.problem ?? "No vault folder chosen yet."} Choose your Obsidian vault below.</p>`}
             <div class="row settings-path">

@@ -1,4 +1,4 @@
-// World Builder as a desktop app: runs the server in this process on a free local port and shows it in a window
+// Novel Craft as a desktop app: runs the server in this process on a free local port and shows it in a window
 // without browser controls. Start with `npm run app` (system Electron) or the installed `world-builder` command.
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, shell } from "electron";
 import fs from "node:fs";
@@ -26,7 +26,7 @@ function createWindow(url) {
     const s = readState();
     win = new BrowserWindow({
         x: s.x, y: s.y, width: s.width ?? 1600, height: s.height ?? 1000, minWidth: 700, minHeight: 500,
-        title: "World Builder", backgroundColor: "#17161a", autoHideMenuBar: true, show: false,
+        title: "Novel Craft", backgroundColor: "#17161a", autoHideMenuBar: true, show: false,
         icon: path.join(HERE, "icon.svg"),
         // hidden (screenshots): rendered off screen, so frames are still painted
         webPreferences: { preload: path.join(HERE, "preload.cjs"), contextIsolation: true, sandbox: true, spellcheck: true, ...(process.env.WB_HIDDEN ? { offscreen: true } : {}) },
@@ -89,7 +89,7 @@ ipcMain.on("wb-prompt", (event, message, value) => {
     const parent = BrowserWindow.fromWebContents(event.sender);
     const box = new BrowserWindow({
         parent, modal: true, width: 460, height: 190, resizable: false, minimizable: false, maximizable: false,
-        title: "World Builder", autoHideMenuBar: true, show: false, backgroundColor: "#1f1e23",
+        title: "Novel Craft", autoHideMenuBar: true, show: false, backgroundColor: "#1f1e23",
         webPreferences: { contextIsolation: true, sandbox: true, javascript: true },
     });
     let answered = false;
@@ -102,7 +102,7 @@ ipcMain.on("wb-prompt", (event, message, value) => {
 });
 
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-const promptPage = (message, value) => `<!doctype html><html><head><meta charset="utf-8"><title>World Builder</title><style>
+const promptPage = (message, value) => `<!doctype html><html><head><meta charset="utf-8"><title>Novel Craft</title><style>
     :root { color-scheme: light dark; --bg: #ffffff; --text: #23211d; --line: #e2dfd8; --accent: #6a4fc4; }
     @media (prefers-color-scheme: dark) { :root { --bg: #1f1e23; --text: #e8e6e3; --line: #34323a; --accent: #b195f5; } }
     body { margin: 0; padding: 18px 20px; background: var(--bg); color: var(--text); font: 14px system-ui, sans-serif; }
@@ -138,7 +138,7 @@ app.whenReady().then(async () => {
         origin = `http://127.0.0.1:${port}`;
         createWindow(`${origin}/`);
     } catch (e) {
-        dialog.showErrorBox("World Builder could not start", String(e?.stack ?? e));
+        dialog.showErrorBox("Novel Craft could not start", String(e?.stack ?? e));
         app.quit();
     }
 });

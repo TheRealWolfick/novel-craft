@@ -21,7 +21,7 @@ function loadXterm() {
     return xtermLoaded;
 }
 // Claude Code's own commands, one click away: it answers them in the terminal (your plan's usage comes from
-// Claude Code itself; World Builder never reads your sign-in)
+// Claude Code itself; Novel Craft never reads your sign-in)
 const COMMANDS = [["/usage", "Usage", "Your plan's usage limits and how much is left (/usage)"], ["/context", "Context", "How full this conversation's context is (/context)"],
     ["/compact", "Compact", "Summarise the conversation so far to free up context (/compact)"], ["/model", "Model", "Choose the model (/model)"], ["/effort", "Effort", "How hard it thinks (/effort)"]];
 /**
@@ -450,7 +450,7 @@ export function ClaudeTerminal({ active }) {
         requestAnimationFrame(() => { try { fit.current.fit(); } catch { /* hidden */ } (box.current ?? term.current)?.focus(); });
     }, [active, ready, running]);
 
-    // while it runs, the server knows what World Builder shows (Claude Code's current_view tool)
+    // while it runs, the server knows what Novel Craft shows (Claude Code's current_view tool)
     useEffect(() => {
         if (!running) return;
         let last = "";
@@ -552,7 +552,7 @@ export function ClaudeTerminal({ active }) {
             <p>${exit ? "Claude Code has ended." : "Start Claude Code to talk about your novels and worlds."}</p>
             <div class="row">${status.sessions?.length ? html`<button class="primary" onClick=${() => start("last")}>Continue “${status.sessions[0].title}”</button><button onClick=${() => start(false)}>New conversation</button><button onClick=${openHistory}>Earlier conversations…</button>`
                 : html`<button class="primary" onClick=${() => start(false)}>Start Claude Code</button>`}</div>
-            <p class="muted small">It runs your own <code>claude</code>, signed in with your subscription, connected to World Builder's tools. It reads only your novels and the data store, can't touch the vault's files or run commands, and every change it makes opens here for your review first. The first time, it asks whether to trust its workspace folder. Type <code>/world-builder</code> for ready-made prompts. Copy and paste: Ctrl+Shift+C / Ctrl+Shift+V.</p>
+            <p class="muted small">It runs your own <code>claude</code>, signed in with your subscription, connected to Novel Craft's tools. It reads only your novels and the data store, can't touch the vault's files or run commands, and every change it makes opens here for your review first. The first time, it asks whether to trust its workspace folder. Type <code>/world-builder</code> for ready-made prompts. Copy and paste: Ctrl+Shift+C / Ctrl+Shift+V.</p>
             ${error && html`<p class="error small">${error}</p>`}
         </div>`}
     </div>`;

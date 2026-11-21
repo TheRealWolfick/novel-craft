@@ -1,6 +1,6 @@
 // Scaffold a novel and/or a world in a vault: the novel's folder, sub folders, config.md and Taxonomy/Novels note, and a
 // world note. The vault needs a data store schema first: import a dataset (Tools → Import data in the app, e.g. the
-// World Builder starter data). Never overwrites: anything that already exists is left alone.
+// Novel Craft starter data). Never overwrites: anything that already exists is left alone.
 //
 //   node scripts/scaffold.js <vault folder> [--novel "Name"] [--number 3] [--world "Name"] [--dry-run]
 import fs from "node:fs";
@@ -65,7 +65,7 @@ if (novelName) {
     if (!fs.existsSync(path.join(ROOT, folder, "config.md"))) {
         say(`add ${folder}/config.md`);
         if (!DRY) await createNote(vault, `${folder}/config.md`, { type: "config", blueprints: false, "contains-system": false },
-            "Settings for this novel (World Builder and Templater read the frontmatter).\n");
+            "Settings for this novel (Novel Craft and Templater read the frontmatter).\n");
     }
     await addNote("Taxonomy/Novels", novelName, { type: "novel", facet: "Novels", folder });
 }

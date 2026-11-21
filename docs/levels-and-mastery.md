@@ -5,7 +5,7 @@ kind: guide
 order: 5
 blurb: 'Cultivation realms, ranks or weapon mastery: levels with numbers, worked out from a stat and changed through the ledger.'
 ---
-A level system is a ladder of named steps that a character climbs: cultivation realms and their stages, adventurer ranks, mastery of a sword art. In World Builder it has three parts:
+A level system is a ladder of named steps that a character climbs: cultivation realms and their stages, adventurer ranks, mastery of a sword art. In Novel Craft it has three parts:
 
 1. **The levels** are values of a [taxonomy](docs:collections#taxonomies), each with a number: the lowest value of a stat that reaches it. They can belong to a power system.
 2. **A stat template** has a number field (qi, experience, mastery points) and a choice field that **follows** it: the level is worked out from the number.

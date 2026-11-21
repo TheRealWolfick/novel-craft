@@ -1,8 +1,8 @@
-# World Builder
+# Novel Craft
 
 **A companion app for novelists who write in [Obsidian](https://obsidian.md).** Write chapters beside their plan, keep a shared encyclopedia of your worlds (items, creatures, factions, places…), track what every character carries and knows chapter by chapter, and draw the maps, all in the same vault you already use.
 
-Everything stays in your vault as ordinary markdown notes. There is no database and no account: World Builder reads your notes, notices when you change them in Obsidian, and writes back in the same shape Obsidian, Dataview, Bases and Templater expect.
+Everything stays in your vault as ordinary markdown notes. There is no database and no account: Novel Craft reads your notes, notices when you change them in Obsidian, and writes back in the same shape Obsidian, Dataview, Bases and Templater expect.
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/writer.dark.png"><img alt="The chapter writer beside the chapter's plan" src="docs/img/writer.png"></picture>
 
@@ -73,7 +73,7 @@ Design how each kind of callout looks, pick the app's colour, fonts and text siz
 
 ## Install
 
-World Builder runs on your own computer; nothing is sent anywhere. You need **[Node.js](https://nodejs.org) 20 or newer** and **[git](https://git-scm.com)**. It is developed and tested on Linux; macOS and Windows should work with the browser or `npx electron` options below.
+Novel Craft runs on your own computer; nothing is sent anywhere. You need **[Node.js](https://nodejs.org) 20 or newer** and **[git](https://git-scm.com)**. It is developed and tested on Linux; macOS and Windows should work with the browser or `npx electron` options below.
 
 ### 1. Get it
 
@@ -87,7 +87,7 @@ npm install
 
 Pick one:
 
-- **As a desktop app (Arch Linux).** Builds a local package that uses your system's Electron and adds World Builder to your app launcher:
+- **As a desktop app (Arch Linux).** Builds a local package that uses your system's Electron and adds Novel Craft to your app launcher:
   ```sh
   sudo pacman -S electron43        # once, if you don't have it
   sh packaging/arch/build.sh       # builds and installs; run it again after updating
@@ -107,7 +107,7 @@ Pick one:
 ### 3. First steps
 
 1. **Choose your vault.** On first start the app shows its Settings page: type the path of your Obsidian vault or browse to it (folders Obsidian has opened are marked "vault").
-2. **Import the starter data.** Open **Tools → Import data** and press **Use the World Builder starter data**, then **Check** and **Import**. This adds the data store schema, ledger types and a basic taxonomy ([world-builder-data](https://github.com/TheRealWolfick/world-builder-data)). Nothing you already have is overwritten without asking.
+2. **Import the starter data.** Open **Tools → Import data** and press **Use the Novel Craft starter data**, then **Check** and **Import**. This adds the data store schema, ledger types and a basic taxonomy ([world-builder-data](https://github.com/TheRealWolfick/world-builder-data)). Nothing you already have is overwritten without asking.
 3. **Add a novel** (a folder named like `1. My Novel` with a `config.md`), with Templater's novel script if you use it, or:
    ```sh
    npm run scaffold -- ~/path/to/vault --novel "My Novel" --world "My World"
@@ -132,7 +132,7 @@ Then restart the app (or rerun `sh packaging/arch/build.sh` for the Arch package
 
 ## How it fits with Obsidian
 
-Keep using Obsidian for writing notes freely; open World Builder when you want structure: a chapter beside its plan, a character's inventory at chapter 12, a table of every rare item, a map. Both edit the same files, and each notices the other's changes straight away. If you use Obsidian Bases, Dataview or Templater, the app keeps to their conventions (flat collection folders, links for categories, frontmatter fields), so your bases and scripts keep working.
+Keep using Obsidian for writing notes freely; open Novel Craft when you want structure: a chapter beside its plan, a character's inventory at chapter 12, a table of every rare item, a map. Both edit the same files, and each notices the other's changes straight away. If you use Obsidian Bases, Dataview or Templater, the app keeps to their conventions (flat collection folders, links for categories, frontmatter fields), so your bases and scripts keep working.
 
 ## Vault structure
 
@@ -195,7 +195,7 @@ The code has no build step: `server.js` (node:http) with modules in `lib/`, and 
 
 The code is released under the [MIT License](LICENSE). The bundled map stamps keep their own licences, listed below.
 
-The AI assistant uses your own Claude account: your own Claude Code with your own plan, or your own Anthropic API key. World Builder never handles your Claude sign-in and doesn't route anyone's use through another account. [`AI-INTEGRATION.md`](AI-INTEGRATION.md) explains how this fits Anthropic's terms, and the rules contributors keep.
+The AI assistant uses your own Claude account: your own Claude Code with your own plan, or your own Anthropic API key. Novel Craft never handles your Claude sign-in and doesn't route anyone's use through another account. [`AI-INTEGRATION.md`](AI-INTEGRATION.md) explains how this fits Anthropic's terms, and the rules contributors keep.
 
 ## Credits
 

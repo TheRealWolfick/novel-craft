@@ -1,11 +1,11 @@
-# Local Arch package of World Builder, built from this checkout (not from a download):
+# Local Arch package of Novel Craft, built from this checkout (not from a download):
 #   sh packaging/arch/build.sh        (or: cd packaging/arch && makepkg -si)
 # Installs the app to /usr/lib/world-builder and runs it with the system's Electron.
 _electron=electron43
 pkgname=world-builder
 pkgver=1.0.0.r18.f792285
 pkgrel=1
-pkgdesc="World Builder: worldbuilding data store, chapter writer, ledgers, plans and maps for an Obsidian vault"
+pkgdesc="Novel Craft: worldbuilding data store, chapter writer, ledgers, plans and maps for an Obsidian vault"
 arch=('any')
 license=('MIT')
 depends=("$_electron" util-linux)   # util-linux: `script`, the terminal for Claude Code
@@ -41,7 +41,7 @@ SH
     install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/$pkgname.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=World Builder
+Name=Novel Craft
 Comment=Worldbuilding, chapter writing and ledgers for your Obsidian vault
 Exec=$pkgname %U
 Icon=$pkgname

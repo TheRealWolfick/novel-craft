@@ -3,9 +3,9 @@ title: Installing and the desktop app
 group: Getting started
 kind: guide
 order: 1
-blurb: Run World Builder as a desktop app, in your browser, or as a background service.
+blurb: Run Novel Craft as a desktop app, in your browser, or as a background service.
 ---
-World Builder runs on your own computer and works on the notes in your Obsidian vault. Nothing is sent anywhere, except when you ask it to download a dataset from GitHub.
+Novel Craft runs on your own computer and works on the notes in your Obsidian vault. Nothing is sent anywhere, except when you ask it to download a dataset from GitHub.
 
 You need [Node.js](https://nodejs.org) 20 or newer and [git](https://git-scm.com).
 

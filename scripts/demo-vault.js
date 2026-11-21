@@ -50,7 +50,7 @@ await vault.load();
 
 // ---------------------------------------------------------------- a level system: Emberwork and its ranks
 {
-    // the taxonomy goes into the schema like World Builder's "+ New taxonomy" does
+    // the taxonomy goes into the schema like Novel Craft's "+ New taxonomy" does
     const schemaFile = path.join(ROOT, "90. Templater", "Data Store Schema.md");
     const text = fs.readFileSync(schemaFile, "utf8");
     const json = text.match(/```json\n([\s\S]*?)\n```/)[1];
