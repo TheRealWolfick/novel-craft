@@ -16,6 +16,8 @@ This is the project's own reading of public documents, written down so they don'
 
 Nobody's requests ever go through anyone else's account: every user of Novel Craft uses their own plan or API account.
 
+Two more modes don't involve Anthropic at all: **OpenAI API key** (the user's own key, billed to their OpenAI account) and **Local model** (Ollama, the llama.cpp server or any OpenAI-compatible address the user enters). Both go through `lib/ai-openai.js` with plain `fetch`, use the same read-only tools and review panel as the Anthropic API chat, and never use the terminal: **the terminal is only ever Claude Code.** Their keys follow rule 8 below (kept in `secrets.json`, sent only to that provider). Anthropic's terms quoted here don't govern them; OpenAI's API terms cover the OpenAI mode, and a local model is the user's own software.
+
 ## What the terms say
 
 **Subscription sign-in in other apps** (Claude Code's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)):

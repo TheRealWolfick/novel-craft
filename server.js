@@ -25,6 +25,7 @@ import { Assets } from "./lib/assets.js";
 import { Assistant } from "./lib/ai.js";
 import { McpServer } from "./lib/mcp.js";
 import { Terminal, findClaude, prepareWorkspace, workspaceDir, sessions } from "./lib/claude-code.js";
+import { terminalSupport } from "./lib/capabilities.js";
 import { WorldExport } from "./lib/worldexport.js";
 import { textureHash } from "./lib/assets.js";
 import { TEXTURES } from "./public/map-core.js";
@@ -161,10 +162,12 @@ function entryOut(novel, ledger, e, placed) {
 }
 
 // routes that work without a vault
-const SETUP_ROUTES = new Set(["GET /api/settings", "POST /api/settings", "GET /api/settings/folders", "POST /api/settings/appearance", "GET /api/docs", "GET /api/docs/page", "GET /api/docs/search", "GET /api/ai/status", "POST /api/ai/settings", "POST /api/ai/signin", "POST /api/ai/signout", "POST /api/ai/test", "GET /api/terminal/status"]);
+const SETUP_ROUTES = new Set(["GET /api/settings", "POST /api/settings", "GET /api/settings/folders", "POST /api/settings/appearance", "GET /api/docs", "GET /api/docs/page", "GET /api/docs/search", "GET /api/ai/status", "POST /api/ai/settings", "POST /api/ai/signin", "POST /api/ai/signout", "POST /api/ai/test", "GET /api/terminal/status", "GET /api/capabilities"]);
 const routes = {
     // AI assistant: connection (Settings), forgetting a conversation; the chat itself streams (see the server below)
-    "GET /api/ai/status": () => assistant.status(),
+    "GET /api/ai/status": ({ q }) => assistant.status({ probe: q.get("probe") === "1" }),
+    // what this computer can run (features that can't work are greyed out with the reason)
+    "GET /api/capabilities": () => ({ platform: process.platform, terminal: terminalSupport(), claude: findClaude() }),
     "POST /api/ai/settings": async ({ req }) => assistant.configure(await json(req)),
     "POST /api/ai/signin": () => assistant.signIn(),
     "POST /api/ai/signout": () => assistant.signOut(),
@@ -172,11 +175,12 @@ const routes = {
     // what the page shows, for current_view (Claude Code asks through the MCP server)
     "POST /api/ai/view": async ({ req }) => { const b = await json(req); assistant.view = b.view && typeof b.view === "object" ? { ...b.view, at: Date.now() } : null; return { ok: true }; },
     // the terminal: Claude Code (the user's own `claude`) in a workspace connected to the MCP server
-    "GET /api/terminal/status": () => ({ claude: findClaude(), running: terminal.running, exit: terminal.exit, workspace: workspaceDir(), session: terminal.session ?? null, sessions: sessions() }),
+    "GET /api/terminal/status": () => ({ claude: findClaude(), support: terminalSupport(), running: terminal.running, exit: terminal.exit, workspace: workspaceDir(), session: terminal.session ?? null, sessions: sessions() }),
     // Claude Code's earlier conversations in the workspace (History in the AI tab)
     "GET /api/terminal/sessions": () => ({ sessions: sessions(), running: terminal.running }),
     "POST /api/terminal/start": async ({ req }) => {
         const b = await json(req);
+        if (!terminalSupport().ok) throw fail(400, terminalSupport().reason);
         const claude = findClaude();
         if (!claude && !process.env.WB_TERMINAL_CMD) throw fail(400, "Claude Code isn't installed (no claude command found)");
         const cwd = await prepareWorkspace({ url: `http://127.0.0.1:${listenPort}/mcp`, token: await assistant.mcpToken(), vaultRoot: vault.root, outline: assistant.tools.outline() });

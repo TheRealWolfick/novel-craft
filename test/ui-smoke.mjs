@@ -1481,6 +1481,67 @@ if (process.env.SETTINGS_DIR) {
             "a saved key is kept owner-only and only its last four characters are shown", JSON.stringify(saved));
         const removed = await (await send("POST", "/api/ai/settings", { removeKey: true, effort: "medium", model: "claude-opus-5-5" })).json();
         check(!removed.hasKey && !JSON.parse(fs.readFileSync(file, "utf8")).anthropicKey, "the key can be removed");
+        check((await send("POST", "/api/ai/settings", { openaiKey: "nope" })).status === 400, "something that isn't an OpenAI key is refused");
+        check((await send("POST", "/api/ai/settings", { localUrl: "localhost:11434" })).status === 400, "a local server address without http:// is refused");
+    }
+    // what the computer can run: the terminal works here (Linux, util-linux)
+    const caps = await get("/api/capabilities");
+    check(caps.terminal?.ok === true && caps.platform === "linux", "capabilities report that the Claude Code terminal can run", JSON.stringify(caps));
+    // a local model: a stand-in OpenAI-compatible server (models list, streamed chat completions with a tool call)
+    {
+        const http = await import("node:http");
+        const seen = [];
+        const srv = http.createServer(async (req, res) => {
+            let body = ""; for await (const c of req) body += c;
+            if (req.url === "/v1/models") { res.setHeader("content-type", "application/json"); return res.end(JSON.stringify({ data: [{ id: "mock-model" }, { id: "other" }] })); }
+            if (req.url !== "/v1/chat/completions") { res.statusCode = 404; return res.end("{}"); }
+            const b = JSON.parse(body); seen.push(b);
+            const last = b.messages.at(-1);
+            res.setHeader("content-type", "text/event-stream");
+            const sse = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
+            if (last.role === "tool") {
+                for (const piece of ["Tool ", "said: ", String(last.content).split("\n")[0]]) sse({ choices: [{ index: 0, delta: { content: piece } }] });
+                sse({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] });
+            } else if (/^search: /.test(last.content)) {
+                const args = JSON.stringify({ query: last.content.split("\n")[0].slice(8) });
+                sse({ choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "search", arguments: args.slice(0, 5) } }] } }] });
+                sse({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: args.slice(5) } }] } }] });
+                sse({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] });
+            } else {
+                sse({ choices: [{ index: 0, delta: { content: "Local says hi" } }] });
+                sse({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] });
+            }
+            sse({ choices: [], usage: { prompt_tokens: 120, completion_tokens: 7 } });
+            res.end("data: [DONE]\n\n");
+        });
+        await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+        const url = `http://127.0.0.1:${srv.address().port}/v1`;
+        await send("POST", "/api/ai/settings", { auth: "local", localPreset: "custom", localUrl: url, localModel: "" });
+        const probe = await get("/api/ai/status?probe=1");
+        check(probe.provider === "local" && !probe.ready && probe.remote?.ok && probe.remote.models.join() === "mock-model,other", "a local server's models are listed and a model must be chosen", JSON.stringify(probe.remote));
+        const ready = await (await send("POST", "/api/ai/settings", { localModel: "mock-model" })).json();
+        check(ready.ready && ready.modelLabel === "mock-model", "with a model chosen the local assistant is ready");
+        const lr = await send("POST", "/api/ai/chat", { message: "search: Mara", view: { page: "test" } });
+        const lev = (await lr.text()).trim().split("\n").map((l) => JSON.parse(l));
+        const ltool = lev.find((e) => e.t === "tool_done");
+        const ltext = lev.filter((e) => e.t === "text").map((e) => e.d).join("");
+        check(ltool?.name === "search" && !ltool.error && /Tool said: (\d+ of \d+ results|No results)/.test(ltext) && lev.at(-1).t === "done" && lev.at(-1).usage.input === 240,
+            "a local model's tool call (arguments streamed in pieces) runs the search tool and the answer follows", JSON.stringify(lev.slice(-3)));
+        const sent = seen.at(-1);
+        check(sent.model === "mock-model" && sent.messages[0].role === "system" && sent.tools?.some((t) => t.function?.name === "propose_changes") && !("reasoning_effort" in sent) && sent.messages.some((m) => m.role === "tool" && m.tool_call_id === "call_1"),
+            "requests carry the system prompt, the tools as functions and the tool result (no reasoning effort for local servers)");
+        const lconv = lev[0].conversation;
+        const saved = await get(`/api/ai/conversation?id=${lconv}`);
+        check(saved.provider === "local" && (await get("/api/ai/conversations")).conversations.some((c) => c.id === lconv && c.provider === "local" && c.tokens === 254), "the conversation is saved with its provider and token count");
+        await send("POST", "/api/ai/settings", { auth: "key" });
+        const mixed = await send("POST", "/api/ai/chat", { conversation: lconv, message: "hello" });
+        const mixedEv = (await mixed.text()).trim().split("\n").map((l) => JSON.parse(l));
+        check(mixedEv.length === 1 && mixedEv[0].t === "error" && /press New/.test(mixedEv[0].message), "a conversation can't continue with another provider", JSON.stringify(mixedEv));
+        await send("POST", "/api/ai/settings", { auth: "local", localPreset: "custom", localUrl: "http://127.0.0.1:9/v1" });
+        const down = await get("/api/ai/status?probe=1");
+        check(down.remote && !down.remote.ok && /Couldn't reach/.test(down.remote.error), "a local server that isn't running is reported", JSON.stringify(down.remote));
+        await send("POST", "/api/ai/settings", { auth: "key", localPreset: "ollama", localUrl: "", localModel: "" });
+        srv.close();
     }
 }
 // settings: the vault folder can be browsed and switched (the test server keeps its settings in SETTINGS_DIR)

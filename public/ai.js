@@ -47,19 +47,20 @@ const setChat = (c) => {
     try { if (c.id) localStorage.setItem("aiConversation", c.id); else localStorage.removeItem("aiConversation"); } catch { /* private window */ }
 };
 /** Open a saved conversation (its replies rendered as markdown again) */
-async function loadConversation(id) {
+async function loadConversation(id, provider = null) {
     const c = await api.get(`/api/ai/conversation?id=${encodeURIComponent(id)}`);
+    if (provider && c.provider !== provider) return;   // restoring: one with another provider stays in History
     setChat({ id: c.id, items: c.display.map((it) => (it.role === "assistant" ? { ...it, streaming: false } : it)), usage: c.usage });
     chat.items.forEach((it, i) => { if (it.role === "assistant") renderReply(i); });
 }
 // the conversation open when the app last closed comes back with it
 let restored = false;
-function restoreConversation() {
+function restoreConversation(provider) {
     if (restored || chat.id) return;
     restored = true;
     let id = null;
     try { id = localStorage.getItem("aiConversation"); } catch { /* none */ }
-    if (id) loadConversation(id).catch(() => { try { localStorage.removeItem("aiConversation"); } catch { /* none */ } });
+    if (id) loadConversation(id, provider).catch(() => { try { localStorage.removeItem("aiConversation"); } catch { /* none */ } });
 }
 
 /** The reply's text without its trailing <replies>[…]</replies> line (also while it streams in), and the replies */
@@ -94,6 +95,7 @@ export function ago(t) {
 
 const TOOL_LABELS = { search: "Searching", novel_overview: "Reading the novel overview", read_chapter: "Reading a chapter", read_note: "Reading a note", query_collection: "Listing a collection", schema: "Reading the fields", character_state: "Checking ledgers", world_tree: "Reading the world outline", taxonomy: "Reading taxonomy values", current_view: "Looking at the screen", propose_changes: "Preparing changes for review" };
 const money = (n) => (n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
+const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M tokens` : n >= 1000 ? `${Math.round(n / 1000)}k tokens` : `${n} tokens`);
 
 export function AiPane({ active }) {
     const [c, set] = useState(chat);
@@ -106,7 +108,7 @@ export function AiPane({ active }) {
     const list = useRef(null);
     const box = useRef(null);
     const stick = useRef(true);
-    useEffect(() => { if (active) api.get("/api/ai/status").then((s) => { setStatus(s); if (s.auth !== "claude-code") restoreConversation(); }).catch(() => setStatus({ ready: false })); }, [active]);
+    useEffect(() => { if (active) api.get("/api/ai/status").then((s) => { setStatus(s); if (s.auth !== "claude-code") restoreConversation(s.provider); }).catch(() => setStatus({ ready: false })); }, [active]);
     const [history, setHistory] = useState(null);
     const openHistory = async () => {
         if (history) return setHistory(null);
@@ -188,20 +190,24 @@ export function AiPane({ active }) {
     if (status && !status.ready) return html`<div class="drawer-body ai-pane"><div class="ai-setup">
         <${BotIcon} size=${40} />
         <h3>Connect the assistant</h3>
-        <p class="muted">Sign in with Anthropic or add a Claude API key in Settings. The assistant only reads your novels and data store, and only what it needs for each question.</p>
+        <p class="muted">${status.auth === "openai" ? "Add your OpenAI API key and choose a model in Settings."
+            : status.auth === "local" ? "Choose your local model server and a model in Settings."
+            : "Sign in with Anthropic, or add an API key (Anthropic or OpenAI), or connect a local model in Settings."} The assistant only reads your novels and data store, and only what it needs for each question.</p>
         <a class="button primary" href="#/settings?s=ai" data-page>Open Settings</a></div></div>`;
     return html`<div class="ai-pane">
         <div class="ai-head">
-            <span class="muted small">${status ? status.models.find((m) => m.id === status.model)?.label ?? status.model : ""}${status?.mock ? " (test mode)" : ""}</span>
+            <span class="muted small">${status?.modelLabel ?? ""}${status?.provider === "local" ? " · local" : status?.provider === "openai" ? " · OpenAI" : ""}${status?.mock && status?.provider === "anthropic" ? " (test mode)" : ""}</span>
             <span class="grow" />
-            ${c.usage && html`<span class="muted small" title=${`${c.usage.input.toLocaleString()} tokens in, ${c.usage.cacheRead.toLocaleString()} from the cache, ${c.usage.output.toLocaleString()} out (estimate)`}>${money(c.usage.cost)}</span>`}
+            ${c.usage && (status?.provider === "anthropic"
+                ? html`<span class="muted small" title=${`${c.usage.input.toLocaleString()} tokens in, ${c.usage.cacheRead.toLocaleString()} from the cache, ${c.usage.output.toLocaleString()} out (estimate)`}>${money(c.usage.cost)}</span>`
+                : html`<span class="muted small" title=${`${c.usage.input.toLocaleString()} tokens in, ${c.usage.output.toLocaleString()} out`}>${tokens(c.usage.input + c.usage.output)}</span>`)}
             <button class=${`small ${history ? "on" : ""}`} onClick=${openHistory} disabled=${busy} title="Earlier conversations">History</button>
             <button class="small" onClick=${fresh} disabled=${busy || !c.items.length} title="Start a new conversation (this one stays in History)">New</button>
         </div>
         ${history && html`<div class="term-history">
             ${!history.length ? html`<p class="muted small">No saved conversations yet.</p>` : history.map((h) => html`<div key=${h.id} class=${`term-session ${c.id === h.id ? "current" : ""}`} role="button" tabIndex="0" onClick=${() => pick(h.id)} onKeyDown=${(e) => e.key === "Enter" && pick(h.id)}>
                 <span class="term-session-title">${h.title}</span>
-                <span class="row"><span class="muted small grow">${ago(h.updated)} · ${Math.ceil(h.messages / 2)} question${h.messages > 2 ? "s" : ""} · ${money(h.cost)}</span>
+                <span class="row"><span class="muted small grow">${ago(h.updated)} · ${Math.ceil(h.messages / 2)} question${h.messages > 2 ? "s" : ""} · ${h.provider === "anthropic" ? money(h.cost) : tokens(h.tokens ?? 0)}</span>
                     <span onClick=${(e) => e.stopPropagation()}><${ConfirmButton} class="small" onConfirm=${() => remove(h.id)}>Delete</${ConfirmButton}></span></span>
             </div>`)}
         </div>`}
@@ -255,7 +261,7 @@ export function AiSettingsPanel() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
     const [test, setTest] = useState(null);
-    const load = () => api.get("/api/ai/status").then(setS).catch((e) => setError(e.message));
+    const load = () => api.get("/api/ai/status?probe=1").then(setS).catch((e) => setError(e.message));
     useEffect(() => { load(); }, []);
     // "Open Settings" from the AI tab lands here
     useEffect(() => { if (s && /[?&]s=ai\b/.test(location.hash)) document.getElementById("ai-settings")?.scrollIntoView({ block: "start" }); }, [!!s]);
@@ -263,7 +269,13 @@ export function AiSettingsPanel() {
     useEffect(() => { if (!s?.signingIn) return; const t = setInterval(load, 2000); return () => clearInterval(t); }, [s?.signingIn]);
     const save = async (patch) => {
         setBusy(true); setError(null);
-        try { setS(await api.send("POST", "/api/ai/settings", patch)); if (patch.apiKey) { setKey(""); toast("API key saved"); } } catch (e) { setError(e.message); }
+        try {
+            const next = await api.send("POST", "/api/ai/settings", patch);
+            setS(next);
+            if (patch.apiKey || patch.openaiKey || patch.localKey) { setKey(""); toast("API key saved"); }
+            setTest(null);
+            if (next.auth === "openai" || next.auth === "local") load();   // the model list comes from the server
+        } catch (e) { setError(e.message); }
         setBusy(false);
     };
     const act = async (url) => { setBusy(true); setError(null); try { setS(await api.send("POST", url)); } catch (e) { setError(e.message); } setBusy(false); };
@@ -271,15 +283,20 @@ export function AiSettingsPanel() {
     if (!s) return html`<div class="panel" id="ai-settings"><h3>AI assistant</h3>${error ? html`<p class="error">${error}</p>` : html`<p class="muted">Loading…</p>`}</div>`;
     return html`<div class="panel ai-settings" id="ai-settings">
         <h3><${BotIcon} /> AI assistant</h3>
-        <p class="muted">Claude helps with your novels and worlds in the side drawer's AI tab (the robot button at the top right). It reads only your novel folders and the data store, a little at a time, and every change it proposes opens for your review before anything is written.</p>
+        <p class="muted">The assistant (Claude, an OpenAI model or a model on your own computer) helps with your novels and worlds in the side drawer's AI tab (the robot button at the top right). It reads only your novel folders and the data store, a little at a time, and every change it proposes opens for your review before anything is written.</p>
         <div class="field"><label>Connect with</label>
             <div class="seg wrap" role="group">
-                <button class=${s.auth === "claude-code" ? "on" : ""} onClick=${() => save({ auth: "claude-code" })}>Claude Code (your subscription)</button>
+                <button class=${s.auth === "claude-code" ? "on" : ""} disabled=${!s.capabilities.terminal.ok} title=${s.capabilities.terminal.ok ? "" : s.capabilities.terminal.reason} onClick=${() => save({ auth: "claude-code" })}>Claude Code (your subscription)</button>
                 <button class=${s.auth === "signin" ? "on" : ""} onClick=${() => save({ auth: "signin" })}>Sign in with Anthropic (API)</button>
-                <button class=${s.auth === "key" ? "on" : ""} onClick=${() => save({ auth: "key" })}>API key</button>
+                <button class=${s.auth === "key" ? "on" : ""} onClick=${() => save({ auth: "key" })}>Anthropic API key</button>
+                <button class=${s.auth === "openai" ? "on" : ""} onClick=${() => save({ auth: "openai" })}>OpenAI API key</button>
+                <button class=${s.auth === "local" ? "on" : ""} onClick=${() => save({ auth: "local" })}>Local model</button>
             </div>
+            ${!s.capabilities.terminal.ok && html`<p class="muted small">Claude Code isn't available: ${s.capabilities.terminal.reason} ${s.capabilities.terminal.fix ?? ""}</p>`}
         </div>
-        ${s.auth === "claude-code" ? html`<div class="ai-cc">
+        ${s.auth === "openai" ? html`<${CompatSettings} s=${s} kind="openai" busy=${busy} save=${save} keyText=${key} setKey=${setKey} />`
+        : s.auth === "local" ? html`<${CompatSettings} s=${s} kind="local" busy=${busy} save=${save} keyText=${key} setKey=${setKey} />`
+        : s.auth === "claude-code" ? html`<div class="ai-cc">
             ${s.claude ? html`<p>Claude Code found: <code>${s.claude}</code></p>` : html`<p class="error">Claude Code isn't installed (no <code>claude</code> command found). Install it from <a href="https://code.claude.com/docs" target="_blank" rel="noopener">Anthropic's Claude Code docs</a> and sign in once by running <code>claude</code> in a terminal.</p>`}
             <p class="muted small">The AI tab runs your own Claude Code in a terminal, signed in with your own Claude subscription (or however you have set Claude Code up), so its use counts against your plan rather than API billing. Novel Craft only connects it to its tools; your sign-in stays with Claude Code.</p>
             <ul class="muted small ai-rules">
@@ -307,19 +324,79 @@ export function AiSettingsPanel() {
             </div>
             <p class="muted small">Create a key in the Claude Console (console.anthropic.com → API keys). It is kept on this computer only, in <code>${s.secretsFile}</code> (readable by you alone), and never shown to the page again.</p>
         </div>`}
-        ${s.auth !== "claude-code" && html`<div class="field"><label>Model</label>
+        ${s.provider === "anthropic" && html`<div class="field"><label>Model</label>
             <div class="seg wrap" role="group">${s.models.map((m) => html`<button class=${s.model === m.id ? "on" : ""} title=${m.note} onClick=${() => save({ model: m.id })}>${m.label}</button>`)}</div>
             <p class="muted small">${s.models.find((m) => m.id === s.model)?.note}</p>
         </div>
         <div class="field"><label>Effort</label>
             <div class="seg" role="group">${s.efforts.map((e) => html`<button class=${s.effort === e ? "on" : ""} onClick=${() => save({ effort: e })}>${e[0].toUpperCase() + e.slice(1)}</button>`)}</div>
             <p class="muted small">How hard Claude thinks before answering. Medium suits most questions; High for reviewing chapters or tricky continuity, at more time and cost.</p>
-        </div>
-        <div class="row">
+        </div>`}
+        ${s.auth !== "claude-code" && html`<div class="row">
             <button disabled=${!s.ready || test?.busy} onClick=${runTest}>${test?.busy ? "Testing…" : "Test the connection"}</button>
             ${test && !test.busy && (test.ok ? html`<span class="ok">Connected (${test.model})</span>` : html`<span class="error">${test.error}</span>`)}
         </div>`}
         ${error && html`<p class="error">${error}</p>`}
+    </div>`;
+}
+
+/** Settings for an OpenAI-compatible server: OpenAI (key, model, effort) or a local one (preset or URL, model) */
+function CompatSettings({ s, kind, busy, save, keyText, setKey }) {
+    const o = kind === "openai" ? s.openai : s.local;
+    const custom = kind === "local" && o.preset === "custom";
+    const [model, setModel] = useState(o.model ?? "");
+    const [url, setUrl] = useState(o.customUrl ?? "");
+    useEffect(() => setModel(o.model ?? ""), [o.model]);
+    const field = kind === "openai" ? "openaiModel" : "localModel";
+    const saveModel = (v = model) => { if (v.trim() !== (o.model ?? "")) save({ [field]: v.trim() }); };
+    const models = s.remote?.models ?? [];
+    const preset = o.presets?.find((p) => p.id === o.preset);
+    return html`<div class="ai-compat">
+        ${kind === "openai" ? html`
+            <p class="muted small">Uses OpenAI's API with your own key, billed to your OpenAI account. Create a key at platform.openai.com → API keys.</p>
+            ${o.hasKey ? html`<p>Key saved <code>${o.keyHint}</code> <${ConfirmButton} class="small" onConfirm=${() => save({ removeOpenaiKey: true })}>Remove</${ConfirmButton}></p>`
+                : o.envKey ? html`<p class="muted">Using the key in the <code>OPENAI_API_KEY</code> environment variable.</p>` : null}
+            <div class="row">
+                <input type="password" autocomplete="off" spellcheck="false" placeholder=${o.hasKey ? "Replace with another key" : "sk-…"} value=${keyText} onInput=${(e) => setKey(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && keyText.trim() && save({ openaiKey: keyText })} />
+                <button class="primary" disabled=${busy || !keyText.trim()} onClick=${() => save({ openaiKey: keyText })}>Save key</button>
+            </div>
+            <p class="muted small">Kept on this computer only, in <code>${s.secretsFile}</code> (readable by you alone), and sent only to OpenAI.</p>`
+        : html`
+            <p class="muted small">Runs the assistant on a model on your own computer (or any server that speaks the OpenAI-compatible API). Nothing leaves your computer unless the address points elsewhere. The model must support tool calling; bigger models follow the instructions better.</p>
+            <div class="field"><label>Server</label>
+                <div class="seg wrap" role="group">
+                    ${o.presets.map((p) => html`<button class=${o.preset === p.id ? "on" : ""} onClick=${() => save({ localPreset: p.id })}>${p.label}</button>`)}
+                    <button class=${custom ? "on" : ""} onClick=${() => save({ localPreset: "custom" })}>Other address</button>
+                </div>
+                ${preset && html`<p class="muted small"><code>${preset.url}</code>. ${preset.help}</p>`}
+            </div>
+            ${custom && html`<div class="field"><label>Address</label>
+                <div class="row"><input placeholder="http://localhost:8000/v1" value=${url} onInput=${(e) => setUrl(e.target.value)}
+                    onKeyDown=${(e) => e.key === "Enter" && save({ localUrl: url })} onBlur=${() => url !== (o.customUrl ?? "") && save({ localUrl: url })} /></div>
+                <p class="muted small">The API's base address, usually ending in <code>/v1</code>.</p>
+            </div>
+            <div class="field"><label>API key (optional)</label>
+                ${o.hasKey && html`<p>Key saved <code>${o.keyHint}</code> <${ConfirmButton} class="small" onConfirm=${() => save({ removeLocalKey: true })}>Remove</${ConfirmButton}></p>`}
+                <div class="row">
+                    <input type="password" autocomplete="off" spellcheck="false" placeholder="Only if the server asks for one" value=${keyText} onInput=${(e) => setKey(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && keyText.trim() && save({ localKey: keyText })} />
+                    <button disabled=${busy || !keyText.trim()} onClick=${() => save({ localKey: keyText })}>Save key</button>
+                </div>
+            </div>`}`}
+        <div class="field"><label>Model</label>
+            <div class="row">
+                <input list=${`ai-models-${kind}`} placeholder=${models.length ? "Choose or type a model" : kind === "openai" ? "e.g. the model's id from OpenAI's docs" : "e.g. qwen3"} value=${model}
+                    onInput=${(e) => { setModel(e.target.value); if (models.includes(e.target.value)) saveModel(e.target.value); }}
+                    onKeyDown=${(e) => e.key === "Enter" && saveModel()} onBlur=${() => saveModel()} />
+                <datalist id=${`ai-models-${kind}`}>${models.map((m) => html`<option value=${m} />`)}</datalist>
+            </div>
+            ${s.remote && (s.remote.ok
+                ? html`<p class="muted small">${models.length ? `${models.length} model${models.length === 1 ? "" : "s"} available.` : kind === "local" ? "The server is running but has no models yet." : "No chat models found for this key."}</p>`
+                : html`<p class="error small">${s.remote.error}</p>`)}
+        </div>
+        ${kind === "openai" && html`<div class="field"><label>Effort</label>
+            <div class="seg" role="group">${s.efforts.map((e) => html`<button class=${s.effort === e ? "on" : ""} onClick=${() => save({ effort: e })}>${e[0].toUpperCase() + e.slice(1)}</button>`)}</div>
+            <p class="muted small">Reasoning effort, for models that reason (ignored by those that don't).</p>
+        </div>`}
     </div>`;
 }
 

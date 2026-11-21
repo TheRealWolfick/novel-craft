@@ -422,7 +422,7 @@ export function ClaudeTerminal({ active }) {
 
     // put the terminal here (made the first time, moved here after that)
     useEffect(() => {
-        if (!status?.claude || !host.current) return;
+        if (!status?.claude || status.support?.ok === false || !host.current) return;
         let gone = false, ro = null, timer = null;
         makeTerminal(host.current).then((t) => {
             if (gone) return;
@@ -519,6 +519,11 @@ export function ClaudeTerminal({ active }) {
 
     if (error && !status) return html`<div class="drawer-body"><p class="error">${error}</p></div>`;
     if (!status) return html`<div class="drawer-body"><p class="muted">Loading…</p></div>`;
+    if (status.support?.ok === false) return html`<div class="drawer-body ai-pane"><div class="ai-setup">
+        <h3>Claude Code can't run here</h3>
+        <p class="muted">${status.support.reason}</p>
+        ${status.support.fix && html`<p class="muted small">${status.support.fix}</p>`}
+        <a class="button primary" href="#/settings?s=ai" data-page>Open Settings</a></div></div>`;
     if (!status.claude) return html`<div class="drawer-body ai-pane"><div class="ai-setup">
         <h3>Claude Code isn't installed</h3>
         <p class="muted">The AI tab runs Claude Code, signed in with your own Claude subscription. Install it (see <a href="https://code.claude.com/docs" target="_blank" rel="noopener">Anthropic's Claude Code docs</a>), sign in once by running <code>claude</code> in a terminal, then come back here.</p>

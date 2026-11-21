@@ -195,7 +195,7 @@ The code has no build step: `server.js` (node:http) with modules in `lib/`, and 
 
 The code is released under the [MIT License](LICENSE). The bundled map stamps keep their own licences, listed below.
 
-The AI assistant uses your own Claude account: your own Claude Code with your own plan, or your own Anthropic API key. Novel Craft never handles your Claude sign-in and doesn't route anyone's use through another account. [`AI-INTEGRATION.md`](AI-INTEGRATION.md) explains how this fits Anthropic's terms, and the rules contributors keep.
+The AI assistant uses your own account: your own Claude Code with your own plan, your own Anthropic or OpenAI API key, or a model on your own computer (Ollama, llama.cpp). Novel Craft never handles your Claude sign-in and doesn't route anyone's use through another account. [`AI-INTEGRATION.md`](AI-INTEGRATION.md) explains how this fits Anthropic's terms, and the rules contributors keep.
 
 ## Credits
 

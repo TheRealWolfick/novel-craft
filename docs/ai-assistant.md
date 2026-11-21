@@ -3,19 +3,21 @@ title: The AI assistant
 group: Tools
 kind: guide
 order: 2
-blurb: Claude Code (with your own subscription) or the API, in the side drawer, reading only what each question needs and proposing changes for you to review.
+blurb: Claude Code (with your own subscription), the Anthropic or OpenAI API, or a model on your own computer, in the side drawer, reading only what each question needs and proposing changes for you to review.
 ---
-The assistant is Claude, in the side drawer's **AI** tab. Ask it what happened in a chapter, what a character carries at a given point, where a place sits in your world, or for ideas about what comes next.
+The assistant lives in the side drawer's **AI** tab: Claude, an OpenAI model, or a model running on your own computer. Ask it what happened in a chapter, what a character carries at a given point, where a place sits in your world, or for ideas about what comes next.
 
 ## Connecting
 
-Open [Settings](app:#/settings?s=ai) and find **AI assistant**. There are three ways to connect:
+Open [Settings](app:#/settings?s=ai) and find **AI assistant**. There are five ways to connect:
 
-- **Claude Code (your subscription)**, the default. The AI tab runs your own Claude Code in a terminal, signed in with your own Claude plan, so it counts against your plan rather than API billing. Install Claude Code and sign in to it once (run `claude` in a terminal) first.
+- **Claude Code (your subscription)**, the default on Linux. The AI tab runs your own Claude Code in a terminal, signed in with your own Claude plan, so it counts against your plan rather than API billing. Install Claude Code and sign in to it once (run `claude` in a terminal) first. For now this needs Linux (the terminal uses Linux tools); on macOS and Windows the option is greyed out and says why.
 - **Sign in with Anthropic (API).** Uses Anthropic's `ant` command-line tool: the button opens your browser, you sign in to your Anthropic API account, and the app uses that sign-in from then on.
-- **API key.** Create a key in the Claude Console and paste it in. The key stays on this computer, in a file only you can read, and the page never shows it again (only its last four characters).
+- **Anthropic API key.** Create a key in the Claude Console and paste it in.
+- **OpenAI API key.** Create a key at platform.openai.com and paste it in, then choose a model from the list your key can use.
+- **Local model.** A model running on your own computer with [Ollama](https://ollama.com) (`localhost:11434`) or the llama.cpp server (`localhost:8080`, started with `--jinja`), or any other server that speaks the OpenAI-compatible API (**Other address**, with a key if it needs one). Settings lists the models the server has; nothing leaves your computer. The model must support tool calling (for Ollama, e.g. qwen3 or llama3.1); bigger models follow the instructions noticeably better.
 
-The two API ways are billed to your Anthropic API account; they use the chat described under [Asking](docs:ai-assistant#asking), where **Model** and **Effort** choose which Claude answers and how hard it thinks, and **Test the connection** sends one tiny request to check everything works.
+Keys stay on this computer, in a file only you can read, and are sent only to their own provider; the page never shows them again (only their last four characters). Everything except Claude Code uses the chat described under [Asking](docs:ai-assistant#asking). **Model** and **Effort** choose which model answers and how hard it thinks (Effort for Claude and OpenAI's reasoning models), and **Test the connection** sends one tiny request to check everything works. The chat shows the cost of a conversation with Claude, and the tokens used with the others. A conversation stays with the provider it started with: after switching, press **New**.
 
 ## Claude Code in the AI tab
 
