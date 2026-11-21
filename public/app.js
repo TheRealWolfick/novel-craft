@@ -1733,6 +1733,10 @@ function RenameDialog({ path: p, title: title0 = "", withTitle = false, onDone, 
 const DEFAULT_GROUPS = { characters: {
     bio: ["name", "aliases", "race", "alive", "age-introduced", "age-current", "age", "member-of", "wealth", "character/power-system", "character/talent", "role"],
     appearance: ["gender", "height", "weight", "eye-color", "hair-color", "hair-style", "facial-hair", "bust-size", "attractiveness"],
+}, Items: {
+    details: ["title", "aliases", "cat", "subcat", "topics", "heritage", "genre", "tradition"],
+    description: [],
+    info: ["power-system", "energy-source", "rarity", "tier", "elements", "teaches"],
 } };
 // list fields that read better as a section of their own (a list under a heading) than as a property
 const DEFAULT_LIST_SECTIONS = { characters: ["character/skills"] };
@@ -1764,10 +1768,18 @@ function docLayout(page, spec, index, keys, defs) {
     const sections = [...new Set([...named.filter((k) => keys.includes(k)), ...keys.filter(long)])].filter((k) => isText(k) && !technicalField(page, spec, k));
     for (const k of lists) if (!sections.includes(k) && !technicalField(page, spec, k)) sections.push(k);
     const grouped = new Map();   // small field -> the section it sits under
-    for (const [sec, list] of Object.entries(spec?.groups ?? DEFAULT_GROUPS[kind] ?? {})) for (const k of asList(list)) if (keys.includes(k) && !sections.includes(k)) grouped.set(k, sec);
-    // a group whose section isn't a text field of the note still gets a section of its own (just the small fields),
-    // first on the page (a character's Bio)
-    sections.unshift(...[...new Set(grouped.values())].filter((sec) => !sections.includes(sec)));
+    const groups = spec?.groups ?? DEFAULT_GROUPS[kind] ?? {};
+    for (const [sec, list] of Object.entries(groups)) for (const k of asList(list)) if (keys.includes(k) && !sections.includes(k)) grouped.set(k, sec);
+    // a group whose section isn't a text field of the note still gets a section of its own (just the small fields):
+    // right after the section of the group before it in the groups' order (an item's Info after Description), else
+    // first on the page (a character's Bio, an item's Details)
+    const order = Object.keys(groups);
+    const front = [];
+    for (const sec of [...new Set(grouped.values())].filter((x) => !sections.includes(x))) {
+        const prev = order.slice(0, order.indexOf(sec)).reverse().find((g) => sections.includes(g));
+        if (prev) sections.splice(sections.indexOf(prev) + 1, 0, sec); else front.push(sec);
+    }
+    sections.unshift(...front);
     return { sections, grouped };
 }
 
@@ -1843,7 +1855,7 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
         const editing = openSec === k;
         const v = cur(k);
         const toggle = () => setOpenSec(editing ? null : k);
-        return html`<section key=${k} class=${`np-sec ${changed.includes(k) ? "changed" : ""}`} onDblClick=${hasField && !readOnly(k) ? dblToggle(toggle) : undefined}>
+        return html`<section key=${k} class=${`np-sec ${changed.includes(k) ? "changed" : ""} ${!hasField && sub.length ? "only-mini" : ""}`} onDblClick=${hasField && !readOnly(k) ? dblToggle(toggle) : undefined}>
             <div class="np-sec-head"><h2>${sectionTitle(k)}</h2>
                 ${hasField && !readOnly(k) && (editing ? html`<button class="small" onClick=${toggle}>Done</button>`
                     : html`<button class="icon" title=${`Edit ${sectionTitle(k)} (or double-click)`} aria-label=${`Edit ${sectionTitle(k)}`} onClick=${toggle}>${ICONS.edit}</button>`)}</div>
@@ -2017,7 +2029,7 @@ function NoteView({ index, path, scope = "page" }) {
         ...(entryTab ? [["entry", entryTabLabel(entryTab)]] : []),
         ["links", "Links & more"]];
     const tabNow = tabs.some(([k]) => k === tab) ? tab : "page";
-    const family = page.plan?.kind === "plots" ? plotFamily(plan, page) : page.plan?.kind === "volumes" && plan ? volumePlots(plan, page.fm) : null;
+    const family = page.plan?.kind === "plots" ? plotFamily(plan, page) : page.plan?.kind === "volumes" && plan ? { ...volumePlots(plan, page.fm), volumes: plan.volumes.filter((v) => v.path === page.path) } : null;
     const usage = html`
         ${page.heldBy?.length > 0 && html`<div class="np-side-sec"><h4>Held by</h4>${page.heldBy.map((x) => html`<div class="np-side-row"><a href=${ownerHref(x.novel, x.owner)}>${x.owner}</a><span class="muted">${x.qtyText}${x.store !== "inventory" ? ` @ ${x.store}` : ""}</span></div>`)}</div>`}
         ${page.whereUsed?.length > 0 && html`<div class="np-side-sec"><h4>Used in</h4><${WhereUsed} uses=${page.whereUsed} /></div>`}
@@ -2147,16 +2159,22 @@ function parentPlot(plots, p) {
     const k = linkKey(asList(v)[0]);
     return plots.find((x) => x.name.toLowerCase() === k) ?? null;
 }
-/** A plot's family from the novel's plots: its main plot (what its `subplot-of` names), the main plot's subplots, its own */
+/**
+ * A plot's family from the novel's plots: its main plot (what its `subplot-of` names), the main plot's subplots, its own,
+ * and the volumes that use it. In a volume, main plot and subplots are that volume's (the one whose main plot is this
+ * family's, else the first), so a subplot the volume only lists still shows the volume's main plot and siblings
+ */
 function plotFamily(plan, page) {
     const plots = plan?.plots ?? [];
     const me = plots.find((p) => p.path === page.path);
     if (!me) return null;
     const parent = parentPlot(plots, me);
     const main = parent ?? me;
+    const volumes = (plan.volumes ?? []).filter((v) => { const f = volumePlots(plan, v.fm); return f.main?.path === me.path || f.subplots.some((p) => p.path === me.path); });
+    const vol = volumes.find((v) => volumePlots(plan, v.fm).main?.path === main.path) ?? volumes[0];
     return {
-        parent, main,
-        subplots: plots.filter((p) => parentPlot(plots, p)?.path === main.path).sort(byRating),
+        parent, volumes,
+        ...(vol ? volumePlots(plan, vol.fm) : { main, subplots: plots.filter((p) => parentPlot(plots, p)?.path === main.path).sort(byRating) }),
         children: plots.filter((p) => parentPlot(plots, p)?.path === me.path).sort(byRating),
     };
 }
@@ -2173,12 +2191,14 @@ function volumePlots(plan, fm) {
     return { main, subplots };
 }
 
-/** The column beside a plot or volume: the main plot and its subplots as titles, the open plot marked; a click opens one */
+/** The column beside a plot or volume: its volume(s), the main plot and its subplots as titles, the open one marked; a click opens one */
 function PlotFamily({ family, current, open }) {
-    const pill = (p) => html`<button key=${p.path} class=${`np-pill ${p.path === current ? "on" : ""}`} aria-current=${p.path === current ? "page" : undefined}
-        onClick=${() => p.path !== current && open(p.path)}>${p.title}</button>`;
-    return html`<div class="np-side-sec"><h4>Main plot</h4>${family.main ? pill(family.main) : html`<p class="muted small">None yet.</p>`}</div>
-        <div class="np-side-sec"><h4>Subplots</h4>${family.subplots.length ? family.subplots.map(pill) : html`<p class="muted small">None yet.</p>`}</div>`;
+    const pill = (p, label = p.title) => html`<button key=${p.path} class=${`np-pill ${p.path === current ? "on" : ""}`} aria-current=${p.path === current ? "page" : undefined}
+        onClick=${() => p.path !== current && open(p.path)}>${label}</button>`;
+    const vols = family.volumes ?? [];
+    return html`<div class="np-side-sec"><h4>${vols.length > 1 ? "Volumes" : "Volume"}</h4>${vols.length ? vols.map((v) => pill(v, v.label ?? v.title)) : html`<p class="muted small">None yet.</p>`}</div>
+        <div class="np-side-sec"><h4>Main plot</h4>${family.main ? pill(family.main) : html`<p class="muted small">None yet.</p>`}</div>
+        <div class="np-side-sec"><h4>Subplots</h4>${family.subplots.length ? family.subplots.map((p) => pill(p)) : html`<p class="muted small">None yet.</p>`}</div>`;
 }
 
 /**
@@ -2225,13 +2245,13 @@ async function newPlot(novel, parent = null) {
 
 /**
  * The plot parts of a plot's or volume's page, as headings of the page: a plot's subplots under "Subplots"; a volume's
- * plots under "Plots": the main plot as a subheading, its subplots as sub-subheadings
+ * main plot under "Main plot", then its subplots under "Subplots"
  */
 function PagePlots({ page, family, open }) {
     if (page.plan?.kind === "plots") {
         if (!family.children.length && family.parent) return null;   // a subplot without subplots of its own
         return html`<section class="np-sec">
-            <div class="np-sec-head"><h2>Subplots</h2><span class="muted small">plots whose “subplot of” is this one</span></div>
+            <div class="np-sec-head"><h2>Subplots</h2></div>
             ${family.children.length ? html`<${PlotTexts} plots=${family.children} open=${open} level=${3} />` : html`<p class="muted">No subplots yet.</p>`}
             <button class="np-more" onClick=${async () => { const p = await newPlot(page.plan.novel, page.name); if (p) open(p); }}>+ Add a subplot</button>
         </section>`;
@@ -2246,10 +2266,12 @@ function PagePlots({ page, family, open }) {
         }
     };
     return html`<section class="np-sec">
-        <div class="np-sec-head"><h2>Plots</h2><span class="muted small">${family.main ? `the main plot, then its subplots (listed in the volume, or a subplot of ${family.main.title})` : "choose the main plot in the Plot field above"}</span></div>
-        ${family.main && html`<${PlotTexts} plots=${[family.main]} open=${open} level=${3} />`}
-        ${family.subplots.length > 0 && html`<div class=${family.main ? "np-plot-children" : ""}><${PlotTexts} plots=${family.subplots} open=${open} level=${family.main ? 4 : 3} /></div>`}
-        ${!family.main && !family.subplots.length && html`<p class="muted">No plots yet.</p>`}
+        <div class="np-sec-head"><h2>Main plot</h2></div>
+        ${family.main ? html`<${PlotTexts} plots=${[family.main]} open=${open} level=${3} />` : html`<p class="muted">None yet.</p>`}
+    </section>
+    <section class="np-sec">
+        <div class="np-sec-head"><h2>Subplots</h2></div>
+        ${family.subplots.length ? html`<${PlotTexts} plots=${family.subplots} open=${open} level=${3} />` : html`<p class="muted">No subplots yet.</p>`}
         <button class="np-more" onClick=${addSub}>+ Add a subplot</button>
     </section>`;
 }

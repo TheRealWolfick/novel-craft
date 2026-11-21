@@ -1278,11 +1278,36 @@ if (process.env.SETTINGS_DIR) {
         const vol = plan.volumes.find((v) => v.fm.plot && plan.plots.some((p) => p.name.toLowerCase() === String(v.fm.plot).replace(/^\[\[|\]\]$/g, "").split("|")[0].toLowerCase()));
         if (vol) {
             w.location.hash = `#/note/${enc(vol.path)}`; await wait(1500);
-            const mainTitle = doc.querySelectorAll("main .np-side .np-side-sec")[0]?.querySelector(".np-pill")?.textContent;
+            const sideSecs = doc.querySelectorAll("main .np-side .np-side-sec");
+            const volTitle = sideSecs[0]?.querySelector(".np-pill.on")?.textContent;
+            const mainTitle = sideSecs[1]?.querySelector(".np-pill")?.textContent;
             const secs = [...doc.querySelectorAll("main .np-sec .np-sec-head h2")].map((h) => h.textContent);
-            check(!!mainTitle && secs.includes("Plots") && doc.querySelector("main .np-plot .np-plot-link")?.textContent === mainTitle,
-                "a volume shows its main plot and subplots in its column and with their text on its page", JSON.stringify({ mainTitle, secs }));
+            check(!!volTitle && !!mainTitle && secs.includes("Main plot") && secs.includes("Subplots") && secs.indexOf("Main plot") < secs.indexOf("Subplots")
+                && doc.querySelector("main .np-plot .np-plot-link")?.textContent === mainTitle,
+                "a volume shows itself, its main plot and subplots in its column and with their text on its page", JSON.stringify({ volTitle, mainTitle, secs }));
+            // opening one of its subplots keeps the volume and the main plot in that page's column
+            const subPill = sideSecs[2]?.querySelector(".np-pill");
+            if (subPill) {
+                const subTitle = subPill.textContent;
+                subPill.click(); await wait(1500);
+                const after = doc.querySelectorAll("main .np-side .np-side-sec");
+                check([...after[0]?.querySelectorAll(".np-pill") ?? []].some((b) => b.textContent === volTitle) && after[1]?.querySelector(".np-pill")?.textContent === mainTitle
+                    && after[2]?.querySelector(".np-pill.on")?.textContent === subTitle,
+                    "a subplot opened from a volume links back to the volume and its main plot", [...after].map((s) => s.textContent).join(" | "));
+            }
         }
+    }
+}
+// an item's page: Details, then Description, then Info, with the small fields under them
+{
+    const doc = w.document;
+    const item = index.notes.find((n) => n.collection === "Items" && n.fm.cat && n.fm.rarity !== undefined);
+    if (item) {
+        w.location.hash = `#/note/${enc(item.path)}`; await wait(1500);
+        const secs = [...doc.querySelectorAll("main .np-sec .np-sec-head h2")].map((h) => h.textContent);
+        const props = [...doc.querySelectorAll("main .np-props .np-prop-k, main > * .np-prop-k")].filter((k) => !k.closest(".np-sec")).map((k) => k.title);
+        check(secs.slice(0, 3).join("|") === "Details|Description|Info" && !props.includes("cat") && !props.includes("rarity"),
+            "an item's page groups its fields under Details, Description and Info", JSON.stringify({ secs, props }));
     }
 }
 // AI assistant (the test server runs with WB_AI_MOCK=1: a stand-in for Claude, no network)
