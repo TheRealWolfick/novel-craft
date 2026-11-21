@@ -1222,6 +1222,26 @@ if (process.env.SETTINGS_DIR) {
     check(!doc.querySelector(".writer .left-tabs"), "closing the last copied tab leaves only the writer");
     doc.querySelector(".drawer-tabs button[title^='Collapse']")?.click(); await wait(300);
 }
+// Alt+← / Alt+→ go back and forward in the place last used (here the drawer); a closed drawer leaves it to the page
+{
+    const doc = w.document;
+    w.location.hash = "#/c/Items"; await wait(800);
+    const links = [...doc.querySelectorAll('main [data-drawer] a[href^="#/note/"]')];
+    if (links.length >= 2) {
+        links[0].click(); await wait(800);
+        const first = doc.querySelector(".drawer-recent button.on")?.textContent;
+        links[1].click(); await wait(800);
+        const second = doc.querySelector(".drawer-recent button.on")?.textContent;
+        const press = (key) => doc.body.dispatchEvent(new w.KeyboardEvent("keydown", { key, altKey: true, bubbles: true, cancelable: true }));
+        doc.querySelector("aside.drawer").dispatchEvent(new w.MouseEvent("pointerdown", { bubbles: true }));
+        press("ArrowLeft"); await wait(500);
+        const back = doc.querySelector(".drawer-recent button.on")?.textContent;
+        press("ArrowRight"); await wait(500);
+        const fwd = doc.querySelector(".drawer-recent button.on")?.textContent;
+        check(first !== second && back === first && fwd === second, "Alt+← / Alt+→ go back and forward in the drawer when it was used last", JSON.stringify({ first, second, back, fwd }));
+        doc.querySelector(".drawer-tabs button[title^='Collapse']")?.click(); await wait(300);
+    }
+}
 // note pages as documents: a plot's family in the column and its subplots on its page; properties open on a click
 {
     const doc = w.document;

@@ -6,7 +6,7 @@ import { parseOutline, serializeOutline } from "./outline.js";
 import { parseLevels } from "./levels.js";
 import { MapEditor } from "./map-editor.js";
 import { WorldView, WorldOutline, MapAssetsView } from "./world.js";
-import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, expandWriter, BlockEditor, openOnLeft, closeLeftTab, renameLeftTab } from "./writer.js";
+import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, expandWriter, BlockEditor, openOnLeft, closeLeftTab, renameLeftTab, leftGo, writerNow } from "./writer.js";
 import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from "./sections.js";
 import { inlineHtml, setSpeechGroups } from "./blocks.js";
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
@@ -313,7 +313,26 @@ const DRAWER_TABS = [["viewer", "Viewer"], ["lookup", "Lookup"], ["datastore", "
 // where the drawer was when the app last closed (a convenience: the pages, the tab, open or not)
 let drawer = (() => { try { const d = JSON.parse(localStorage.getItem("drawerState")); if (d && Array.isArray(d.recent)) return { recent: d.recent.slice(0, DRAWER_RECENT), open: !!d.open && (d.recent.length > 0 || d.tab !== "viewer"), tab: d.tab ?? "viewer", ai: !!d.ai }; } catch { /* none */ } return { recent: [], open: false, tab: "viewer" }; })();
 const drawerListeners = new Set();
-const setDrawer = (d) => { drawer = d; drawerListeners.forEach((f) => f(d)); try { localStorage.setItem("drawerState", JSON.stringify(d)); } catch { /* private window */ } };
+// Back / forward in the drawer (Alt+← / Alt+→): the tab and page it showed before each change
+const drawerNav = { back: [], fwd: [], restoring: false };
+const drawerSnap = (d) => JSON.stringify({ tab: d.tab, href: d.tab === "viewer" ? d.recent[0] ?? null : null });
+const setDrawer = (d) => {
+    if (!drawerNav.restoring && drawerSnap(d) !== drawerSnap(drawer)) { drawerNav.back.push(drawerSnap(drawer)); drawerNav.fwd = []; if (drawerNav.back.length > 50) drawerNav.back.shift(); }
+    drawer = d; drawerListeners.forEach((f) => f(d)); try { localStorage.setItem("drawerState", JSON.stringify(d)); } catch { /* private window */ }
+};
+/** Alt+← / Alt+→ in the drawer: the page or tab it showed before (or after); returns whether it moved */
+function drawerGo(dir) {
+    const from = dir < 0 ? drawerNav.back : drawerNav.fwd, to = dir < 0 ? drawerNav.fwd : drawerNav.back;
+    if (!from.length) return false;
+    const snap = JSON.parse(from[from.length - 1]);
+    if (snap.href && snap.href !== drawer.recent[0] && !confirmDiscard("drawer")) return true;
+    from.pop();
+    to.push(drawerSnap(drawer));
+    drawerNav.restoring = true;
+    setDrawer(snap.href ? { ...drawer, tab: "viewer", open: true, recent: [snap.href, ...drawer.recent.filter((h) => h !== snap.href)].slice(0, DRAWER_RECENT) } : { ...drawer, tab: snap.tab, open: true });
+    drawerNav.restoring = false;
+    return true;
+}
 function useDrawer() {
     const [d, set] = useState(drawer);
     useEffect(() => { drawerListeners.add(set); return () => drawerListeners.delete(set); }, []);
@@ -365,6 +384,25 @@ addEventListener("keydown", (e) => {
 // (an Escape something already handled doesn't count, nor one from an element its handler has just removed)
 // Escape never collapses the drawer (it cancels things inside it instead: see useEscapeTwice); the » button, the
 // backdrop and Ctrl+] do.
+
+// Alt+← / Alt+→ go back / forward in the place you last clicked or typed in: the left drawer, the right drawer or the
+// page. A closed drawer is never that place (the page is, then). The page uses the browser's history.
+let navPlace = "main";
+const placeOf = (el) => (el?.closest?.(".writer-wrap") ? "left" : el?.closest?.(".drawer-wrap") ? "right" : "main");
+addEventListener("pointerdown", (e) => { navPlace = placeOf(e.target); }, true);
+addEventListener("focusin", (e) => { navPlace = placeOf(e.target); }, true);
+addEventListener("keydown", (e) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight") || e.defaultPrevented) return;
+    // the terminal, the map editor and (on macOS, where Option+arrow moves by word) text fields keep the keys
+    if (e.target.closest?.(".xterm, .map-editor")) return;
+    if (/Mac/.test(navigator.platform) && e.target.closest?.("input, textarea, [contenteditable]")) return;
+    const dir = e.key === "ArrowLeft" ? -1 : 1;
+    const place = navPlace === "left" && writerNow().open ? "left" : navPlace === "right" && drawer.open ? "right" : "main";
+    e.preventDefault();
+    if (place === "left") { if (!leftGo(dir)) toast(dir < 0 ? "Nothing to go back to in the left drawer" : "Nothing to go forward to"); }
+    else if (place === "right") { if (!drawerGo(dir)) toast(dir < 0 ? "Nothing to go back to in the drawer" : "Nothing to go forward to"); }
+    else if (dir < 0) history.back(); else history.forward();
+}, true);
 
 // a renamed note's drawer page follows it
 function renameInDrawer(from, to) { if (drawer.recent.includes(from)) setDrawer({ ...drawer, recent: drawer.recent.map((h) => (h === from ? to : h)) }); }
@@ -1692,14 +1730,14 @@ function RenameDialog({ path: p, title: title0 = "", withTitle = false, onDone, 
  * collect until Save changes (Ctrl+S); only changed keys are patched.
  */
 const DEFAULT_GROUPS = { characters: {
-    bio: ["race", "alive", "age-introduced", "age-current", "age", "member-of", "wealth", "character/power-system", "character/talent", "role"],
+    bio: ["name", "aliases", "race", "alive", "age-introduced", "age-current", "age", "member-of", "wealth", "character/power-system", "character/talent", "role"],
     appearance: ["gender", "height", "weight", "eye-color", "hair-color", "hair-style", "facial-hair", "bust-size", "attractiveness"],
 } };
 // list fields that read better as a section of their own (a list under a heading) than as a property
 const DEFAULT_LIST_SECTIONS = { characters: ["character/skills"] };
 // fields the page never shows (only Links & more): leftovers, or covered elsewhere (ledgers, stat templates); a schema
 // collection's `hidden` replaces the list for it
-const DEFAULT_HIDDEN = { characters: ["chapter-introduced", "chapter-updated", "character/level", "character/sub-level", "items", "inventory"] };
+const DEFAULT_HIDDEN = { characters: ["novel", "chapter-introduced", "chapter-updated", "character/level", "character/sub-level", "items", "inventory"] };
 const HIDDEN_EVERYWHERE = new Set(["cssclasses"]);
 const PLAN_SECTIONS = { plots: ["plot"], volumes: ["description", "plan"], chapters: ["plan"] };
 const TECH_KEYS = new Set(["type", "created-date", "facet", "images"]);

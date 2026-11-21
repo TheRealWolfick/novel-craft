@@ -26,7 +26,32 @@ let writer = (() => {
     return none;
 })();
 const writerListeners = new Set();
-const setWriter = (w) => { writer = w; writerListeners.forEach((f) => f(w)); try { localStorage.setItem("writerState", JSON.stringify(w)); } catch { /* private window */ } };
+// Back / forward in the left drawer (Alt+← / Alt+→): what it showed (its tabs and which one) before each change
+const leftNav = { back: [], fwd: [], restoring: false };
+const leftSnap = (w) => JSON.stringify({ tabs: w.tabs, active: w.active });
+const setWriter = (w) => {
+    if (!leftNav.restoring && leftSnap(w) !== leftSnap(writer)) { leftNav.back.push(leftSnap(writer)); leftNav.fwd = []; if (leftNav.back.length > 50) leftNav.back.shift(); }
+    writer = w; writerListeners.forEach((f) => f(w)); try { localStorage.setItem("writerState", JSON.stringify(w)); } catch { /* private window */ }
+};
+/** Alt+← / Alt+→ in the left drawer: the tab it showed before (or after); returns whether it moved */
+export function leftGo(dir) {
+    const from = dir < 0 ? leftNav.back : leftNav.fwd, to = dir < 0 ? leftNav.fwd : leftNav.back;
+    if (!from.length) return false;
+    const snap = JSON.parse(from.pop());
+    to.push(leftSnap(writer));
+    // only which tab shows (and which page a tab shows) goes back: tabs opened since stay open
+    let tabs = writer.tabs;
+    if (snap.active !== "writer" && !tabs.includes(snap.active)) {
+        const gone = snap.tabs.filter((t) => !tabs.includes(t)), added = tabs.filter((t) => !snap.tabs.includes(t));
+        // the tab followed a link to another page (a plot's family): it shows the earlier page again
+        if (gone.length === 1 && added.length === 1 && gone[0] === snap.active) tabs = tabs.map((t) => (t === added[0] ? snap.active : t));
+        else tabs = [...tabs, snap.active].slice(-(LEFT_TABS - 1));   // a tab closed since comes back
+    }
+    leftNav.restoring = true;
+    setWriter({ ...writer, tabs, active: snap.active, open: true });
+    leftNav.restoring = false;
+    return true;
+}
 /** Where the writer is now ({folder, n, open}), for the assistant's view of the screen */
 export const writerNow = () => writer;
 export function useWriter() {

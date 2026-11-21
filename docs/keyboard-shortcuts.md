@@ -13,6 +13,7 @@ blurb: Every keyboard shortcut in the app, in one table.
 | <kbd>Ctrl</kbd>+<kbd>]</kbd> | Open or close the side drawer |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> | Move the split between the writer and the drawer left / right (both open) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\\</kbd> | Put the split back in the middle |
+| <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Back / forward in the place you last clicked or typed in: the page, the side drawer (its pages and tabs) or the left drawer (its tabs, and the pages a tab followed). A closed drawer doesn't count: then it's the page |
 | <kbd>Escape</kbd> twice | Discard a new item you're making (a new block, note, entry or recipe); the first press says so |
 | Double-click | Edit a block or a ledger entry (double-click the block's edges again to close it) |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the form or note you're editing |
