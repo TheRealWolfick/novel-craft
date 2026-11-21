@@ -368,7 +368,7 @@ function CompatSettings({ s, kind, busy, save, keyText, setKey }) {
                     ${o.presets.map((p) => html`<button class=${o.preset === p.id ? "on" : ""} onClick=${() => save({ localPreset: p.id })}>${p.label}</button>`)}
                     <button class=${custom ? "on" : ""} onClick=${() => save({ localPreset: "custom" })}>Other address</button>
                 </div>
-                ${preset && html`<p class="muted small"><code>${preset.url}</code>. ${preset.help}</p>`}
+                ${preset && html`<p class="muted small"><code>${preset.url}</code>. ${preset.help.split("`").map((t, i) => (i % 2 ? html`<code>${t}</code>` : t))}</p>`}
             </div>
             ${custom && html`<div class="field"><label>Address</label>
                 <div class="row"><input placeholder="http://localhost:8000/v1" value=${url} onInput=${(e) => setUrl(e.target.value)}
@@ -384,7 +384,7 @@ function CompatSettings({ s, kind, busy, save, keyText, setKey }) {
             </div>`}`}
         <div class="field"><label>Model</label>
             <div class="row">
-                <input list=${`ai-models-${kind}`} placeholder=${models.length ? "Choose or type a model" : kind === "openai" ? "e.g. the model's id from OpenAI's docs" : "e.g. qwen3"} value=${model}
+                <input class="grow" list=${`ai-models-${kind}`} placeholder=${models.length ? "Choose or type a model" : kind === "openai" ? "A model id (the list appears once the key is saved)" : "e.g. qwen3"} value=${model}
                     onInput=${(e) => { setModel(e.target.value); if (models.includes(e.target.value)) saveModel(e.target.value); }}
                     onKeyDown=${(e) => e.key === "Enter" && saveModel()} onBlur=${() => saveModel()} />
                 <datalist id=${`ai-models-${kind}`}>${models.map((m) => html`<option value=${m} />`)}</datalist>
