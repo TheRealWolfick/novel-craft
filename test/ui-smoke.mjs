@@ -1206,6 +1206,21 @@ if (process.env.SETTINGS_DIR) {
     check(w.localStorage.getItem("lastHash") === "#/c/Items" && saved?.open === true && saved.recent.length >= 1, "the page and the drawer are saved for the next start", JSON.stringify({ last: w.localStorage.getItem("lastHash"), saved }));
     doc.querySelector(".drawer-tabs button[title^='Collapse']").click(); await wait(300);
 }
+// left drawer tabs: a side-drawer page copied to the left drawer, behind the writer tab
+{
+    const doc = w.document;
+    w.location.hash = "#/c/Items"; await wait(800);
+    doc.querySelector('main [data-drawer] a[href^="#/note/"]').click(); await wait(900);
+    const title = doc.querySelector(".drawer .drawer-pane:not([hidden]) h1")?.textContent;
+    [...doc.querySelectorAll(".drawer .drawer-tabs button")].find((b) => b.textContent.includes("On the left")).click(); await wait(900);
+    const tabs = () => [...doc.querySelectorAll(".writer .left-tabs [role=tab]")].map((b) => b.textContent.trim());
+    check(tabs().length === 2 && tabs()[0].startsWith("✎") && !!title?.startsWith(tabs()[1]) && !doc.querySelectorAll(".writer .left-tabs [role=tab]")[0].nextElementSibling?.classList.contains("left-tab-x")
+        && doc.querySelector(".writer .drawer-pane:not([hidden]) h1")?.textContent === title,
+        "a drawer page opens on the left as a tab after the writer, which has no close button", JSON.stringify({ tabs: tabs(), title, left: doc.querySelector(".writer .drawer-pane:not([hidden]) h1")?.textContent }));
+    doc.querySelector(".writer .left-tab-x").click(); await wait(400);
+    check(!doc.querySelector(".writer .left-tabs"), "closing the last copied tab leaves only the writer");
+    doc.querySelector(".drawer-tabs button[title^='Collapse']")?.click(); await wait(300);
+}
 // AI assistant (the test server runs with WB_AI_MOCK=1: a stand-in for Claude, no network)
 {
     const doc = w.document;

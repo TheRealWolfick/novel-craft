@@ -285,7 +285,37 @@ const themeNow = () => ({ background: cssVar("--panel", "#1f1e23"), foreground: 
 
 // The terminal, its stream and what was sent live as long as the app (not the tab): switching tabs, opening a note or a
 // re-render puts the same terminal back, so the conversation only changes with New, History, End or closing the app.
-const T = { term: null, fit: null, inner: null, es: null, id: null, received: 0, sent: [], autoTried: false, starting: false, ui: {}, queue: { pending: "", busy: false } };
+const T = { term: null, fit: null, inner: null, es: null, id: null, received: 0, sent: [], autoTried: false, starting: false, ui: {}, queue: { pending: "", busy: false }, owner: null };
+
+// The AI tab can show in the side drawer and in a left-drawer tab at once. The terminal is one xterm, so it lives in
+// the copy used last (T.owner); the other copy shows a live text mirror of the screen and its own message box, and can
+// take the terminal over. What the stream reports (running, ended, the conversation list) goes to every copy.
+const copies = new Set();              // each mounted copy's handlers (a ref: {current: {setRunning, …}})
+const ownerListeners = new Set();
+const claimTerminal = (who) => { if (T.owner === who) return; T.owner = who; ownerListeners.forEach((f) => f(who)); };
+const each = (k) => (...a) => copies.forEach((c) => c.current[k]?.(...a));
+const ownerDoes = (k) => (...a) => T.owner?.current[k]?.(...a);
+T.ui = { setRunning: each("setRunning"), setExit: each("setExit"), setStatus: each("setStatus"), state: each("state"), answer: ownerDoes("answer"), focus: ownerDoes("focus") };
+
+/** The terminal's screen as text, for the copy of the AI tab that doesn't hold the terminal (updated as output arrives) */
+function TermMirror() {
+    const [, tick] = useState(0);
+    useEffect(() => {
+        const t = T.term;
+        if (!t) return;
+        let raf = 0;
+        const later = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; tick((x) => x + 1); }); };
+        const subs = [t.onWriteParsed?.(later), t.onResize?.(later), t.onScroll?.(later)].filter(Boolean);
+        return () => { subs.forEach((d) => d.dispose()); cancelAnimationFrame(raf); };
+    }, [T.term]);
+    const t = T.term;
+    if (!t) return html`<div class="term-mirror muted">Starting…</div>`;
+    const b = t.buffer.active;
+    const rows = [];
+    for (let y = 0; y < t.rows; y++) rows.push(b.getLine(b.viewportY + y)?.translateToString(true) ?? "");
+    while (rows.length && !rows.at(-1).trim()) rows.pop();
+    return html`<pre class="term-mirror" aria-label="Claude Code (mirror)">${rows.join("\n")}</pre>`;
+}
 async function flushKeys() {
     const qd = T.queue;
     if (qd.busy || !qd.pending) return;
@@ -407,8 +437,20 @@ export function ClaudeTerminal({ active }) {
     useEffect(() => { api.get("/api/terminal/status").then((s) => { setStatus(s); setRunning(s.running); setExit(s.exit); setSession(s.session); }).catch((e) => setError(e.message)); }, []);
     const type = typeKeys;
     const sent = { get current() { return T.sent; }, set current(v) { T.sent = v; } };
+    // this copy of the tab: registered for what the stream reports; it holds the terminal when it was used last
+    const me = useRef(null);
+    const [owner, setOwner] = useState(T.owner);
+    useEffect(() => {
+        copies.add(me);
+        const f = (who) => { setOwner(who); if (!who) claimTerminal(me); };   // the holder went away: the first copy takes it
+        ownerListeners.add(f);
+        if (!T.owner) claimTerminal(me);
+        return () => { copies.delete(me); ownerListeners.delete(f); if (T.owner === me) claimTerminal(null); };
+    }, []);
+    useEffect(() => { if (active) claimTerminal(me); }, [active]);
+    const live = owner === me;
     // what the app-level terminal tells this tab
-    T.ui = {
+    me.current = {
         setRunning, setExit, setStatus,
         state: ({ menu: m, prompt: p }) => {
             setMenu((was) => (was === m ? was : m));
@@ -422,7 +464,7 @@ export function ClaudeTerminal({ active }) {
 
     // put the terminal here (made the first time, moved here after that)
     useEffect(() => {
-        if (!status?.claude || status.support?.ok === false || !host.current) return;
+        if (!status?.claude || status.support?.ok === false || !host.current || !live) return;
         let gone = false, ro = null, timer = null;
         makeTerminal(host.current).then((t) => {
             if (gone) return;
@@ -442,13 +484,13 @@ export function ClaudeTerminal({ active }) {
             setReady(true);
         }).catch((e) => setError(`The terminal couldn't load: ${e.message}`));
         return () => { gone = true; ro?.disconnect(); clearTimeout(timer); };   // the terminal itself stays
-    }, [status?.claude]);
+    }, [status?.claude, live]);
 
     // shown again: fit to the pane and take the keyboard
     useEffect(() => {
-        if (!active || !term.current) return;
+        if (!active || !term.current || !live) return;
         requestAnimationFrame(() => { try { fit.current.fit(); } catch { /* hidden */ } (box.current ?? term.current)?.focus(); });
-    }, [active, ready, running]);
+    }, [active, ready, running, live]);
 
     // while it runs, the server knows what Novel Craft shows (Claude Code's current_view tool)
     useEffect(() => {
@@ -545,7 +587,10 @@ export function ClaudeTerminal({ active }) {
             </button>`)}
         </div>`}
         <div class="term-wrap" ref=${wrap}>
-            <div class="term-host" ref=${host} />
+            ${live ? html`<div class="term-host" ref=${host} />` : html`<div class="term-host term-mirror-host">
+                <${TermMirror} />
+                <button class="small term-takeover" onClick=${() => claimTerminal(me)} title="The terminal is showing in the other drawer; this is a live copy">Use the terminal here</button>
+            </div>`}
             ${running && menu && html`<button class="term-close" title="Close this screen (Escape)" onClick=${() => { type("\x1b"); setMenu(false); box.current?.focus(); }}>✕ Close</button>`}
             ${running && html`<div class="ai-input term-input" ref=${inputBar}>
                 <textarea ref=${box} rows="1" placeholder=${answering != null ? "Write your answer… (Shift+Enter sends it)" : prompt ? "Answer above, or write something here… (Enter chooses · ↑↓ move · Esc cancels)" : "Message Claude Code… (Shift+Enter sends · Enter: new line · Esc stops it)"} value=${text}

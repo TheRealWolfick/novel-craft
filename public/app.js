@@ -6,7 +6,7 @@ import { parseOutline, serializeOutline } from "./outline.js";
 import { parseLevels } from "./levels.js";
 import { MapEditor } from "./map-editor.js";
 import { WorldView, WorldOutline, MapAssetsView } from "./world.js";
-import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, expandWriter, BlockEditor } from "./writer.js";
+import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, expandWriter, BlockEditor, openOnLeft, closeLeftTab, renameLeftTab } from "./writer.js";
 import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from "./sections.js";
 import { inlineHtml, setSpeechGroups } from "./blocks.js";
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
@@ -291,6 +291,8 @@ function useRoute() {
     return { name: parts[0] || "home", args: parts.slice(1), params: new URLSearchParams(query ?? "") };
 }
 const go = (href) => { location.hash = href; };
+/** Pages shown in the side drawer or a left-drawer tab use the drawer's layout (scope "drawer" / "left") */
+const inDrawer = (scope) => scope === "drawer" || scope === "left";
 
 // ------------------------------------------------------------------ unsaved edits
 
@@ -433,6 +435,8 @@ function Drawer({ index, novel }) {
             <div class="drawer-tabs" role="tablist">
                 ${tabs.map(([k, l]) => html`<button key=${k} role="tab" aria-selected=${k === tab} class=${k === tab ? "on" : ""} onClick=${() => openDrawerTab(k)}>${sideLabel(k, l)}</button>`)}
                 <span class="grow" />
+                <button class="small" title="Open this tab in the left drawer too" aria-label="Open on the left" disabled=${tab === "viewer" && !href}
+                    onClick=${() => openOnLeft(tab === "viewer" ? href : tab === "novel" ? `pane:novel:${novel}` : `pane:${tab}`)}>⇤ On the left</button>
                 <button class="small" title="Collapse (Ctrl+])" onClick=${collapseDrawer}>»</button>
             </div>
             <div class="drawer-pane" hidden=${tab !== "viewer"} ref=${panes.viewer}><${DrawerViewer} index=${index} d=${d} /></div>
@@ -464,17 +468,51 @@ function DrawerViewer({ index, d }) {
             ${pick && html`<div class="pick-banner"><span>Choosing for <b>${pick.label}</b>: press Add on a row, or open one and press Use this.</span>
                 <span class="row">${pick.collections.map((c) => html`<button class=${`small ${name === "c" && args.join("/") === c ? "on" : ""}`} onClick=${() => openInDrawer(`#/c/${encodeURIComponent(c)}`)}>${collectionLabel(c)}</button>`)}
                     <button class="small" onClick=${() => setItemPick(null)}>Cancel</button></span></div>`}
-            ${name === "chapter" ? html`<${ChapterView} folder=${args[0]} n=${args[1]} scope="drawer" />`
-            // a ledger entry written from the chapter view in the drawer; saving or cancelling goes back to that chapter
-            : name === "entry" ? (() => { const { folder, params } = entryParams(href); const ch = params.get("chapter");
-                return html`<${EntryEditor} index=${index} folder=${folder} params=${params} embedded=${true}
-                    onDone=${() => (ch ? openInDrawer(chapterHref(folder, ch)) : collapseDrawer())} />`; })()
-            : name === "c" ? html`<${CollectionView} index=${index} collection=${args.join("/")} novelFilter="" scope="drawer" />`
-            : name === "new" ? html`<${NoteForm} index=${index} collection=${args.join("/")} scope="drawer" />`
-            : name === "newchar" ? html`<${NoteForm} index=${index} collection="characters" novel=${args[0]} scope="drawer" />`
-            : name === "proposal" ? html`<${ProposalView} id=${args[0]} />`
-            : name === "docs" ? html`<${DocArticle} id=${args[0].split("?")[0]} section=${new URLSearchParams(args[0].split("?")[1] ?? "").get("s")} scope="drawer" />`
-            : html`<${NoteView} index=${index} path=${args.join("/")} scope="drawer" />`}</div>`;
+            ${drawerPage(href, index, "drawer")}</div>`;
+}
+
+/** A drawer page (#/note/…, #/chapter/…, #/c/…, an entry, a form, docs) as shown in the side drawer or a left tab */
+function drawerPage(href, index, scope) {
+    const [name, ...args] = parseDrawerHref(href);
+    if (name === "chapter") return html`<${ChapterView} folder=${args[0]} n=${args[1]} scope=${scope} />`;
+    // a ledger entry written from the chapter view in the drawer; saving or cancelling goes back to that chapter
+    if (name === "entry") {
+        const { folder, params } = entryParams(href); const ch = params.get("chapter");
+        return html`<${EntryEditor} index=${index} folder=${folder} params=${params} embedded=${true}
+            onDone=${() => (ch ? openInDrawer(chapterHref(folder, ch)) : collapseDrawer())} />`;
+    }
+    if (name === "c") return html`<${CollectionView} index=${index} collection=${args.join("/")} novelFilter="" scope=${scope} />`;
+    if (name === "new") return html`<${NoteForm} index=${index} collection=${args.join("/")} scope=${scope} />`;
+    if (name === "newchar") return html`<${NoteForm} index=${index} collection="characters" novel=${args[0]} scope=${scope} />`;
+    if (name === "proposal") return html`<${ProposalView} id=${args[0]} />`;
+    if (name === "docs") return html`<${DocArticle} id=${args[0].split("?")[0]} section=${new URLSearchParams(args[0].split("?")[1] ?? "").get("s")} scope="drawer" />`;
+    return html`<${NoteView} index=${index} path=${args.join("/")} scope=${scope} />`;
+}
+
+/** What a left-drawer tab is called: a page's title, or the pane's name */
+export function tabLabel(key, index) {
+    if (key === "pane:lookup") return "Lookup";
+    if (key === "pane:datastore") return "Data store";
+    if (key === "pane:taxonomy") return "Taxonomy";
+    if (key === "pane:ai") return "AI";
+    if (key.startsWith("pane:novel:")) return `Novel: ${novelName(index, key.slice(11))}`;
+    return drawerLabel(key, index);
+}
+
+/**
+ * A tab in the left drawer: a copy of a side-drawer page or pane. It shows the same data as the drawer (pages refetch on
+ * every vault change, the assistant's conversation is shared), so a change in one shows in the other.
+ */
+export function LeftTab({ tab, index, active }) {
+    const scroller = useRef();
+    useScrollMemory(scroller, `left:${tab}`, { ready: active, scroller: (el) => el.querySelector(":scope > .drawer-body") });
+    let body;
+    if (tab === "pane:lookup") body = html`<${Lookup} index=${index} novel=${null} active=${active} />`;
+    else if (tab === "pane:datastore" || tab === "pane:taxonomy") body = html`<${BrowsePane} index=${index} taxonomy=${tab === "pane:taxonomy"} active=${active} />`;
+    else if (tab.startsWith("pane:novel:")) body = html`<${NovelDrawer} folder=${tab.slice(11)} index=${index} />`;
+    else if (tab === "pane:ai") return html`<${AiPane} active=${active} />`;
+    else body = html`<div class="drawer-body" data-drawer>${drawerPage(tab, index, "left")}</div>`;
+    return html`<div class="left-tab-pane" data-drawer ref=${scroller}>${body}</div>`;
 }
 
 // ------------------------------------------------------------------ lookup (drawer tab)
@@ -1048,12 +1086,12 @@ function WriterButton({ index }) {
     const w = useWriter();
     const m = /^#\/chapter\/([^/]+)\/([\d.]+)/.exec(location.hash);
     const novelName = (folder) => index?.novels.find((n) => n.folder === folder)?.name ?? folder;
-    const can = !!w.folder || !!m;
+    const can = !!w.folder || !!m || w.tabs.length > 0;
     const label = w.folder ? `Chapter ${w.n}` : m ? `Chapter ${m[2]}` : "";
     const title = w.folder ? `Open the writer: ${novelName(w.folder)}, chapter ${w.n} (Ctrl+[)`
         : m ? `Write chapter ${m[2]} (Ctrl+[)` : "No chapter in the writer yet: open a chapter and press ✎ Write";
     return html`<button class="side-pill writer-pill" disabled=${!can} aria-disabled=${!can} title=${title}
-        onClick=${() => (w.folder ? expandWriter() : toggleWriter())}>
+        onClick=${() => (w.folder || w.tabs.length ? expandWriter() : toggleWriter())}>
         <span>✎ Open writer</span>${label && html`<span class="writer-pill-ch">${label}</span>`}</button>`;
 }
 
@@ -1192,7 +1230,7 @@ function CollectionView({ index, collection, novelFilter, scope = "page" }) {
                 ${allFacets.length > 0 && html`<button title="Choose which filter groups show" onClick=${() => setPicking(true)}>Filters${hiddenFacets.some((k) => allFacets.some((f) => f.key === k)) ? html` <span class="muted">(${facets.length}/${allFacets.length})</span>` : ""}</button>`}
                 <button onClick=${() => { const m = mode === "table" ? "cards" : "table"; setMode(m); store.set("viewMode", m); }}>${mode === "table" ? "Cards" : "Table"}</button>
                 ${collection.startsWith("Taxonomy/") && html`<button title="Add several values at once from a list (levels with sub-levels and numbers)" onClick=${() => setAddingMany(true)}>Add several…</button>`}
-                <button class="primary" onClick=${() => (scope === "drawer" ? openInDrawer : go)(`#/new/${encodeURIComponent(collection)}`)}>New</button>
+                <button class="primary" onClick=${() => (inDrawer(scope) ? openInDrawer : go)(`#/new/${encodeURIComponent(collection)}`)}>New</button>
             </div>
             ${addingMany && html`<${TaxonomyDialog} index=${index} collection=${collection} onClose=${() => setAddingMany(false)} />`}
         </div>
@@ -1822,6 +1860,7 @@ function NoteView({ index, path, scope = "page" }) {
             markDirty(scope, page.path, false);
             toast(`Moved to ${r.trashed}`);
             if (scope === "drawer") dropFromDrawer(noteHref(page.path));
+            else if (scope === "left") closeLeftTab(noteHref(page.path));
             else go(page.collection ? `#/c/${encodeURIComponent(page.collection)}` : novel ? `#/novel/${encodeURIComponent(novel.folder)}` : "#/");
         } catch (e) { toast(e.message); }
     };
@@ -1831,12 +1870,13 @@ function NoteView({ index, path, scope = "page" }) {
         if (!r.renamed) return;
         markDirty(scope, page.path, false);
         if (scope === "drawer") renameInDrawer(noteHref(page.path), noteHref(r.path));
+        else if (scope === "left") renameLeftTab(noteHref(page.path), noteHref(r.path));
         else location.replace(noteHref(r.path));
     };
     const startRename = () => { if (!dirtyForms.has(`${scope}:${page.path}`) || confirm("Renaming reloads this note. Discard unsaved changes?")) setRenaming(true); };
     const backlinks = Object.keys(page.backlinks).length > 0 && html`<div class="panel"><h3>Linked from</h3>${linkGroups(page.backlinks)}</div>`;
     const outlinks = Object.keys(page.outlinks ?? {}).length > 0 && html`<div class="panel"><h3>Links to</h3>${linkGroups(page.outlinks)}</div>`;
-    const charTabs = scope === "drawer" && page.fm.type === "character" && !!novel;
+    const charTabs = inDrawer(scope) && page.fm.type === "character" && !!novel;
     const tabNow = charTab === "entry" && !entryTab ? "ledger" : charTab === "ledger" || charTab === "entry" ? charTab : "sheet";
     return html`<div>
         ${renaming && html`<${RenameDialog} path=${page.path} onDone=${renamed} onClose=${() => setRenaming(false)} />`}
@@ -1847,9 +1887,9 @@ function NoteView({ index, path, scope = "page" }) {
                     ${page.fm.status ? html` <span class="badge">${page.fm.status}</span>` : ""}</h1>
             </div>
             <div class="row">
-                ${page.fm.type === "character" && novel && scope !== "drawer" && html`<button onClick=${() => go(`#/owner/${encodeURIComponent(novel.folder)}/${encodeURIComponent(page.name)}`)}>Ledgers</button>`}
+                ${page.fm.type === "character" && novel && !inDrawer(scope) && html`<button onClick=${() => go(`#/owner/${encodeURIComponent(novel.folder)}/${encodeURIComponent(page.name)}`)}>Ledgers</button>`}
                 ${pickable(pick, page.collection) && html`<button class="primary" onClick=${() => pick.pick(page.name)}>Use this for ${pick.label}</button>`}
-                ${page.collection === "Items" && !page.blueprint && html`<button title="Make the recipe (blueprint) for this item" onClick=${() => { if (scope === "drawer") collapseDrawer(); go(`#/newrecipe/${encodeURIComponent(page.path)}`); }}>Create recipe</button>`}
+                ${page.collection === "Items" && !page.blueprint && html`<button title="Make the recipe (blueprint) for this item" onClick=${() => { if (inDrawer(scope)) collapseDrawer(); go(`#/newrecipe/${encodeURIComponent(page.path)}`); }}>Create recipe</button>`}
                 ${["Items", "Materials"].includes(page.collection) && html`<button title="Copy as an item callout (like a game's item tooltip)" onClick=${() => copyText(itemCallout(page, spec), `Copied ${page.name} as a callout`)}>⧉ Copy callout</button>`}
                 ${renameable && html`<button title="Rename the file; links to it in the vault follow" onClick=${startRename}>Rename file</button>`}
                 ${deletable && html`<${ConfirmButton} class="" onConfirm=${del}
@@ -1865,7 +1905,7 @@ function NoteView({ index, path, scope = "page" }) {
         </div>`}
         ${charTabs && tabNow === "ledger" && html`<${OwnerView} key=${page.name} index=${index} folder=${novel.folder} owner=${page.name} params=${new URLSearchParams()} embedded=${true} onEntry=${openEntry} />`}
         ${charTabs && entryTab && html`<div hidden=${tabNow !== "entry"}><${EntryEditor} key=${entryTab} index=${index} folder=${novel.folder} params=${new URLSearchParams(entryTab)} embedded=${true} onDone=${closeEntry} /></div>`}
-        <div hidden=${charTabs && tabNow !== "sheet"}>${scope === "drawer"
+        <div hidden=${charTabs && tabNow !== "sheet"}>${inDrawer(scope)
             // drawer: summary, content, then images on the left; frontmatter and links on the right
             // (plan notes keep their fields, which are the plan, on the left)
             ? html`<${ClassStrip} page=${page} index=${index} />
@@ -2329,7 +2369,7 @@ function NoteForm({ index, collection, novel, scope = "page" }) {
                 const fm = Object.fromEntries(Object.entries(vals).filter(([k, v]) => v !== "" && !(Array.isArray(v) && !v.length) && !generated.has(k)).map(([k, v]) => [k, coerce(v)]));
                 const r = await api.send("POST", "/api/character", { novel, name, fm });
                 markDirty(scope, dirtyKey, false);
-                if (scope === "drawer") openInDrawer(noteHref(r.path));
+                if (inDrawer(scope)) openInDrawer(noteHref(r.path));
                 else go(noteHref(r.path));
             } else {
                 const fm = Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, coerce(v)]));
@@ -2338,14 +2378,19 @@ function NoteForm({ index, collection, novel, scope = "page" }) {
                 const made = r.path.split("/").pop().replace(/\.md$/, "");
                 // made while choosing an item: it is taken at once; otherwise it opens where the form was
                 if (pickable(pick, collection)) pick.pick(made);
-                else if (scope === "drawer") openInDrawer(noteHref(r.path));
+                else if (inDrawer(scope)) openInDrawer(noteHref(r.path));
                 else go(noteHref(r.path));
             }
         } catch (e) { setErr(e.message); }
         setBusy(false);
     };
     const title = collection === "characters" ? "New character" : `New ${spec.label ?? collection}`;
-    const cancel = () => { markDirty(scope, dirtyKey, false); scope === "drawer" ? (drawer.recent.length > 1 ? openInDrawer(drawer.recent[1]) : collapseDrawer()) : history.back(); };
+    const cancel = () => {
+        markDirty(scope, dirtyKey, false);
+        if (scope === "left") closeLeftTab(collection === "characters" ? `#/newchar/${encodeURIComponent(novel)}` : `#/new/${encodeURIComponent(collection)}`);
+        else if (scope === "drawer") drawer.recent.length > 1 ? openInDrawer(drawer.recent[1]) : collapseDrawer();
+        else history.back();
+    };
     useEscapeTwice(true, cancel, formRef);
     // data-drawer: notes linked from the form (chips in link fields) open in the side drawer, so the form stays
     return html`<div data-drawer ref=${formRef}>
@@ -3133,13 +3178,13 @@ function ChapterView({ folder, n, scope = "page" }) {
         <div class="spread" style="margin-top:18px">
             <h2 style="margin:0">Ledger entries <span class="muted" style="font-size:13px">${data.entries.length}</span></h2>
             <div class="row">
-                <button class="primary" onClick=${() => (scope === "drawer" ? openInDrawer : go)(entryHref(folder, { chapter: num }))}>New entry</button>
+                <button class="primary" onClick=${() => (inDrawer(scope) ? openInDrawer : go)(entryHref(folder, { chapter: num }))}>New entry</button>
                 <button disabled=${!entries.length} onClick=${() => copyText(entries.map((e) => e.callout).join("\n\n"), `Copied ${entries.length} callouts`)}>⧉ Copy all</button>
             </div>
         </div>
         ${types.length > 1 && html`<div class="row" style="margin:10px 0">${[["", "All"], ...types.map((t) => [t, t])].map(([t, label]) => html`<a class=${`chip ${type === t ? "on" : ""}`} href="javascript:" onClick=${() => setType(t)}>${label}</a>`)}</div>`}
         <div style="margin-top:10px">${entries.length ? entries.map((e) => html`<${EntryCard} e=${e} folder=${folder} behaviour=${beh(e.type)} showOwner=${true}
-            onEdit=${scope === "drawer" ? (p) => openInDrawer(entryHref(folder, { ...p, chapter: num })) : null} />`) : html`<p class="muted">No entries in this chapter.</p>`}</div>
+            onEdit=${inDrawer(scope) ? (p) => openInDrawer(entryHref(folder, { ...p, chapter: num })) : null} />`) : html`<p class="muted">No entries in this chapter.</p>`}</div>
     </div>`;
 }
 

@@ -9,7 +9,7 @@ blurb: Every keyboard shortcut in the app, in one table.
 
 | Keys | Does |
 | --- | --- |
-| <kbd>Ctrl</kbd>+<kbd>[</kbd> | Open or close the writer |
+| <kbd>Ctrl</kbd>+<kbd>[</kbd> | Open or close the writer (the left drawer, with its tabs) |
 | <kbd>Ctrl</kbd>+<kbd>]</kbd> | Open or close the side drawer |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> | Move the split between the writer and the drawer left / right (both open) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\\</kbd> | Put the split back in the middle |

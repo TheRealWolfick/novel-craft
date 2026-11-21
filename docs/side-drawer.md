@@ -20,6 +20,12 @@ The drawer slides in from the right. Closed, it leaves a button per tab on the r
 
 Beside the [writer](docs:writing-a-chapter) the two share the window half and half; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> move the split and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\\</kbd> resets it.
 
+## Tabs on the left
+
+Any drawer tab can also open in the left drawer, beside the [writer](docs:writing-a-chapter): press **⇤ On the left** at the top of the drawer. It copies what the tab shows (the page in the Viewer, or the Lookup, Data store, Taxonomy, Novel or AI tab) and opens it on the left as a tab of its own, behind the writer's tab, which is always first. Up to five tabs fit, the writer included; opening another closes the oldest. **×** closes a tab; the writer's tab has none. A tab you open there while no chapter is in the writer keeps the left drawer open for itself, and <kbd>Ctrl</kbd>+<kbd>[</kbd> or the sidebar's **Open writer** brings it back.
+
+A page open on both sides shows the same note: save a change on one side and the other shows it at once. The AI tab is shared too: with an API connection both show the same conversation as it streams; with Claude Code the terminal sits in the copy you used last, and the other copy shows its screen as live text with its own message box (**Use the terminal here** moves the terminal over).
+
 ## Lookup
 
 Type to search names, fields and the text of chapters. Results are grouped by kind with counts; **Only <novel>** limits notes inside novel folders to the one you're in. Opening a result shows it in the Viewer and keeps it under **Recently opened**. Chapter results have **✎ Write**.

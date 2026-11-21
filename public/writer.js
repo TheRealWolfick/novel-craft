@@ -4,15 +4,27 @@ import { h } from "preact";
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "preact/hooks";
 import htm from "htm";
 import { parseBlocks, serializeBlocks, blockMarkdown, newBlock, defaultSep, isList, isProse, wordCount, toggleWrap, IMAGE_ONLY, inlineHtml, markSpeech } from "./blocks.js";
-import { api, useApi, qs, toast, store, markDirty, confirmDiscard, Loading, openInDrawer, fieldInput, useNovelLinks, Html, useScrollMemory } from "./app.js";
+import { api, useApi, qs, toast, store, markDirty, confirmDiscard, Loading, openInDrawer, fieldInput, useNovelLinks, Html, useScrollMemory, LeftTab, tabLabel } from "./app.js";
 
 const html = htm.bind(h);
 const chapterHref = (folder, n) => `#/chapter/${encodeURIComponent(folder)}/${n}`;
 
 // ------------------------------------------------------------------ writer drawer state
 
-// {folder, n, open}: the chapter in the writer; collapsed it stays mounted (the sidebar's "Open writer" brings it back)
-let writer = (() => { try { const w = JSON.parse(localStorage.getItem("writerState")); if (w?.folder) return { folder: w.folder, n: Number(w.n), open: !!w.open }; } catch { /* none */ } return { folder: null, n: null, open: false }; })();
+// {folder, n, open, tabs, active}: the chapter in the writer; collapsed it stays mounted (the sidebar's "Open writer"
+// brings it back). `tabs` are drawer pages copied to the left drawer ("Open on the left" in the side drawer): hrefs
+// (#/note/…, #/chapter/…) or panes ("pane:lookup", "pane:datastore", "pane:taxonomy", "pane:ai", "pane:novel:<folder>");
+// `active` is "writer" or one of them. The writer tab is always first and can't be closed.
+export const LEFT_TABS = 5;   // tabs in the left drawer, the writer included
+let writer = (() => {
+    const none = { folder: null, n: null, open: false, tabs: [], active: "writer" };
+    try {
+        const w = JSON.parse(localStorage.getItem("writerState"));
+        const tabs = Array.isArray(w?.tabs) ? w.tabs.filter((t) => typeof t === "string").slice(0, LEFT_TABS - 1) : [];
+        if (w?.folder || tabs.length) return { folder: w.folder ?? null, n: w.folder ? Number(w.n) : null, open: !!w.open, tabs, active: tabs.includes(w.active) ? w.active : "writer" };
+    } catch { /* none */ }
+    return none;
+})();
 const writerListeners = new Set();
 const setWriter = (w) => { writer = w; writerListeners.forEach((f) => f(w)); try { localStorage.setItem("writerState", JSON.stringify(w)); } catch { /* private window */ } };
 /** Where the writer is now ({folder, n, open}), for the assistant's view of the screen */
@@ -23,18 +35,39 @@ export function useWriter() {
     return w;
 }
 export function collapseWriter() { if (writer.open) setWriter({ ...writer, open: false }); }
-export function expandWriter() { if (writer.folder && !writer.open) setWriter({ ...writer, open: true }); }
+export function expandWriter() { if ((writer.folder || writer.tabs.length) && !writer.open) setWriter({ ...writer, open: true }); }
+/** Copy a side-drawer page or pane to the left drawer as a tab (or show it, when it is there already) */
+export function openOnLeft(key) {
+    if (!key) return;
+    let tabs = writer.tabs.includes(key) ? writer.tabs : [...writer.tabs, key];
+    if (tabs.length > LEFT_TABS - 1) {
+        const out = tabs.find((t) => t !== writer.active && t !== key);
+        tabs = tabs.filter((t) => t !== out);
+        toast(`Closed the oldest tab: the left drawer holds ${LEFT_TABS} tabs`);
+    }
+    setWriter({ ...writer, tabs, active: key, open: true });
+}
+/** A renamed note's left tab follows it */
+export function renameLeftTab(from, to) { if (writer.tabs.includes(from)) setWriter({ ...writer, tabs: writer.tabs.map((t) => (t === from ? to : t)), active: writer.active === from ? to : writer.active }); }
+export function showLeftTab(key) { setWriter({ ...writer, active: key, open: true }); }
+export function closeLeftTab(key) {
+    const i = writer.tabs.indexOf(key);
+    if (i < 0) return;
+    const tabs = writer.tabs.filter((t) => t !== key);
+    const active = writer.active !== key ? writer.active : tabs[Math.min(i, tabs.length - 1)] ?? "writer";
+    setWriter({ ...writer, tabs, active, open: writer.open && (!!writer.folder || tabs.length > 0) });
+}
 /** Write a chapter: its text on the left, its plan and ledger entries in the drawer on the right */
 export function openWriter(folder, n, { withPlan = true } = {}) {
     const same = writer.folder === folder && Number(writer.n) === Number(n);
     if (!same && writer.folder && !confirmDiscard("writer")) return;
-    setWriter({ folder, n: Number(n), open: true });
+    setWriter({ ...writer, folder, n: Number(n), open: true, active: "writer" });
     if (withPlan) openInDrawer(chapterHref(folder, n));
 }
 
 /** Ctrl+[ : open or close the writer (on a chapter page with no chapter in the writer yet, that chapter) */
 export function toggleWriter() {
-    if (writer.folder) return setWriter({ ...writer, open: !writer.open });
+    if (writer.folder || writer.tabs.length) return setWriter({ ...writer, open: !writer.open });
     const m = /^#\/chapter\/([^/]+)\/([\d.]+)/.exec(location.hash);
     if (m) return openWriter(decodeURIComponent(m[1]), Number(m[2]), { withPlan: false });
     toast("No chapter in the writer yet: open a chapter and press ✎ Write");
@@ -42,10 +75,25 @@ export function toggleWriter() {
 
 export function WriterDrawer({ index }) {
     const w = useWriter();
-    if (!w.folder) return null;
+    if (!w.folder && !w.tabs.length) return null;
+    const active = w.tabs.includes(w.active) ? w.active : "writer";
     return html`<div class=${`writer-wrap ${w.open ? "open" : "collapsed"}`}>
         <aside class="writer" inert=${!w.open} aria-label="Chapter writer">
-            <${ChapterWriter} key=${`${w.folder}:${w.n}`} folder=${w.folder} n=${w.n} index=${index} />
+            ${w.tabs.length > 0 && html`<div class="drawer-tabs left-tabs" role="tablist">
+                <button role="tab" aria-selected=${active === "writer"} class=${active === "writer" ? "on" : ""} onClick=${() => showLeftTab("writer")}
+                    title=${w.folder ? `Writer: chapter ${w.n}` : "Writer"}>✎ ${w.folder ? `Chapter ${w.n}` : "Writer"}</button>
+                ${w.tabs.map((k) => html`<span key=${k} class=${`left-tab ${active === k ? "on" : ""}`}>
+                    <button role="tab" aria-selected=${active === k} class=${active === k ? "on" : ""} onClick=${() => showLeftTab(k)} title=${tabLabel(k, index)}>${tabLabel(k, index)}</button>
+                    <button class="left-tab-x" aria-label=${`Close ${tabLabel(k, index)}`} title="Close tab" onClick=${() => { if (!confirmDiscard("left")) return; closeLeftTab(k); }}>×</button>
+                </span>`)}
+                <span class="grow" />
+                <button class="small" title="Collapse (Ctrl+[)" onClick=${collapseWriter}>«</button>
+            </div>`}
+            <div class="drawer-pane" hidden=${active !== "writer"}>
+                ${w.folder ? html`<${ChapterWriter} key=${`${w.folder}:${w.n}`} folder=${w.folder} n=${w.n} index=${index} />`
+                    : html`<div class="writer-body"><div class="drawer-empty muted"><p>No chapter in the writer. Open a chapter and press ✎ Write.</p></div></div>`}
+            </div>
+            ${w.tabs.map((k) => html`<div key=${k} class="drawer-pane" hidden=${active !== k}><${LeftTab} tab=${k} index=${index} active=${w.open && active === k} /></div>`)}
         </aside>
     </div>`;
 }
