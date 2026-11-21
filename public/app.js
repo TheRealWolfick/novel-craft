@@ -1961,7 +1961,7 @@ function NoteView({ index, path, scope = "page" }) {
         ...(entryTab ? [["entry", entryTabLabel(entryTab)]] : []),
         ["links", "Links & more"]];
     const tabNow = tabs.some(([k]) => k === tab) ? tab : "page";
-    const family = page.plan?.kind === "plots" ? plotFamily(plan, page) : null;
+    const family = page.plan?.kind === "plots" ? plotFamily(plan, page) : page.plan?.kind === "volumes" && plan ? volumePlots(plan, page.fm) : null;
     const usage = html`
         ${page.heldBy?.length > 0 && html`<div class="np-side-sec"><h4>Held by</h4>${page.heldBy.map((x) => html`<div class="np-side-row"><a href=${ownerHref(x.novel, x.owner)}>${x.owner}</a><span class="muted">${x.qtyText}${x.store !== "inventory" ? ` @ ${x.store}` : ""}</span></div>`)}</div>`}
         ${page.whereUsed?.length > 0 && html`<div class="np-side-sec"><h4>Used in</h4><${WhereUsed} uses=${page.whereUsed} /></div>`}
@@ -1999,7 +1999,7 @@ function NoteView({ index, path, scope = "page" }) {
                     <${ClassStrip} page=${page} index=${index} />
                     ${page.fmError ? html`<p class="muted">Fix the frontmatter in Obsidian to edit fields here.</p>`
                         : html`<${FieldsEditor} key=${page.path} page=${page} index=${index} spec=${spec} scope=${scope} linkOptions=${linkOptions ?? novelLinks} />`}
-                    ${family && html`<${Subplots} family=${family} page=${page} open=${openNote} />`}
+                    ${family && html`<${PagePlots} page=${page} plan=${plan} family=${family} open=${openNote} />`}
                     <${PowerLevels} page=${page} index=${index} />
                     ${content}
                     <section class="np-sec"><div class="np-sec-head"><h2>Images</h2></div><${Gallery} images=${page.images} /><${ImageDrop} path=${page.path} /></section>
@@ -2083,66 +2083,109 @@ function CharacterRelations({ ledger, chapter, index, onEntry }) {
         </section>`)}</div>`;
 }
 
+const byRating = (a, b) => (b.rating?.class ?? 0) - (a.rating?.class ?? 0) || a.title.localeCompare(b.title);
+/** The plot a plot's `subplot-of` names (from the novel's plots), or null */
+function parentPlot(plots, p) {
+    const v = p.fm?.["subplot-of"];
+    if (!v) return null;
+    const k = linkKey(asList(v)[0]);
+    return plots.find((x) => x.name.toLowerCase() === k) ?? null;
+}
 /** A plot's family from the novel's plots: its main plot (what its `subplot-of` names), the main plot's subplots, its own */
 function plotFamily(plan, page) {
     const plots = plan?.plots ?? [];
-    if (!plots.length) return null;
-    const byName = new Map(plots.map((p) => [p.name.toLowerCase(), p]));
-    const parentOf = (p) => { const v = p.fm?.["subplot-of"]; return v ? byName.get(linkKey(asList(v)[0])) ?? null : null; };
     const me = plots.find((p) => p.path === page.path);
     if (!me) return null;
-    const parent = parentOf(me);
+    const parent = parentPlot(plots, me);
     const main = parent ?? me;
     return {
         parent, main,
-        subplots: plots.filter((p) => parentOf(p)?.path === main.path).sort((a, b) => (b.rating?.class ?? 0) - (a.rating?.class ?? 0) || a.title.localeCompare(b.title)),
-        children: plots.filter((p) => parentOf(p)?.path === me.path).sort((a, b) => (b.rating?.class ?? 0) - (a.rating?.class ?? 0) || a.title.localeCompare(b.title)),
+        subplots: plots.filter((p) => parentPlot(plots, p)?.path === main.path).sort(byRating),
+        children: plots.filter((p) => parentPlot(plots, p)?.path === me.path).sort(byRating),
     };
 }
+/**
+ * A volume's plots: its main plot (`plot`) and its subplots: the ones its `subplots` lists plus every plot whose
+ * `subplot-of` names the main plot, so a subplot shows in the volume however it was linked
+ */
+function volumePlots(plan, fm) {
+    const plots = plan?.plots ?? [];
+    const main = fm.plot ? plotByLink(plan, asList(fm.plot)[0]) : null;
+    const listed = asList(fm.subplots).map((v) => plotByLink(plan, v)).filter(Boolean);
+    const derived = main ? plots.filter((p) => parentPlot(plots, p)?.path === main.path) : [];
+    const subplots = [...new Map([...listed, ...derived].filter((p) => p.path !== main?.path).map((p) => [p.path, p])).values()].sort(byRating);
+    return { main, subplots };
+}
 
-/** The column beside a plot: the main plot and its subplots as titles, the open one marked; a click opens another */
+/** The column beside a plot or volume: the main plot and its subplots as titles, the open plot marked; a click opens one */
 function PlotFamily({ family, current, open }) {
     const pill = (p) => html`<button key=${p.path} class=${`np-pill ${p.path === current ? "on" : ""}`} aria-current=${p.path === current ? "page" : undefined}
         onClick=${() => p.path !== current && open(p.path)}>${p.title}</button>`;
-    return html`<div class="np-side-sec"><h4>Main plot</h4>${pill(family.main)}</div>
+    return html`<div class="np-side-sec"><h4>Main plot</h4>${family.main ? pill(family.main) : html`<p class="muted small">None yet.</p>`}</div>
         <div class="np-side-sec"><h4>Subplots</h4>${family.subplots.length ? family.subplots.map(pill) : html`<p class="muted small">None yet.</p>`}</div>`;
 }
 
-/** A plot's subplots on its page, each with its own text, edited here and saved to the subplot's note */
-function Subplots({ family, page, open }) {
+/**
+ * Plots shown on another note's page with their own text (a plot's subplots, a volume's main plot and subplots), each
+ * edited here (pencil or double-click) and saved to that plot's note. `onAdd` adds one.
+ */
+function PlotTexts({ title, hint = "", plots, open, onAdd = null, addLabel = "+ Add a subplot", empty = "No subplots yet." }) {
     const [editing, setEditing] = useState(null);   // path
     const [draft, setDraft] = useState("");
     const [busy, setBusy] = useState(false);
-    if (!family.children.length && family.parent) return null;
+    const start = (p) => { setEditing(p.path); setDraft(String(p.fm.plot ?? "")); };
     const save = async (p) => {
         setBusy(true);
         try { await api.send("PATCH", "/api/note", { path: p.path, set: { plot: draft }, baseMtime: p.mtime }); setEditing(null); toast(`Saved ${p.title}`); }
         catch (e) { toast(e.message); }
         setBusy(false);
     };
-    const add = async () => {
-        const title = window.prompt("Title of the new subplot")?.trim();
-        if (!title) return;
-        try {
-            const r = await api.send("POST", "/api/plan/plot", { novel: page.plan.novel, title, fm: { "subplot-of": toLink(page.name) } });
-            toast(`Added ${title}`);
-            if (r?.path) open(r.path);
-        } catch (e) { toast(e.message); }
-    };
     return html`<section class="np-sec">
-        <div class="np-sec-head"><h2>Subplots</h2><span class="muted small">plots whose “subplot of” is this one</span></div>
-        ${family.children.map((p) => html`<div key=${p.path} class="np-sub" onDblClick=${editing === p.path ? undefined : dblToggle(() => { setEditing(p.path); setDraft(String(p.fm.plot ?? "")); })}>
+        <div class="np-sec-head"><h2>${title}</h2>${hint && html`<span class="muted small">${hint}</span>`}</div>
+        ${plots.map((p) => html`<div key=${p.path} class="np-sub" onDblClick=${editing === p.path ? undefined : dblToggle(() => start(p))}>
             <div class="spread"><div class="row"><button class="linkish np-sub-title" onClick=${() => open(p.path)}>${p.title}</button>${p.rating && html`<span class="chip">${p.rating.title}</span>`}
                 ${asList(p.fm.characters).length > 0 && html`<span class="muted small">${asList(p.fm.characters).map(linkLabel).join(", ")}</span>`}</div>
-                ${editing !== p.path && html`<button class="icon" aria-label=${`Edit the text of ${p.title}`} title="Edit (or double-click)" onClick=${() => { setEditing(p.path); setDraft(String(p.fm.plot ?? "")); }}>${ICONS.edit}</button>`}</div>
+                ${editing !== p.path && html`<button class="icon" aria-label=${`Edit the text of ${p.title}`} title="Edit (or double-click)" onClick=${() => start(p)}>${ICONS.edit}</button>`}</div>
             ${editing === p.path ? html`<${AutoTextarea} class="np-sec-text" value=${draft} autoFocus=${true} onInput=${(e) => setDraft(e.target.value)} aria-label=${`The plot of ${p.title}`}
                     onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); e.stopPropagation(); save(p); } if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
                 <div class="row" style="margin-top:6px"><button class="primary" disabled=${busy} onClick=${() => save(p)}>${busy ? "Saving…" : "Save"}</button><button onClick=${() => setEditing(null)}>Cancel</button><span class="muted small">Saved to ${p.name}</span></div>`
                 : html`<p class=${`np-prose ${filled(p.fm.plot) ? "" : "blank"}`}>${filled(p.fm.plot) ? String(p.fm.plot) : "-"}</p>`}
         </div>`)}
-        ${!family.children.length && html`<p class="muted">No subplots yet.</p>`}
-        <button class="np-more" onClick=${add}>+ Add a subplot</button>
+        ${!plots.length && html`<p class="muted">${empty}</p>`}
+        ${onAdd && html`<button class="np-more" onClick=${onAdd}>${addLabel}</button>`}
     </section>`;
+}
+
+/** Make a plot (asks for its title), optionally a subplot of `parent`; resolves to its path */
+async function newPlot(novel, parent = null) {
+    const title = window.prompt(parent ? "Title of the new subplot" : "Plot title")?.trim();
+    if (!title) return null;
+    try {
+        const r = await api.send("POST", "/api/plan/plot", { novel, title, fm: parent ? { "subplot-of": toLink(parent) } : {} });
+        toast(`Added ${title}`);
+        return r?.path ?? null;
+    } catch (e) { toast(e.message); return null; }
+}
+
+/** The plot parts of a plot's or volume's page: a plot's subplots; a volume's main plot and subplots */
+function PagePlots({ page, plan, family, open }) {
+    if (page.plan?.kind === "plots") {
+        if (!family.children.length && family.parent) return null;   // a subplot without subplots of its own
+        return html`<${PlotTexts} title="Subplots" hint="plots whose “subplot of” is this one" plots=${family.children} open=${open}
+            onAdd=${async () => { const p = await newPlot(page.plan.novel, page.name); if (p) open(p); }} />`;
+    }
+    // a volume: a new subplot is a subplot of its main plot, or, with no main plot yet, listed in the volume's subplots
+    const addSub = async () => {
+        const p = await newPlot(page.plan.novel, family.main?.name ?? null);
+        if (!p) return;
+        if (!family.main) {
+            const name = p.split("/").pop().replace(/\.md$/, "");
+            try { await api.send("PATCH", "/api/note", { path: page.path, set: { subplots: [...asList(page.fm.subplots), toLink(name)] } }); } catch (e) { toast(e.message); }
+        }
+    };
+    return html`
+        <${PlotTexts} title="Main plot" plots=${family.main ? [family.main] : []} open=${open} empty="No main plot yet: choose one in the Plot field above." />
+        <${PlotTexts} title="Subplots" hint=${family.main ? `listed in the volume, or a subplot of ${family.main.title}` : "listed in the volume"} plots=${family.subplots} open=${open} onAdd=${addSub} />`;
 }
 
 /** A power system's levels: taxonomy values whose `power-system` is this note, per taxonomy, sub-levels indented, with their numbers */
@@ -3041,7 +3084,7 @@ function GrandPlan({ folder, plan }) {
                 </div>
                 <div class="volume-plots">
                     ${v.fm.plot && html`<${PlotChip} plan=${plan} value=${v.fm.plot} main=${true} />`}
-                    ${asList(v.fm.subplots).map((sp) => html`<${PlotChip} plan=${plan} value=${sp} />`)}
+                    ${volumePlots(plan, v.fm).subplots.map((sp) => html`<${PlotChip} plan=${plan} value=${toLink(sp.name)} />`)}
                 </div>
                 ${v.fm.description && html`<p>${v.fm.description}</p>`}
                 ${String(v.fm.plan ?? "").trim() && html`<details class="volume-outline"><summary>Volume outline</summary><${PlanView} text=${v.fm.plan} /></details>`}
@@ -3061,7 +3104,7 @@ function PlotBoard({ folder, plan }) {
     const flip = useFlip();
     const usage = (p) => plan.volumes.flatMap((v) => [
         ...(plotByLink(plan, v.fm.plot)?.path === p.path ? [{ v, main: true }] : []),
-        ...asList(v.fm.subplots).filter((sp) => plotByLink(plan, sp)?.path === p.path).map(() => ({ v, main: false })),
+        ...volumePlots(plan, v.fm).subplots.filter((sp) => sp.path === p.path).map(() => ({ v, main: false })),
     ]);
     const groups = [...plan.ratings.map((r) => [r, plan.plots.filter((p) => p.rating?.path === r.path)]), [null, plan.plots.filter((p) => !p.rating)]]
         .filter(([r, list]) => list.length || r);

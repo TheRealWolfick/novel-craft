@@ -1254,6 +1254,15 @@ if (process.env.SETTINGS_DIR) {
         w.location.hash = `#/note/${enc(sub.path)}`; await wait(1500);
         check(doc.querySelector("main .np-parent")?.textContent.includes(main.title) && doc.querySelector("main .np-side .np-pill.on")?.textContent === sub.title,
             "a subplot names its main plot and is marked among the subplots");
+        // a volume with a main plot shows it and its subplots (listed, or subplots of the main plot) in its column and on its page
+        const vol = plan.volumes.find((v) => v.fm.plot && plan.plots.some((p) => p.name.toLowerCase() === String(v.fm.plot).replace(/^\[\[|\]\]$/g, "").split("|")[0].toLowerCase()));
+        if (vol) {
+            w.location.hash = `#/note/${enc(vol.path)}`; await wait(1500);
+            const mainTitle = doc.querySelectorAll("main .np-side .np-side-sec")[0]?.querySelector(".np-pill")?.textContent;
+            const secs = [...doc.querySelectorAll("main .np-sec .np-sec-head h2")].map((h) => h.textContent);
+            check(!!mainTitle && secs.includes("Main plot") && secs.includes("Subplots") && doc.querySelector("main .np-sub .np-sub-title")?.textContent === mainTitle,
+                "a volume shows its main plot and subplots in its column and with their text on its page", JSON.stringify({ mainTitle, secs }));
+        }
     }
 }
 // AI assistant (the test server runs with WB_AI_MOCK=1: a stand-in for Claude, no network)
