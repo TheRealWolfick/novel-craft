@@ -26,7 +26,7 @@ Moves can be undone from the message that appears.
 
 Nested boxes sized by how much each place holds, coloured by scale. Click to select, double-click to zoom in.
 
-![The atlas](img/world-atlas-dark.png)
+![The atlas](img/world-atlas.png)
 
 ## Sharing
 

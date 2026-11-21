@@ -1,53 +1,31 @@
 [
  {
   "name": "home",
-  "hash": "#/",
-  "theme": "light"
+  "hash": "#/"
  },
  {
   "name": "novel-plan",
   "hash": "#/novel/1.%20Ashfall%20Road",
-  "do": "btn(\"Grand plan\").click(); await w(600);",
-  "theme": "light"
- },
- {
-  "name": "novel-plan-dark",
-  "hash": "#/novel/1.%20Ashfall%20Road",
-  "theme": "dark",
   "do": "btn(\"Grand plan\").click(); await w(600);"
  },
  {
   "name": "novel-plots",
   "hash": "#/novel/1.%20Ashfall%20Road",
-  "do": "btn(\"Plots\").click(); await w(600);",
-  "theme": "light"
+  "do": "btn(\"Plots\").click(); await w(600);"
  },
  {
   "name": "novel-scratchpad",
   "hash": "#/novel/1.%20Ashfall%20Road",
-  "do": "btn(\"Scratchpad\").click(); await w(900);",
-  "theme": "light"
+  "do": "btn(\"Scratchpad\").click(); await w(900);"
  },
  {
   "name": "chapter-view",
-  "hash": "#/chapter/1.%20Ashfall%20Road/1",
-  "theme": "light"
+  "hash": "#/chapter/1.%20Ashfall%20Road/1"
  },
  {
   "name": "writer",
   "hash": "#/chapter/1.%20Ashfall%20Road/1",
-  "do": "await w(300); btn(\"\u270e Write\", document.querySelector(\"main\")).click(); await w(2200);",
-  "theme": "light",
-  "size": [
-   1920,
-   1080
-  ]
- },
- {
-  "name": "writer-dark",
-  "hash": "#/chapter/1.%20Ashfall%20Road/1",
-  "theme": "dark",
-  "do": "await w(300); btn(\"\u270e Write\", document.querySelector(\"main\")).click(); await w(2200);",
+  "do": "await w(300); btn(\"✎ Write\", document.querySelector(\"main\")).click(); await w(2200);",
   "size": [
    1920,
    1080
@@ -56,8 +34,7 @@
  {
   "name": "writer-callout",
   "hash": "#/chapter/1.%20Ashfall%20Road/2",
-  "do": "await w(300); btn(\"\u270e Write\", document.querySelector(\"main\")).click(); await w(2200); $(\".writer .be-render\")?.scrollIntoView({block:\"center\"}); await w(800);",
-  "theme": "light",
+  "do": "await w(300); btn(\"✎ Write\", document.querySelector(\"main\")).click(); await w(2200); $(\".writer .be-render\")?.scrollIntoView({block:\"center\"}); await w(800);",
   "size": [
    1920,
    1080
@@ -66,8 +43,7 @@
  {
   "name": "writer-find",
   "hash": "#/chapter/1.%20Ashfall%20Road/1",
-  "do": "await w(300); btn(\"\u270e Write\", document.querySelector(\"main\")).click(); await w(2200); const f = $(\".writer-find input\"); type(f, \"lamp\"); await w(400); f.dispatchEvent(new KeyboardEvent(\"keydown\", {key:\"Enter\", bubbles:true})); await w(500);",
-  "theme": "light",
+  "do": "await w(300); btn(\"✎ Write\", document.querySelector(\"main\")).click(); await w(2200); const f = $(\".writer-find input\"); type(f, \"lamp\"); await w(400); f.dispatchEvent(new KeyboardEvent(\"keydown\", {key:\"Enter\", bubbles:true})); await w(500);",
   "size": [
    1920,
    1080
@@ -75,85 +51,64 @@
  },
  {
   "name": "owner",
-  "hash": "#/owner/1.%20Ashfall%20Road/Mara%20Venn",
-  "theme": "light"
+  "hash": "#/owner/1.%20Ashfall%20Road/Mara%20Venn"
  },
  {
   "name": "entry-editor",
-  "hash": "#/entry/1.%20Ashfall%20Road?owner=Mara%20Venn&type=Inventory&chapter=4",
-  "theme": "light"
+  "hash": "#/entry/1.%20Ashfall%20Road?owner=Mara%20Venn&type=Inventory&chapter=4"
  },
  {
   "name": "collection-items",
-  "hash": "#/c/Items",
-  "theme": "light"
+  "hash": "#/c/Items"
  },
  {
-  "name": "collection-locations-dark",
-  "hash": "#/c/Locations",
-  "theme": "dark"
+  "name": "collection-locations",
+  "hash": "#/c/Locations"
  },
  {
   "name": "note-world",
-  "hash": "#/note/80.%20Global%20Data%20Store%2FWorlds%2FThe%20Cinder%20Reach.md",
-  "theme": "light"
+  "hash": "#/note/80.%20Global%20Data%20Store%2FWorlds%2FThe%20Cinder%20Reach.md"
  },
  {
   "name": "note-blocks-edit",
   "hash": "#/note/80.%20Global%20Data%20Store%2FWorlds%2FThe%20Cinder%20Reach.md",
-  "do": "$(\"main button[aria-label='Edit Calendar']\").click(); await w(900);",
-  "theme": "light"
+  "do": "$(\"main button[aria-label='Edit Calendar']\").click(); await w(900);"
  },
  {
   "name": "drawer-note",
   "hash": "#/c/Items",
-  "theme": "dark",
   "do": "[...document.querySelectorAll(\"main table a[href^='#/note/']\")].find(a => a.textContent.includes(\"Signal Lantern\")).click(); await w(1500);"
  },
  {
   "name": "item-blueprint",
-  "hash": "#/note/80.%20Global%20Data%20Store%2FItems%2FSignal%20Lantern.md",
-  "theme": "light"
+  "hash": "#/note/80.%20Global%20Data%20Store%2FItems%2FSignal%20Lantern.md"
  },
  {
   "name": "drawer-lookup",
   "hash": "#/novel/1.%20Ashfall%20Road",
-  "do": "btn(\"Lookup\", document.querySelector(\".drawer-side\")).click(); await w(500); type($(\".lookup input[type=search]\"), \"lantern\"); await w(1500);",
-  "theme": "light"
+  "do": "btn(\"Lookup\", document.querySelector(\".drawer-side\")).click(); await w(500); type($(\".lookup input[type=search]\"), \"lantern\"); await w(1500);"
  },
  {
   "name": "drawer-datastore",
   "hash": "#/qa",
-  "do": "btn(\"Data store\", document.querySelector(\".drawer-side\")).click(); await w(500); [...document.querySelectorAll(\".drawer-pane:not([hidden]) .browse-toggle\")].find(b => b.textContent.includes(\"Items\")).click(); await w(500);",
-  "theme": "light"
+  "do": "btn(\"Data store\", document.querySelector(\".drawer-side\")).click(); await w(500); [...document.querySelectorAll(\".drawer-pane:not([hidden]) .browse-toggle\")].find(b => b.textContent.includes(\"Items\")).click(); await w(500);"
  },
  {
-  "name": "drawer-novel-dark",
+  "name": "drawer-novel",
   "hash": "#/novel/1.%20Ashfall%20Road",
-  "theme": "dark",
   "do": "btn(\"Novel\", document.querySelector(\".drawer-side\")).click(); await w(1500);"
  },
  {
   "name": "world-outline",
-  "hash": "#/world/80.%20Global%20Data%20Store%2FWorlds%2FThe%20Cinder%20Reach.md",
-  "theme": "light"
+  "hash": "#/world/80.%20Global%20Data%20Store%2FWorlds%2FThe%20Cinder%20Reach.md"
  },
  {
-  "name": "world-atlas-dark",
-  "hash": "#/world/80.%20Global%20Data%20Store%2FWorlds%2FThe%20Cinder%20Reach.md?tab=atlas",
-  "theme": "dark"
+  "name": "world-atlas",
+  "hash": "#/world/80.%20Global%20Data%20Store%2FWorlds%2FThe%20Cinder%20Reach.md?tab=atlas"
  },
  {
   "name": "map-floor",
   "hash": "#/map/80.%20Global%20Data%20Store%2FLocations%2FWaystation%20Nine%20Ground%20Floor.md",
-  "wait": 5000,
-  "theme": "light",
-  "do": "$(\".tool-opts\")?.remove();"
- },
- {
-  "name": "map-floor-dark",
-  "hash": "#/map/80.%20Global%20Data%20Store%2FLocations%2FWaystation%20Nine%20Ground%20Floor.md",
-  "theme": "dark",
   "wait": 5000,
   "do": "$(\".tool-opts\")?.remove();"
  },
@@ -161,46 +116,57 @@
   "name": "map-region",
   "hash": "#/map/80.%20Global%20Data%20Store%2FLocations%2FKettle%20Flats.md",
   "wait": 5000,
-  "theme": "light",
   "do": "$(\".tool-opts\")?.remove();"
  },
  {
   "name": "world-export",
   "hash": "#/world/80.%20Global%20Data%20Store%2FWorlds%2FThe%20Cinder%20Reach.md",
-  "do": "btn(\"Export world\").click(); await w(500); $(\".export-linked input\").click(); await w(1500);",
-  "theme": "light"
+  "do": "btn(\"Export world\").click(); await w(500); $(\".export-linked input\").click(); await w(1500);"
  },
  {
   "name": "import-check",
   "hash": "#/import",
-  "do": "type($(\".import-source input\"), \"https://github.com/TheRealWolfick/world-builder-data\"); await w(200); btn(\"Check\").click(); await w(6000);",
-  "theme": "light"
+  "do": "type($(\".import-source input\"), \"https://github.com/TheRealWolfick/world-builder-data\"); await w(200); btn(\"Check\").click(); await w(6000);"
  },
  {
   "name": "map-assets",
   "hash": "#/map-assets",
-  "theme": "light",
   "do": "$(\".tool-opts\")?.remove();"
  },
  {
   "name": "callout-designer",
   "hash": "#/callout-design",
-  "theme": "dark",
-  "do": "[...document.querySelectorAll(\".co-types button\")].find(b => b.textContent.includes(\"Journal\")).click(); await w(1200);"
+  "do": "[...document.querySelectorAll(\".co-nav .co-type\")].find(b => b.textContent.includes(\"Journal\")).click(); await w(1200);"
  },
  {
   "name": "settings",
-  "hash": "#/settings",
-  "theme": "light"
+  "hash": "#/settings"
  },
  {
   "name": "docs",
-  "hash": "#/docs/importing-data",
-  "theme": "light"
+  "hash": "#/docs/importing-data"
  },
  {
   "name": "quality-checks",
-  "hash": "#/qa",
-  "theme": "light"
+  "hash": "#/qa"
+ },
+ {
+  "name": "stats-template-levels",
+  "hash": "#/novel/1.%20Ashfall%20Road",
+  "do": "btn(\"Stats\", document.querySelector(\"main .tabs\")).click(); await w(1500); $$(\".field-summary\").find(b => b.textContent.includes(\"Step\"))?.click(); await w(700); $$(\".field-row:not(.folded)\")[0]?.scrollIntoView({block:\"center\"}); await w(500);"
+ },
+ {
+  "name": "taxonomy-add-levels",
+  "hash": "#/c/Taxonomy%2FEmber%20Ranks",
+  "do": "btn(\"Add several\").click(); await w(400); type($(\".taxonomy-modal textarea\"), \"Inferno (Low, High)\\n\\tLow = 1500\\n\\tHigh = 2200\"); await w(500);"
+ },
+ {
+  "name": "stats-entry-levels",
+  "hash": "#/entry/1.%20Ashfall%20Road?owner=Mara%20Venn&type=Stats&chapter=5",
+  "do": "await w(1800); $(\".stat-lines\")?.scrollIntoView({block:\"start\"}); await w(400);"
+ },
+ {
+  "name": "power-levels",
+  "hash": "#/note/80.%20Global%20Data%20Store%2FPower%20Systems%2FEmberwork.md"
  }
 ]

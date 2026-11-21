@@ -1,5 +1,7 @@
 // Screenshots for the docs and the README, always of the demo vault (scripts/demo-vault.js), never a real one.
-// Runs the desktop app hidden on a throwaway copy of the demo vault and captures each shot in docs/shots.json.
+// Runs the desktop app hidden on a throwaway copy of the demo vault and captures each shot in docs/shots.json in both
+// themes: docs/img/<name>.png (light) and docs/img/<name>.dark.png (dark). The docs show the one for the app's theme,
+// the README the one for the reader's (<picture>).
 //
 //   node scripts/screenshots.mjs [--only name,name] [--keep]
 import fs from "node:fs";
@@ -48,26 +50,23 @@ const $ = (s) => document.querySelector(s), $$ = (s) => [...document.querySelect
 const btn = (t, root = document) => [...root.querySelectorAll("button, a")].find((b) => b.textContent.trim().startsWith(t));
 const type = (el, v) => { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };`;
 
-let theme = null;
-for (const s of shots) {
+for (const s of shots) for (const theme of s.themes ?? ["light", "dark"]) {
     const [width, height] = s.size ?? [1440, 900];
     await call("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: s.scale ?? 1, mobile: false });
-    log("sized");
-    log("shot", s.name);
+    log("shot", s.name, theme);
     // every shot starts from a fresh page in its theme, so nothing (an open drawer, the writer) carries over
-    theme = s.theme ?? "light";
     await run(`localStorage.setItem("theme", JSON.stringify("${theme}")); location.hash = "#/";`);
     await call("Page.reload", { ignoreCache: true });
     await wait(2000);
     await run(`${HELPERS} location.hash = ${JSON.stringify(s.hash ?? "#/")}; await w(${s.wait ?? 1400}); ${s.do ?? ""}; await w(${s.after ?? 500});`);
     const clip = s.clip ? await run(`const r = document.querySelector(${JSON.stringify(s.clip)})?.getBoundingClientRect(); return r && { x: Math.max(0, r.x - 8), y: Math.max(0, r.y - 8), width: r.width + 16, height: r.height + 16, scale: 1 };`) : null;
-    log("captured page ready");
     const shot = await call("Page.captureScreenshot", { format: "png", ...(clip ? { clip } : {}) });
-    fs.writeFileSync(path.join(OUT, `${s.name}.png`), Buffer.from(shot.result.data, "base64"));
-    console.log(`  ${s.name}.png`);
+    const file = `${s.name}${theme === "dark" ? ".dark" : ""}.png`;
+    fs.writeFileSync(path.join(OUT, file), Buffer.from(shot.result.data, "base64"));
+    console.log(`  ${file}`);
     await run(`${HELPERS} ${s.undo ?? ""}; document.querySelector(".drawer-backdrop.on")?.click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));`).catch(() => {});
 }
 ws.close();
 await new Promise((r) => { app.once("exit", r); app.kill(); setTimeout(r, 5000); });
 if (!args.includes("--keep")) fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
-console.log(`${shots.length} screenshots in docs/img`);
+console.log(`${shots.length} shots in docs/img, light and dark`);

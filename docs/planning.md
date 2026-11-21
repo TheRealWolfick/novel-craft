@@ -17,7 +17,7 @@ A novel's plan lives in three kinds of notes, all edited from the novel page:
 
 The novel page's **Grand plan** tab lists the volumes in order, each with its plots and its chapters. A chapter row shows whether it is written, planned or still an empty note, and the first lines of its plan.
 
-![Ashfall Road's grand plan](img/novel-plan-dark.png)
+![Ashfall Road's grand plan](img/novel-plan.png)
 
 - **New volume** starts after the last one; set its chapter range on its note.
 - **Plan chapter N** opens the next chapter's plan.

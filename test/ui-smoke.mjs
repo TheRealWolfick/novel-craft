@@ -342,7 +342,124 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
         await wait(1500);
         const panel = doc.querySelector(".stats-panel")?.textContent ?? "";
         check(/Power\s*40/.test(panel.replace(/\s+/g, " ")) || panel.includes("Power: 40") || /Power.{0,20}40/.test(panel), "owner page shows the stats panel with computed values", panel.slice(0, 200));
+        // a choice from a taxonomy that follows a number (stage from qi), and a reward written as a change (+50)
+        {
+            const sendJ = (method, p, body) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: JSON.stringify(body) }).then(async (x) => ({ status: x.status, ...(await x.json()) }));
+            const facetDir = `${COPY}/80. Global Data Store/Taxonomy/WB Stages`;
+            fs.mkdirSync(facetDir, { recursive: true });
+            for (const [name, cls] of [["WB Foundation", 2], ["WB Qi Condensation", 1], ["WB Core", 3]]) fs.writeFileSync(`${facetDir}/${name}.md`, `---\ntitle: ${name}\nordered: true\nclass: ${cls}\n---\n`);
+            await wait(800);
+            const sn = await get(`/api/stats/novel?novel=${enc(statNovel.folder)}`);
+            const hero0 = sn.templates.Hero;
+            const tpl = { ...hero0, fields: [...hero0.fields, { label: "Qi", key: "stats/qi", type: "number" },
+                { label: "Stage", key: "stats/stage", type: "choice", facet: "WB Stages", from: "stats/qi", thresholds: { "WB Qi Condensation": 0, "WB Foundation": 100, "WB Core": 500 } }] };
+            const sv = await sendJ("POST", "/api/stats/templates", { novel: statNovel.folder, templates: [tpl, ...Object.values(sn.templates).filter((t) => t.name !== "Hero")], baseMtime: sn.configMtime });
+            const cfg2 = fs.readFileSync(`${COPY}/${statNovel.folder}/config.md`, "utf8");
+            check(sv.status === 200 && cfg2.includes("facet: WB Stages") && cfg2.includes("from: stats/qi") && !/options:\s*\n\s+- WB/.test(cfg2), "a choice field saves its taxonomy and thresholds, not the values", JSON.stringify(sv).slice(0, 300) + cfg2.slice(cfg2.indexOf("Stage") - 40, cfg2.indexOf("Stage") + 250));
+            const sn2 = await get(`/api/stats/novel?novel=${enc(statNovel.folder)}`);
+            check(sn2.templates.Hero.fields.find((f) => f.key === "stats/stage")?.options.join("|") === "WB Qi Condensation|WB Foundation|WB Core", "its options are the taxonomy's values in class order", JSON.stringify(sn2.templates.Hero.fields.at(-1)));
+            const entry = (ch, title, lines) => sendJ("POST", "/api/ledger/entry", { novel: statNovel.folder, owner: hero, type: "Stats", entry: { chapter: ch, title, lines } });
+            const e1 = await entry(21, "WB qi start", [{ set: "stats/qi", value: "80" }]);
+            const e2 = await entry(22, "WB qi reward", [{ set: "qi", add: "50" }]);
+            const st = await get(`/api/stats?novel=${enc(statNovel.folder)}&owner=${enc(hero)}&at=22`);
+            const st21 = await get(`/api/stats?novel=${enc(statNovel.folder)}&owner=${enc(hero)}&at=21`);
+            check(e1.status === 200 && e2.status === 200 && st.values["stats/qi"] === 130 && st.values["stats/stage"] === "[[WB Foundation]]" && st21.values["stats/stage"] === "[[WB Qi Condensation]]",
+                "a change adds to the number and the stage follows it, chapter by chapter", JSON.stringify([e2.error, st.values, st21.values]));
+            const led = fs.readFileSync(`${COPY}/${statNovel.folder}/Ledgers/${hero} - Stats.md`, "utf8");
+            check(/\[set:: qi\] \[add:: 50\]/.test(led), "the change is written as [add:: 50]", led.slice(-200));
+            // setting the stage moves qi to its lowest value; unlinked, qi moves alone and the overflow shows
+            const badStage = await entry(23, "WB bad", [{ set: "stage", value: "No Such Stage" }]);
+            check(badStage.status === 400 && /must be one of/.test(badStage.error ?? ""), "a stage that isn't one of the levels is refused", JSON.stringify(badStage));
+            const at = (ch) => get(`/api/stats?novel=${enc(statNovel.folder)}&owner=${enc(hero)}&at=${ch}`);
+            await entry(23, "WB breakthrough", [{ set: "stage", value: "WB Core" }]);
+            const s23 = await at(23);
+            check(s23.values["stats/qi"] === 500 && s23.values["stats/stage"] === "[[WB Core]]", "setting a level moves its number to the level's lowest value", JSON.stringify(s23.values));
+            await entry(24, "WB constitution", [{ set: "stage", link: "off", value: "WB Qi Condensation" }, { set: "qi", add: "100" }]);
+            const s24 = await at(24);
+            check(s24.values["stats/stage"] === "[[WB Qi Condensation]]" && s24.values["stats/qi"] === 600 && s24.values["@unlinked"]?.includes("stats/stage") && s24.origin["stats/stage"]?.unlinked,
+                "unlinked, the level stays as set while the number moves", JSON.stringify([s24.values, s24.origin["stats/stage"]]));
+            const { driftOf } = await import("../public/stats-core.js");
+            const d = driftOf(s24.template, s24.template.fields.find((f) => f.key === "stats/stage"), s24.values);
+            check(d?.dir === "over" && d.by === 501, "an unlinked level shows how far its number is over its range", JSON.stringify(d));
+            {
+                const core = await import("../public/stats-core.js");
+                const tpl = { ...s24.template, layout: "status", callout: "status" };
+                const txt = core.builtinPanel(tpl, core.panelData(tpl, s24.values, { ownerName: hero, chapter: 24 }));
+                check(txt.startsWith(`> [!status] ${hero}`) === false && txt.startsWith(`[!status] ${hero}`) && /\| Stage \| {2}\| WB Qi Condensation \(overflow \+501\) \|/.test(txt) && /\|:--\|--:\|--:\|/.test(txt),
+                    "the status window panel has a table per section and notes an overflow", txt);
+            }
+            await entry(25, "WB relinked", [{ set: "stage", link: "on" }]);
+            const s25 = await at(25);
+            check(s25.values["stats/stage"] === "[[WB Core]]" && !s25.values["@unlinked"], "linked again, the level follows the number", JSON.stringify(s25.values));
+            // in the drawer, a new ledger entry opens as a third tab of the character
+            {
+                // a #/note/ link inside a [data-drawer] area opens in the drawer
+                w.location.hash = "#/c/Items"; await wait(1200);
+                const heroPath = (await get(`/api/novel?folder=${enc(statNovel.folder)}`)).characters.find((c) => c.name === hero).path;
+                const heroNote = await get(`/api/note?path=${enc(heroPath)}`);
+                if (heroNote.fm.type !== "character") await sendJ("PATCH", "/api/note", { path: heroPath, set: { type: "character" } });
+                await wait(400);
+                const a = doc.createElement("a"); a.href = `#/note/${enc(heroPath)}`; a.textContent = hero;
+                doc.querySelector("[data-drawer]").append(a); a.click(); await wait(1500);
+                const tabs = () => [...doc.querySelectorAll(".drawer .note-tabs button")];
+                tabs().find((b) => b.textContent.trim() === "Ledger")?.click(); await wait(1200);
+                [...doc.querySelectorAll(".drawer button")].find((b) => /^New .*entry$/.test(b.textContent.trim()))?.click(); await wait(1200);
+                check(tabs().length === 3 && !!doc.querySelector(".drawer .entry-tab.on") && !!doc.querySelector(".drawer .entry-embedded"), "a new entry from the drawer's Ledger tab opens as a third tab", `${w.location.hash} open=${!!doc.querySelector(".drawer-wrap.open")} people=${doc.querySelectorAll(".people-list a").length} tabs=${tabs().map((b) => b.textContent).join(" | ")} btns=${[...doc.querySelectorAll(".drawer button")].map((b) => b.textContent.trim()).filter((t) => /entry/i.test(t)).join(",")}`);
+                doc.querySelector(".drawer .entry-tab .tab-x")?.click(); await wait(300);
+                check(tabs().length === 2 && tabs().find((b) => b.classList.contains("on"))?.textContent.trim() === "Ledger", "closing the entry tab goes back to the Ledger tab");
+                doc.querySelector(".drawer-backdrop")?.click(); await wait(300);
+            }
+            const ledTxt = fs.readFileSync(`${COPY}/${statNovel.folder}/Ledgers/${hero} - Stats.md`, "utf8");
+            check(/\[set:: stage\] \[value:: WB Qi Condensation\] \[link:: off\]/.test(ledTxt), "unlinking is a ledger line", ledTxt.slice(-500));
+            // the ledger filter hides entries (and stats rows) that don't match
+            w.location.hash = "#/qa"; await wait(300);
+            w.location.hash = `#/owner/${enc(statNovel.folder)}/${enc(hero)}?type=Stats`; await wait(1500);
+            const box = [...doc.querySelectorAll(".ledger-filter input")].find((x) => !x.closest(".drawer"));
+            const mainEntries = () => [...doc.querySelectorAll(".entry")].filter((x) => !x.closest(".drawer"));
+            const cards = () => mainEntries().length;
+            const all = cards();
+            if (box) { box.value = "qi reward"; box.dispatchEvent(new w.Event("input", { bubbles: true })); await wait(300); }
+            check(!!box && all > 1 && cards() === 1 && mainEntries()[0].textContent.includes("WB qi reward"), "the ledger filter hides entries that don't match", `${all} -> ${cards()}`);
+        }
     }
+}
+// taxonomy: a new facet from a pasted list of levels (with sub-levels and numbers), and a stat that follows them
+{
+    const { parseLevels } = await import("../public/levels.js");
+    const lv = parseLevels("Qi Refining (Layer 1 - 9)\nFoundation Establishment (Early, Mid, Late, Peak)\nGolden Core = 5,000\n\tEarly = 5000\n\tMid: 6000");
+    check(lv.length === 18 && lv[1].name === "Qi Refining Layer 1" && lv[1].parent === "Qi Refining" && lv[11].title === "Foundation Establishment (Early)" && lv[15].threshold === 5000 && lv[17].name === "Golden Core Mid" && lv[17].threshold === 6000,
+        "a pasted list of levels expands sub-levels and reads numbers", JSON.stringify(lv.slice(15)));
+    const both = parseLevels("Inferno (Low, High)\n\tLow = 1500\n\tHigh = 2200");
+    check(both.length === 3 && both[1].threshold === 1500 && both[2].threshold === 2200, "indented lines naming bracketed sub-levels give them their numbers, not duplicates", JSON.stringify(both));
+    const sendJ = (method, p, body) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: JSON.stringify(body) }).then(async (x) => ({ status: x.status, ...(await x.json()) }));
+    const ps = (await get("/api/index")).notes.find((n) => n.collection === "Power Systems");
+    const values = parseLevels("WB Refining (Layer 1 - 3)\nWB Tier (Early, Late)").map((v, i) => ({ ...v, threshold: v.parent ? i * 100 : null }));
+    const made = await sendJ("POST", "/api/taxonomy/facet", { name: "WB Levels", levels: true, values, powerSystem: ps?.name ?? "" });
+    const schemaText = fs.readFileSync(`${COPY}/90. Templater/Data Store Schema.md`, "utf8");
+    const late = fs.existsSync(`${COPY}/80. Global Data Store/Taxonomy/WB Levels/WB Tier Late.md`) ? fs.readFileSync(`${COPY}/80. Global Data Store/Taxonomy/WB Levels/WB Tier Late.md`, "utf8") : "";
+    check(made.status === 200 && made.paths.length === 7 && schemaText.includes('"Taxonomy/WB Levels"') && /parent: "\[\[WB Tier\]\]"/.test(late) && /threshold: 600/.test(late) && (!ps || late.includes(`power-system: "[[${ps.name}]]"`)),
+        "a new taxonomy goes into the schema, and its values are notes with parent, rank, number and power system", JSON.stringify(made).slice(0, 300) + late);
+    const again = await sendJ("POST", "/api/taxonomy/facet", { name: "wb levels" });
+    check(again.status === 409, "a taxonomy name can't be used twice");
+    const { facetChoice } = await import("../public/stats-core.js");
+    const idx = await get("/api/index");
+    const notes = idx.notes.filter((n) => n.collection === "Taxonomy/WB Levels");
+    const res = (l) => notes.find((n) => n.name.toLowerCase() === String(l).replace(/^\[\[|\]\]$/g, "").toLowerCase())?.path ?? null;
+    const top = facetChoice(notes, "top", res), bottom = facetChoice(notes, "bottom", res);
+    // the dialog is drawn at the end of the page, not inside the sticky sidebar (whose stacking would put it under the page)
+    {
+        const doc = w.document;
+        w.location.hash = "#/qa"; await wait(600);
+        let addBtn = doc.querySelector(".sidebar .side-add");
+        if (!addBtn) { [...doc.querySelectorAll(".side-head")].find((b) => b.textContent.startsWith("Taxonomy"))?.click(); await wait(200); addBtn = doc.querySelector(".sidebar .side-add"); }
+        addBtn?.click(); await wait(300);
+        const modal = doc.querySelector(".taxonomy-modal");
+        check(!!modal && !modal.closest(".sidebar") && modal.closest(".modal-back")?.parentElement?.parentElement === doc.body, "the new taxonomy dialog opens outside the sidebar");
+        modal?.querySelector("button[aria-label=Close]")?.click(); await wait(200);
+        check(!doc.querySelector(".taxonomy-modal"), "closing it removes it");
+    }
+    check(top.options.join("|") === "WB Refining|WB Tier" && bottom.options.length === 5 && top.noteThresholds["WB Tier"] === 500 && top.noteThresholds["WB Refining"] === 100,
+        "a choice can use the top levels or the sub-levels, a top level starting where its first sub-level does", JSON.stringify([top, bottom.options]));
 }
 // world builder: outline add + move, then a square-grid map with floors, stamps, text and layers
 {
@@ -745,7 +862,12 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
         check(closed && !!doc.querySelector(".writer-wrap.open") && !!doc.querySelector(".drawer-wrap.open"), "Ctrl+[ and Ctrl+] toggle the writer and the drawer");
         doc.querySelector(".drawer-backdrop").click();
         await wait(300);
-        check(!doc.querySelector(".writer-wrap.open") && !!doc.querySelector(".writer-wrap.collapsed .writer-tab"), "the backdrop collapses the writer to a tab on the left");
+        check(!doc.querySelector(".writer-wrap.open") && !!doc.querySelector(".writer-wrap.collapsed") && !doc.querySelector(".writer-tab"), "the backdrop collapses the writer, with no tab over the page");
+        const pill = doc.querySelector(".sidebar .writer-pill");
+        check(!!pill && !pill.disabled && /Chapter/.test(pill.textContent), "the sidebar's Open writer shows the chapter in the writer", pill?.outerHTML);
+        pill?.click(); await wait(400);
+        check(!!doc.querySelector(".writer-wrap.open"), "Open writer brings the writer back");
+        doc.querySelector(".drawer-backdrop").click(); await wait(300);
 
         // novel tab: characters, New character in the viewer
         [...doc.querySelectorAll(".drawer-side .drawer-tab")].find((b) => b.textContent.startsWith("Novel")).click();
@@ -929,6 +1051,12 @@ if (process.env.SETTINGS_DIR && fs.existsSync(STARTER)) {
     q.value = ""; q.dispatchEvent(new w.Event("input", { bubbles: true })); await wait(400);
     doc.querySelector(".doc-prose .ref-link").dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true })); await wait(900);
     check(w.location.hash.startsWith("#/docs/importing-data") && !!doc.querySelector(".drawer-wrap.open .drawer-pane:not([hidden]) .doc-prose.in-drawer"), "a reference link opens beside the page, in the drawer");
+    // screenshots come in light and dark: a figure carries both and the theme shows one
+    {
+        const pg = await get("/api/docs/page?id=planning");
+        const hasDark = fs.existsSync(new URL("../docs/img/novel-plan.dark.png", import.meta.url));
+        check(!hasDark || (/class="shot-light" src="\/docs\/img\/novel-plan\.png"/.test(pg.html) && /class="shot-dark" src="\/docs\/img\/novel-plan\.dark\.png"/.test(pg.html)), "a docs figure has its light and dark screenshot", pg.html?.match(/<figure[^]*?<\/figure>/)?.[0]);
+    }
     doc.querySelector(".drawer-tabs button[title^='Collapse']").click(); await wait(300);
 }
 // callout designer: styles saved to the vault, callout metadata rendered
@@ -939,12 +1067,21 @@ if (process.env.SETTINGS_DIR && fs.existsSync(STARTER)) {
     w.location.hash = "#/callout-design";
     await wait(1000);
     check(!!doc.getElementById("callout-styles")?.textContent.includes('data-callout="system"'), "the callout styles are in the page");
-    [...doc.querySelectorAll(".co-types button")].find((b) => b.textContent.includes("Journal")).click();
+    [...doc.querySelectorAll(".co-nav .co-type")].find((b) => b.textContent.includes("Journal")).click();
     await wait(200);
     const width = [...doc.querySelectorAll(".co-field")].find((f) => f.textContent.startsWith("Width"))?.querySelector("input[type=number]");
     width.value = "70"; width.dispatchEvent(new w.Event("change", { bubbles: true }));
     await wait(100);
-    check(doc.querySelector(".co-designer style").textContent.includes("width: 70%"), "designer changes show in the preview");
+    check(doc.querySelector(".co-shell style").textContent.includes("width: 70%"), "designer changes show in the preview");
+    // on / off settings are switches and short choices a row of buttons, no checkboxes
+    const titleHead = [...doc.querySelectorAll(".co-group-head")].find((b) => b.textContent.includes("Title"));
+    if (titleHead?.getAttribute("aria-expanded") !== "true") { titleHead?.click(); await wait(100); }
+    check(!doc.querySelector(".co-form input[type=checkbox]:not([role=switch])") && !!doc.querySelector(".co-form .co-switch input[role=switch]") && !!doc.querySelector(".co-form .co-seg button"),
+        "the designer uses switches and button rows, not checkboxes");
+    const find = doc.querySelector(".co-nav input[type=search]");
+    find.value = "journ"; find.dispatchEvent(new w.Event("input", { bubbles: true })); await wait(100);
+    check(doc.querySelectorAll(".co-nav .co-type").length === 1, "the callout list can be filtered");
+    find.value = ""; find.dispatchEvent(new w.Event("input", { bubbles: true })); await wait(100);
     [...doc.querySelectorAll("button")].find((b) => b.textContent.trim() === "Save styles").click();
     await wait(1000);
     const note = `${COPY}/90. Templater/Callout Styles.md`;
@@ -1140,6 +1277,64 @@ if (process.env.SETTINGS_DIR) {
         check(/heard: Review of "Test changes": applied: 1, 3; rejected: 2/.test(told), "the assistant hears what was applied and rejected with the next message", told);
         // put the chapter back for the tests after this
         fs.writeFileSync(`${COPY}/${written.notePath}`, bodyOf(written.notePath).replace("WB-EDIT " + find, find));
+    }
+    // a proposed ledger entry: previewed (callout, holdings), written only when applied, through the ledger editor's save
+    {
+        let led = null, stockType = null, novel = null;
+        for (const n of nv.list()) {
+            const st = Object.entries(nv.ledgerTypes(n)).find(([, t]) => t.behaviour === "stock")?.[0];
+            const l = st && nv.ledgers(n).find((x) => x.type === st && x.entries.length && !x.entries.every((e) => e.fields["mirror-of"]));
+            if (l) { led = l; stockType = st; novel = n; break; }
+        }
+        check(!!led, "the vault copy has a stock ledger to propose an entry in");
+        if (led) {
+            const ch = Math.max(...led.entries.map((e) => e.chapter));
+            const owner = led.owner.replace(/^\[\[|\]\]$/g, "");
+            const ask = (changes) => send("POST", "/api/ai/chat", { message: "propose: " + JSON.stringify({ title: "Ledger", changes }) }).then((r) => r.text());
+            const badType = await ask([{ action: "ledger_entry", novel: novel.folder, owner, ledger: "No Such Ledger", chapter: ch, lines: [{ item: "x" }] }]);
+            const badKey = await ask([{ action: "ledger_entry", novel: novel.folder, owner, ledger: stockType, chapter: ch, replace: "9999.9", lines: [{ item: "x" }] }]);
+            check(/No ledger type/.test(badType) && /has no .* entry 9999\.9/.test(badKey), "a ledger entry for a missing type or entry is refused with a reason");
+            const out = await ask([{ action: "ledger_entry", novel: novel.folder, owner, ledger: stockType, chapter: ch, title: "WB test find", lines: [{ action: "add", item: "WB test flute", qty: 2 }] }]);
+            const pid2 = out.trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.proposal)?.proposal.id;
+            const p2 = pid2 && await get(`/api/ai/proposal?id=${pid2}`);
+            const ledFile = `${COPY}/${led.path}`;
+            check(p2?.changes[0].holdings.some((r) => r.item === "WB test flute" && /^2/.test(r.after)) && /WB test flute/.test(p2.changes[0].calloutHtml) && !fs.readFileSync(ledFile, "utf8").includes("WB test flute"),
+                "a proposed ledger entry shows its callout and holdings change, and nothing is written yet", JSON.stringify(p2?.changes[0].holdings));
+            const applied = await send("POST", "/api/ai/proposal/apply", { id: pid2, which: 0 }).then((r) => r.json());
+            const txt = fs.readFileSync(ledFile, "utf8");
+            check(applied.changes[0].status === "applied" && /## \d+(\.\d+)?\.\d+ WB test find/.test(txt) && /\[item:: WB test flute\] \[qty:: 2\]/.test(txt),
+                "applying it writes the entry into the ledger like the ledger editor", JSON.stringify(applied.changes[0].error ?? txt.slice(-300)));
+        }
+    }
+    // relationships: friendly / neutral / hostile with a note, folded from the ledger; the sheet gets the three lists
+    {
+        const { foldRelations } = await import("../lib/ledger.js");
+        const E = (chapter, seq, lines) => ({ chapter, seq, key: `${chapter}.${seq}`, lines });
+        const r = foldRelations([E(1, 1, [{ set: "relationship", with: "[[A]]", value: "Mother: strict" }, { set: "relation", with: "[[B]]", value: "hostile", note: "blames him" }]),
+            E(2, 1, [{ set: "status", with: "[[A]]", value: "friendly" }, { set: "relationship", with: "[[B]]", value: "Neutral: made up" }, { set: "trust", with: "[[C]]", value: "high" }])]);
+        const by = Object.fromEntries(r.map((x) => [x.withName, x]));
+        check(by.A?.status === "friendly" && by.A.note === "Mother: strict" && by.B?.status === "neutral" && by.B.note === "made up" && !by.C,
+            "relationship lines fold to a standing and a note per person (older free-text lines read too)", JSON.stringify(r));
+        const sendJ = (method, p, body) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: body && JSON.stringify(body) }).then(async (x) => ({ status: x.status, ...(await x.json()) }));
+        let nv = null;
+        for (const n of index.novels) { const x = await get(`/api/novel?folder=${enc(n.folder)}`); if (x.characters?.length >= 2 && x.ledgerTypes?.Relationships) { nv = x; break; } }
+        check(!!nv, "the vault copy has a novel with two characters and a Relationships ledger type");
+        const [who, other] = nv?.characters ?? [];
+        if (who && other) {
+            const sheetPath = `${COPY}/${who.path}`;
+            // a leftover of the old sync: a relations/<phrase> key
+            const t0 = fs.readFileSync(sheetPath, "utf8").replace(/^---\n/, `---\n"relations/old phrase from a line": ["[[${other.name}]]"]\n`);
+            fs.writeFileSync(sheetPath, t0); await wait(400);
+            const saved = await sendJ("POST", "/api/ledger/entry", { novel: nv.folder, owner: who.name, type: "Relationships", entry: { chapter: 1, title: "WB test relation", lines: [{ set: "relation", with: `[[${other.name}]]`, value: "hostile", note: "WB test grudge" }] } });
+            await wait(400);
+            const sheet = fs.readFileSync(sheetPath, "utf8");
+            check(saved.status === 200 && new RegExp(`relations/hostile:\\n\\s+- "\\[\\[${other.name}\\]\\]"`).test(sheet) && !/old phrase/.test(sheet) && !/WB test grudge/.test(sheet),
+                "a relationship entry puts the person in relations/hostile on the sheet, clears old phrase keys, keeps the note in the ledger", sheet.slice(0, 600));
+            const pg = await get(`/api/note?path=${enc(who.path)}`);
+            check(pg.relations?.hostile?.some((x) => x.note === "WB test grudge"), "the character page gets its relationships with notes", JSON.stringify(pg.relations));
+            const bad = await realFetch(new URL("/api/ai/chat", BASE), { method: "POST", headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: JSON.stringify({ message: "propose: " + JSON.stringify({ title: "Rel", changes: [{ action: "ledger_entry", novel: nv.folder, owner: who.name, ledger: "Relationships", chapter: 2, lines: [{ set: "relationship", with: other.name, value: "Mother: strict but loving" }] }] }) }) }).then((x) => x.text());
+            check(/standing, one of friendly, neutral, hostile/.test(bad), "the assistant can't write free text as a relationship's value", bad.slice(0, 300));
+        }
     }
     doc.querySelector(".drawer-tabs button[title^='Collapse']").click(); await wait(300);
     // API chat conversations are saved and listed (History), and can be deleted

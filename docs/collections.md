@@ -26,8 +26,18 @@ Open a collection from the sidebar's **Data store** section.
 
 Your choices are remembered per collection.
 
-![Locations grouped, in dark mode](img/collection-locations-dark.png)
+![Locations grouped](img/collection-locations.png)
 
 ## Opening notes
 
 Clicking a note in a table opens it in the [side drawer](docs:side-drawer), so the table stays where it was. <kbd>Ctrl</kbd>+click opens the full page. **New** creates a note in the collection with the schema's fields.
+
+## Taxonomies
+
+A taxonomy is a set of category values, one note per value in `80. Global Data Store/Taxonomy/<Facet>/`: rarities, item categories, location scales. Categories on other notes are links to these values. Some taxonomies are ranked (`ordered`, with a `class` number per value) and values can have a `parent` for a hierarchy.
+
+- **+ New taxonomy** at the bottom of the sidebar's Taxonomy section makes a new one: its entry in the data store schema and its folder. Paste values to make them at once, in rank order.
+- **Add several…** on a taxonomy's page adds values from a list; **New** adds one.
+- A list line `Name (A, B, C)` or `Name (Layer 1 - 9)` makes a value with sub-levels; indented lines are sub-levels of the line above; `= 100` at the end gives a value its number.
+- Ticking **levels with a number each** gives every value a `threshold` and a `power-system`: levels of a power system that a [stat template](docs:stat-templates#choices) can work out from a stat. See [Levels and mastery systems](docs:levels-and-mastery).
+

@@ -3,16 +3,17 @@ import { h, render } from "preact";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "preact/hooks";
 import htm from "htm";
 import { parseOutline, serializeOutline } from "./outline.js";
+import { parseLevels } from "./levels.js";
 import { MapEditor } from "./map-editor.js";
 import { WorldView, WorldOutline, MapAssetsView } from "./world.js";
-import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, BlockEditor } from "./writer.js";
+import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, expandWriter, BlockEditor } from "./writer.js";
 import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from "./sections.js";
 import { inlineHtml, setSpeechGroups } from "./blocks.js";
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
 import { ImportView } from "./importer.js";
 import { DocsView, DocArticle } from "./docs.js";
 import { AiPane, AiSettingsPanel, BotIcon, ProposalView } from "./ai.js";
-import { FIELD_TYPES, normalizeTemplates, checkTemplate, checkValue, fromText, toText, parseResource, computeValues, displayValue, defaultKey, fieldId, namesField, fieldNamed } from "./stats-core.js";
+import { FIELD_TYPES, normalizeTemplates, checkTemplate, checkValue, fromText, toText, parseResource, computeValues, displayValue, defaultKey, fieldId, namesField, fieldNamed, isDerived, optionOf, applyChange, isChange, thresholdRows, facetChoice, stateFrom, replayLine, valuesFromState, driftOf, sourceOf, UNLINKED } from "./stats-core.js";
 
 const html = htm.bind(h);
 
@@ -924,6 +925,8 @@ function LinkField({ value, multiple, target, index, onChange, options: given })
 // ------------------------------------------------------------------ layout
 
 const route0 = () => location.hash.replace(/^#\/?/, "").split(/[/?]/)[0];
+/** Pages under Tools: no data store search or novel filter at the top */
+const TOOL_PAGES = new Set(["settings", "callout-design", "import", "map-assets", "qa"]);
 
 // Sidebar sections collapse on a click of their heading; closed ones are remembered (Taxonomy starts closed)
 function SideSection({ id, title, closed, toggle, children }) {
@@ -939,6 +942,7 @@ function Sidebar({ index, novelFolder }) {
     const [closed, setClosed] = useState(() => store.get("sidebarClosed", { taxonomy: !store.get("showTax", false) }));
     const toggle = (id) => { const c = { ...closed, [id]: !closed[id] }; setClosed(c); store.set("sidebarClosed", c); };
     const [theme, setThemeState] = useState(store.get("theme", "system"));
+    const [newTax, setNewTax] = useState(false);
     const setTheme = (m) => { setThemeState(m); store.set("theme", m); applyTheme(m); };
     if (!index) return html`<nav class="sidebar"><div class="brand">World Builder</div>
         <div class="side-section"><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a><a class=${route0() === "docs" ? "active" : ""} href="#/docs"><span>Docs</span></a></div></nav>`;
@@ -951,11 +955,98 @@ function Sidebar({ index, novelFolder }) {
         ${section("novels", "Novels", index.novels.map((n) => html`<a class=${`novel-link ${n.folder === novelFolder ? "active" : ""}`} href=${`#/novel/${encodeURIComponent(n.folder)}`}>
             <span class="novel-dot" style=${`--dot:${novelColour(index, n.folder)}`} aria-hidden="true" /><span class="name">${n.name}</span><span class="count">${n.number}</span></a>`))}
         <a class=${`side-pill ${route0() === "world" || route0() === "map" ? "active" : ""}`} href="#/world">World builder<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18" /></svg></a>
+        <${WriterButton} index=${index} />
         ${section("datastore", "Data store", main.map((c) => html`<a class=${active(`#/c/${encodeURIComponent(c)}`)} href=${`#/c/${encodeURIComponent(c)}`}><span>${c}</span><span class="count">${index.counts[c] ?? 0}</span></a>`))}
-        ${section("taxonomy", "Taxonomy", tax.map((c) => html`<a class=${active(`#/c/${encodeURIComponent(c)}`)} href=${`#/c/${encodeURIComponent(c)}`}><span>${collectionLabel(c)}</span><span class="count">${index.counts[c] ?? 0}</span></a>`))}
+        ${section("taxonomy", "Taxonomy", html`${tax.map((c) => html`<a class=${active(`#/c/${encodeURIComponent(c)}`)} href=${`#/c/${encodeURIComponent(c)}`}><span>${collectionLabel(c)}</span><span class="count">${index.counts[c] ?? 0}</span></a>`)}
+            <button class="side-add" onClick=${() => setNewTax(true)}>+ New taxonomy</button>`)}
+        ${newTax && html`<${TaxonomyDialog} index=${index} onClose=${() => setNewTax(false)} />`}
         ${section("tools", "Tools", html`<a class=${active("#/qa")} href="#/qa"><span>Quality checks</span></a><a class=${active("#/callout-design")} href="#/callout-design"><span>Callout designer</span></a><a class=${active("#/import")} href="#/import"><span>Import data</span></a><a class=${active("#/map-assets")} href="#/map-assets"><span>Map assets</span></a><a class=${route0() === "docs" ? "active" : ""} href="#/docs"><span>Docs</span></a><a class=${active("#/settings")} href="#/settings"><span>Settings</span></a>`)}
         <div class="theme-switch" role="group" aria-label="Theme">${THEMES.map(([m, label]) => html`<button class=${theme === m ? "on" : ""} aria-pressed=${theme === m} onClick=${() => setTheme(m)}>${label}</button>`)}</div>
     </nav>`;
+}
+
+/**
+ * A new taxonomy (a facet: schema entry + folder), or several values for an existing one, from a pasted list:
+ * "Qi Refining (Layer 1 - 9)" makes a value with nine sub-levels, indented lines are sub-levels, "= 100" a value's
+ * number (parseLevels in levels.js). Values can be levels of a power system, each with a number that stat templates
+ * use (a cultivation stage worked out from qi).
+ */
+/**
+ * Its children rendered into a box at the end of <body>: a modal opened from inside a stacking context (the sticky
+ * sidebar, a drawer) would otherwise be drawn under the page beside it, whatever its z-index.
+ */
+function Portal({ children }) {
+    const box = useMemo(() => document.createElement("div"), []);
+    useLayoutEffect(() => { document.body.append(box); return () => { render(null, box); box.remove(); }; }, []);
+    useLayoutEffect(() => { render(children, box); });
+    return null;
+}
+
+function TaxonomyDialog({ index, collection = null, onClose }) {
+    const existing = collection ? index.schema.collections[collection] : null;
+    const levelsFacet = existing ? existing.fields.some(([k]) => k === "threshold") : true;
+    const [name, setName] = useState("");
+    const [levels, setLevels] = useState(levelsFacet);
+    const [system, setSystem] = useState(() => { const v = collection && index.inCollection(collection).map((n) => n.fm["power-system"]).find(Boolean); return v ? linkLabel(String(v)) : ""; });
+    const [text, setText] = useState("");
+    const [numbers, setNumbers] = useState({});
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState("");
+    useEffect(() => { const k = (e) => { if (e.key === "Escape") onClose(); }; addEventListener("keydown", k); return () => removeEventListener("keydown", k); }, []);
+    const values = useMemo(() => parseLevels(text), [text]);
+    const systems = index.inCollection("Power Systems").map((n) => n.name).sort();
+    const numberOf = (v) => (v.name in numbers ? numbers[v.name] : v.threshold ?? "");
+    const submit = async (e) => {
+        e.preventDefault();
+        if (busy || (!collection && !name.trim()) || (collection && !values.length)) return;
+        setBusy(true); setErr("");
+        const list = values.map((v) => ({ ...v, threshold: levels && numberOf(v) !== "" ? Number(numberOf(v)) : null }));
+        try {
+            const r = collection
+                ? await api.send("POST", "/api/taxonomy/values", { collection, values: list, powerSystem: levels ? system : "" })
+                : await api.send("POST", "/api/taxonomy/facet", { name: name.trim(), levels, values: list, powerSystem: levels ? system : "" });
+            toast(`${collection ? "Added" : `Made ${r.collection.slice(9)} with`} ${r.paths.length} value${r.paths.length === 1 ? "" : "s"}`);
+            onClose();
+            if (!collection) go(`#/c/${encodeURIComponent(r.collection)}`);
+        } catch (e2) { setErr(e2.message); }
+        setBusy(false);
+    };
+    return html`<${Portal}><div class="modal-back" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+        <form class="modal taxonomy-modal" role="dialog" aria-label=${collection ? "Add values" : "New taxonomy"} onSubmit=${submit}>
+            <div class="spread"><h2 style="margin:0">${collection ? `Add to ${collectionLabel(collection)}` : "New taxonomy"}</h2><button type="button" onClick=${onClose} aria-label="Close">×</button></div>
+            ${!collection && html`<label class="field"><span>Name</span><input value=${name} onInput=${(e) => setName(e.target.value)} placeholder="Cultivation Levels" required autofocus /></label>`}
+            ${(!collection || levelsFacet) && html`<label class="row"><input type="checkbox" style="width:auto" checked=${levels} disabled=${!!collection} onChange=${(e) => setLevels(e.target.checked)} /> levels with a number each (stat templates can work a level out from a stat, e.g. a cultivation stage from qi)</label>`}
+            ${levels && html`<label class="field"><span>Levels of the power system</span><select value=${system} onChange=${(e) => setSystem(e.target.value)}>
+                <option value="">none</option>${systems.map((x) => html`<option value=${x}>${x}</option>`)}</select></label>`}
+            <label class="field"><span>Values, one per line</span>
+                <textarea class="mono" style="min-height:130px" value=${text} onInput=${(e) => setText(e.target.value)}
+                    placeholder=${"Qi Refining (Layer 1 - 9)\nFoundation Establishment (Early, Mid, Late, Peak)\nGolden Core = 5000\n\tEarly = 5000\n\tMid = 6000"} /></label>
+            <p class="muted small-note">"Name (A, B, C)" or "Name (Layer 1 - 9)" adds sub-levels; indented lines are sub-levels of the line above; "= 100" at the end gives a value its number. You can type the numbers below too. Values are ranked in this order.</p>
+            ${values.length > 0 && html`<div class="taxonomy-preview"><table><thead><tr><th>Value</th>${levels && html`<th>Number</th>`}</tr></thead><tbody>
+                ${values.map((v) => html`<tr class=${v.parent ? "sub" : ""}><td>${v.title}</td>
+                    ${levels && html`<td><input type="number" value=${numberOf(v)} placeholder=${v.parent ? "—" : "first sub-level's"} onInput=${(e) => setNumbers({ ...numbers, [v.name]: e.target.value })} /></td>`}</tr>`)}</tbody></table></div>`}
+            ${err && html`<p class="error">${err}</p>`}
+            <div class="row" style="justify-content:flex-end"><button type="button" onClick=${onClose}>Cancel</button>
+                <button type="submit" class="primary" disabled=${busy || (!collection && !name.trim()) || (collection && !values.length)}>${busy ? "Saving…" : collection ? `Add ${values.length} value${values.length === 1 ? "" : "s"}` : `Make taxonomy${values.length ? ` with ${values.length} value${values.length === 1 ? "" : "s"}` : ""}`}</button></div>
+        </form>
+    </div><//>`;
+}
+
+/**
+ * The sidebar's "Open writer": brings back the chapter in the writer, or on a chapter page opens that chapter;
+ * greyed out when there is neither (Ctrl+[ does the same)
+ */
+function WriterButton({ index }) {
+    const w = useWriter();
+    const m = /^#\/chapter\/([^/]+)\/([\d.]+)/.exec(location.hash);
+    const novelName = (folder) => index?.novels.find((n) => n.folder === folder)?.name ?? folder;
+    const can = !!w.folder || !!m;
+    const label = w.folder ? `Chapter ${w.n}` : m ? `Chapter ${m[2]}` : "";
+    const title = w.folder ? `Open the writer: ${novelName(w.folder)}, chapter ${w.n} (Ctrl+[)`
+        : m ? `Write chapter ${m[2]} (Ctrl+[)` : "No chapter in the writer yet: open a chapter and press ✎ Write";
+    return html`<button class="side-pill writer-pill" disabled=${!can} aria-disabled=${!can} title=${title}
+        onClick=${() => (w.folder ? expandWriter() : toggleWriter())}>
+        <span>✎ Open writer</span>${label && html`<span class="writer-pill-ch">${label}</span>`}</button>`;
 }
 
 function Search({ index }) {
@@ -1008,6 +1099,7 @@ const HIDDEN_COLS = new Set(["title", "aliases", "type", "created-date", "tags",
 function CollectionView({ index, collection, novelFilter, scope = "page" }) {
     const pick = useItemPick();
     const [q, setQ] = useState("");
+    const [addingMany, setAddingMany] = useState(false);
     // picked filter values, kept per collection in localStorage like the rest of the view's settings
     const [filters, setFiltersNow] = useState(() => store.get(`filters:${collection}`, {}));
     const setFilters = (fn) => setFiltersNow((f) => { const next = typeof fn === "function" ? fn(f) : fn; store.set(`filters:${collection}`, next); return next; });
@@ -1091,8 +1183,10 @@ function CollectionView({ index, collection, novelFilter, scope = "page" }) {
                 <input placeholder="Filter…" value=${q} onInput=${(e) => setQ(e.target.value)} />
                 ${allFacets.length > 0 && html`<button title="Choose which filter groups show" onClick=${() => setPicking(true)}>Filters${hiddenFacets.some((k) => allFacets.some((f) => f.key === k)) ? html` <span class="muted">(${facets.length}/${allFacets.length})</span>` : ""}</button>`}
                 <button onClick=${() => { const m = mode === "table" ? "cards" : "table"; setMode(m); store.set("viewMode", m); }}>${mode === "table" ? "Cards" : "Table"}</button>
+                ${collection.startsWith("Taxonomy/") && html`<button title="Add several values at once from a list (levels with sub-levels and numbers)" onClick=${() => setAddingMany(true)}>Add several…</button>`}
                 <button class="primary" onClick=${() => (scope === "drawer" ? openInDrawer : go)(`#/new/${encodeURIComponent(collection)}`)}>New</button>
             </div>
+            ${addingMany && html`<${TaxonomyDialog} index=${index} collection=${collection} onClose=${() => setAddingMany(false)} />`}
         </div>
         <div class="facets">
             ${facets.map((f) => html`<div class="facet"><b>${f.key}</b>${f.values.slice(0, 40).map(([v, c]) => {
@@ -1620,8 +1714,47 @@ function NoteSummary({ page, index }) {
             ${sections.map((k) => html`<h4>${fieldLabel(k)}</h4><div class="summary-section">${text(k)}</div>`)}
         </div>`}
         ${skills && html`<div class="panel note-summary"><h3>Skills</h3><div class="summary-section">${text("character/skills")}</div></div>`}
-        ${relations.length > 0 && html`<div class="panel note-summary"><h3>Relationships</h3>
-            <dl class="facts">${relations.map((k) => html`<div><dt>${fieldLabel(k)}</dt><dd>${value(k)}</dd></div>`)}</dl></div>`}`;
+        ${(page.relations || relations.length > 0) && html`<${RelationsBox} page=${page} index=${index} />`}`;
+}
+
+/**
+ * A character's relationships: friendly, neutral and hostile, each with the name and the current note. From the
+ * ledger (page.relations, latest chapter) when it has relation lines, else the sheet's relations/<status> lists.
+ * Long sections show the first few and fold out.
+ */
+const RELATION_SECTIONS = [["friendly", "Friendly"], ["neutral", "Neutral"], ["hostile", "Hostile"], ["unset", "No standing yet"]];
+const RELATIONS_SHOWN = 5;
+/** compute()'s relations [{with, withName, status, note, chapter, entry}] -> {friendly: [...], neutral, hostile, unset} */
+function relationGroups(list, index) {
+    const out = Object.fromEntries(RELATION_SECTIONS.map(([k]) => [k, []]));
+    for (const r of list) {
+        const n = index?.resolve(r.with);
+        out[r.status || "unset"].push({ ...r, name: n?.fm.title || r.withName, path: r.path ?? n?.path ?? null });
+    }
+    for (const k of Object.keys(out)) out[k].sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+}
+function RelationsBox({ page, index, rel: given, title = "Relationships" }) {
+    const [open, setOpen] = useState(() => new Set());
+    const rel = given ?? page.relations ?? Object.fromEntries(RELATION_SECTIONS.map(([k]) => [k, asList(page.fm[`relations/${k}`]).filter(Boolean).map((v) => {
+        const n = isLink(v) && index?.resolve(v);
+        return { with: v, name: n?.fm.title || linkText(v), path: page.links?.[v]?.path ?? n?.path ?? null, note: "" };
+    })]));
+    const sections = RELATION_SECTIONS.filter(([k]) => rel[k]?.length);
+    if (!sections.length) return null;
+    const toggle = (k) => setOpen((o) => { const n = new Set(o); n.has(k) ? n.delete(k) : n.add(k); return n; });
+    return html`<div class="panel note-summary relations-box"><h3>${title}</h3>
+        ${sections.map(([k, label]) => {
+            const list = rel[k], all = open.has(k), shown = all ? list : list.slice(0, RELATIONS_SHOWN);
+            return html`<section class=${`rel-section rel-${k}`}>
+                <h4>${label} <span class="muted small">${list.length}</span></h4>
+                <ul class="rel-list">${shown.map((r) => html`<li>
+                    ${r.path ? html`<a class="rel-name" href=${noteHref(r.path)}>${r.name}</a>` : html`<span class="rel-name">${r.name}</span>`}
+                    <span class="rel-note">${r.note}</span>
+                    ${r.chapter != null ? html`<span class="rel-ch muted small" title=${`Last changed in chapter ${r.chapter} (entry ${r.entry})`}>ch. ${r.chapter}</span>` : html`<span class="rel-ch"></span>`}</li>`)}</ul>
+                ${list.length > RELATIONS_SHOWN && html`<button type="button" class="small rel-more" onClick=${() => toggle(k)}>${all ? "Show fewer" : `Show all ${list.length}`}</button>`}
+            </section>`;
+        })}</div>`;
 }
 
 // Ranked taxonomy notes (`ordered: true`) show every value of their facet in `class` order
@@ -1645,7 +1778,11 @@ function NoteView({ index, path, scope = "page" }) {
     const [renaming, setRenaming] = useState(false);
     // a character in the drawer: its sheet and its ledgers as two tabs
     const [charTab, setCharTabState] = useState(() => store.get("characterTab", "sheet"));
-    const setCharTab = (t) => { setCharTabState(t); store.set("characterTab", t); };
+    const setCharTab = (t) => { setCharTabState(t); if (t !== "entry") store.set("characterTab", t); };
+    // a ledger entry being written or edited from the Ledger tab: a third tab, kept while you look at the others
+    const [entryTab, setEntryTab] = useState(null); // query string of the entry editor, or null
+    const openEntry = (p) => { setEntryTab(qs(p)); setCharTab("entry"); };
+    const closeEntry = () => { setEntryTab(null); setCharTab("ledger"); };
     const pick = useItemPick();
     // a character's relation fields pick from the characters of its own novel
     const charNovel = page?.fm.type === "character" ? index?.novels.find((n) => page.path.startsWith(`${n.folder}/`))?.folder : null;
@@ -1690,6 +1827,7 @@ function NoteView({ index, path, scope = "page" }) {
     const backlinks = Object.keys(page.backlinks).length > 0 && html`<div class="panel"><h3>Linked from</h3>${linkGroups(page.backlinks)}</div>`;
     const outlinks = Object.keys(page.outlinks ?? {}).length > 0 && html`<div class="panel"><h3>Links to</h3>${linkGroups(page.outlinks)}</div>`;
     const charTabs = scope === "drawer" && page.fm.type === "character" && !!novel;
+    const tabNow = charTab === "entry" && !entryTab ? "ledger" : charTab === "ledger" || charTab === "entry" ? charTab : "sheet";
     return html`<div>
         ${renaming && html`<${RenameDialog} path=${page.path} onDone=${renamed} onClose=${() => setRenaming(false)} />`}
         <div class="spread">
@@ -1710,22 +1848,44 @@ function NoteView({ index, path, scope = "page" }) {
         </div>
         ${page.fmError && html`<div class="warnbox">Frontmatter could not be read: ${page.fmError}</div>`}
         ${charTabs && html`<div class="tabs note-tabs" role="tablist">
-            <button role="tab" aria-selected=${charTab !== "ledger"} class=${charTab !== "ledger" ? "on" : ""} onClick=${() => setCharTab("sheet")}>Character</button>
-            <button role="tab" aria-selected=${charTab === "ledger"} class=${charTab === "ledger" ? "on" : ""} onClick=${() => setCharTab("ledger")}>Ledger</button>
+            <button role="tab" aria-selected=${tabNow === "sheet"} class=${tabNow === "sheet" ? "on" : ""} onClick=${() => setCharTab("sheet")}>Character</button>
+            <button role="tab" aria-selected=${tabNow === "ledger"} class=${tabNow === "ledger" ? "on" : ""} onClick=${() => setCharTab("ledger")}>Ledger</button>
+            ${entryTab && html`<button role="tab" aria-selected=${tabNow === "entry"} class=${`entry-tab ${tabNow === "entry" ? "on" : ""}`} onClick=${() => setCharTab("entry")}>${entryTabLabel(entryTab)}
+                <span class="tab-x" role="button" title="Close without saving" aria-label="Close the entry" onClick=${(e) => { e.stopPropagation(); closeEntry(); }}>×</span></button>`}
         </div>`}
-        ${charTabs && charTab === "ledger" && html`<${OwnerView} key=${page.name} index=${index} folder=${novel.folder} owner=${page.name} params=${new URLSearchParams()} embedded=${true} />`}
-        <div hidden=${charTabs && charTab === "ledger"}>${scope === "drawer"
+        ${charTabs && tabNow === "ledger" && html`<${OwnerView} key=${page.name} index=${index} folder=${novel.folder} owner=${page.name} params=${new URLSearchParams()} embedded=${true} onEntry=${openEntry} />`}
+        ${charTabs && entryTab && html`<div hidden=${tabNow !== "entry"}><${EntryEditor} key=${entryTab} index=${index} folder=${novel.folder} params=${new URLSearchParams(entryTab)} embedded=${true} onDone=${closeEntry} /></div>`}
+        <div hidden=${charTabs && tabNow !== "sheet"}>${scope === "drawer"
             // drawer: summary, content, then images on the left; frontmatter and links on the right
             // (plan notes keep their fields, which are the plan, on the left)
             ? html`<${ClassStrip} page=${page} index=${index} />
             <div class="note-cols">
-                <div class="note-main">${page.plan ? fields : html`<${NoteSummary} page=${page} index=${index} />`}${usage}${content}<${Gallery} images=${page.images} />${imageDrop}</div>
+                <div class="note-main">${page.plan ? fields : html`<${NoteSummary} page=${page} index=${index} />`}<${PowerLevels} page=${page} index=${index} />${usage}${content}<${Gallery} images=${page.images} />${imageDrop}</div>
                 <div class="note-side">${!page.plan && fields}${backlinks}${outlinks}</div>
             </div>`
             : html`<${Gallery} images=${page.images} />
-                <div class=${page.plan ? "" : "grid2"}>${fields}<div>${usage}${imageDrop}</div></div>
+                <div class=${page.plan ? "" : "grid2"}>${fields}<div><${PowerLevels} page=${page} index=${index} />${usage}${imageDrop}</div></div>
                 ${content}${backlinks}${outlinks}`}</div>
     </div>`;
+}
+
+/** A power system's levels: taxonomy values whose `power-system` is this note, per taxonomy, sub-levels indented, with their numbers */
+function PowerLevels({ page, index }) {
+    if (page.collection !== "Power Systems" || !index) return null;
+    const me = page.name.toLowerCase();
+    const notes = index.notes.filter((n) => n.collection?.startsWith("Taxonomy/") && n.fm["power-system"] && linkLabel(String(n.fm["power-system"])).toLowerCase() === me);
+    if (!notes.length) return null;
+    const facets = [...new Set(notes.map((n) => n.collection))];
+    return html`<div class="panel note-summary power-levels"><h3>Levels</h3>
+        ${facets.map((c) => {
+            const own = notes.filter((n) => n.collection === c);
+            const { options, noteThresholds } = facetChoice(own, "all", (l) => index.resolve(l)?.path ?? null);
+            const byName = new Map(own.map((n) => [n.name, n]));
+            return html`${facets.length > 1 && html`<h4>${collectionLabel(c)}</h4>`}
+                <table class="levels-table"><tbody>${options.map((o) => { const n = byName.get(o); const sub = !!(n.fm.parent && index.resolve(String(n.fm.parent))); return html`<tr class=${sub ? "sub" : ""}>
+                    <td><a href=${noteHref(n.path)}>${n.fm.title || n.name}</a></td><td class="num muted">${n.fm.threshold !== "" && n.fm.threshold != null ? n.fm.threshold : sub ? "" : noteThresholds[o] ?? ""}</td></tr>`; })}</tbody></table>
+                <p class="muted small-note"><a href=${`#/c/${encodeURIComponent(c)}`}>${collectionLabel(c)}</a>: a stat template's choice can take these values and work them out from a stat.</p>`;
+        })}</div>`;
 }
 
 // ------------------------------------------------------------------ note blocks (the body's "## " sections)
@@ -2177,10 +2337,11 @@ function SheetStats({ info, tpl, tplName, fm, edits, edit, changed, index }) {
         : html`${info.problems?.length > 0 && html`<div class="warnbox">${info.problems.map((p) => html`<div>${p}</div>`)}</div>`}
             ${sections.map((s) => html`${s && html`<h4 class="stat-section">${s}</h4>`}<div class="formgrid">${tpl.fields.filter((f) => f.section === s).map((f) => {
                 const o = info.origin?.[f.key];
-                const err = !managed.has(f.key) && f.type !== "computed" && statError(index, f, values[f.key]);
+                const err = !managed.has(f.key) && !isDerived(f) && statError(index, f, values[f.key]);
                 return html`<label class=${changed.includes(f.key) ? "changed" : ""} title=${f.key}>${f.label}</label>
                     <div class="stat-cell">${managed.has(f.key)
-                        ? html`<span>${displayValue(tpl, f, values) || "—"}</span> <span class="muted stat-was">set by the Stats ledger${o?.chapter != null ? ` (ch ${o.chapter})` : ""}; change it with a Stats entry</span>`
+                        ? html`<span>${displayValue(tpl, f, info.values ?? values) || "—"}</span> <span class="muted stat-was">set by the Stats ledger${o?.unlinked ? ", unlinked from its number" : ""}${o?.chapter != null ? ` (ch ${o.chapter})` : ""}; change it with a Stats entry</span>
+                            ${driftText(tpl, f, info.values ?? {}) && html`<div class="stat-drift">${driftText(tpl, f, info.values ?? {})}</div>`}`
                         : html`<${StatInput} field=${f} value=${values[f.key]} onChange=${(v) => edit(f.key, v)} index=${index} template=${tpl} values=${values} />
                             ${o?.from === "source" && !(f.key in edits) && html`<span class="muted stat-was">prefilled from ${o.field}: ${displayValue(tpl, f, info.values ?? {})}</span>`}`}
                         ${err && html`<div class="error">${err}</div>`}</div>`;
@@ -2190,7 +2351,54 @@ function SheetStats({ info, tpl, tplName, fm, edits, edit, changed, index }) {
 
 // ------------------------------------------------------------------ stats: novel tab (templates and who uses them)
 
-const blankTemplate = (name) => ({ name, description: "", default: false, callout: "system", "show-empty": false, panel: "", fields: [] });
+/**
+ * A choice field's options in the template editor: typed options, or the values of a taxonomy facet (in class order,
+ * stored as [[links]]); and optionally "follows" a number field, each option from its lowest value up
+ * (Qi Condensation from 0, Foundation Establishment from 1000…), so the choice is worked out, never set.
+ */
+function ChoiceOptions({ f, t, facets, index, set }) {
+    // a facet's values (and their own numbers) as the server fills them in
+    const fromFacet = (facet, depth = f.depth) => (facet ? facetChoice(index.inCollection(`Taxonomy/${facet}`), depth, (l) => index.resolve(l)?.path ?? null) : { options: [], noteThresholds: {} });
+    // the power system a facet's values belong to, to show beside its name
+    const systemOf = (facet) => { const v = index.inCollection(`Taxonomy/${facet}`).map((n) => n.fm["power-system"]).find(Boolean); return v ? linkLabel(String(v)) : ""; };
+    const numbers = t.fields.filter((x) => x !== f && ["number", "resource", "computed"].includes(x.type));
+    const src = numbers.find((x) => x.key === f.from || x.id === f.from);
+    const hasLevels = f.facet && index.inCollection(`Taxonomy/${f.facet}`).some((n) => n.fm.parent);
+    return html`<div class="choice-opts">
+        <div class="row">
+            <label class="row">values from <select value=${f.facet ? "taxonomy" : "list"} onChange=${(e) => set(e.target.value === "list" ? { facet: "", options: [], noteThresholds: {} } : { facet: facets[0] ?? "", ...fromFacet(facets[0]) })}>
+                <option value="list">options typed here</option><option value="taxonomy" disabled=${!facets.length}>a taxonomy</option></select></label>
+            ${f.facet
+                ? html`<label class="row">taxonomy <select value=${f.facet} onChange=${(e) => set({ facet: e.target.value, ...fromFacet(e.target.value) })}>${facets.map((x) => { const sys = systemOf(x); return html`<option value=${x}>${x}${sys ? ` (${sys})` : ""}</option>`; })}</select></label>
+                    ${hasLevels && html`<label class="row">use <select value=${f.depth} onChange=${(e) => set({ depth: e.target.value, ...fromFacet(f.facet, e.target.value) })}>
+                        <option value="all">every value</option><option value="top">top levels only (e.g. realms)</option><option value="bottom">sub-levels only (e.g. stages)</option></select></label>`}
+                    <span class="muted">${f.options.length} values${f.options.length ? `: ${f.options.slice(0, 4).map((o) => f.optionTitles?.[o] ?? o).join(", ")}${f.options.length > 4 ? "…" : ""}` : ""}</span>`
+                : html`<label class="row" style="flex:1">options <input style="flex:1" value=${f.options.join(", ")} placeholder="Common, Rare, Epic" onChange=${(e) => set({ options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></label>`}
+        </div>
+        <div class="row">
+            <label class="row" title="Work the choice out from a number: each option applies from its lowest value up">follows <select value=${src?.key ?? ""} onChange=${(e) => set({ from: e.target.value })}>
+                <option value="">nothing (set it in Stats entries)</option>${numbers.map((x) => html`<option value=${x.key}>${x.label}</option>`)}</select></label>
+            ${src && html`<span class="muted">each option applies from its lowest ${src.label} up${f.facet ? " (the number on its taxonomy note, unless you give one here)" : ""}; Stats entries change ${src.label}, not this</span>`}
+        </div>
+        ${src && f.options.length > 0 && html`<table class="threshold-table"><thead><tr><th>${f.label || "option"}</th><th>from ${src.label}</th><th>up to</th></tr></thead><tbody>
+            ${f.options.map((o) => { const row = thresholdRows(f).find((r) => r.option === o); const fromNote = f.noteThresholds?.[o]; return html`<tr><td>${f.optionTitles?.[o] ?? o}</td>
+                <td><input type="number" value=${f.thresholds?.[o] ?? ""} placeholder=${fromNote ?? "—"} title=${fromNote != null ? `${fromNote} on the taxonomy note; type a number to use another here` : ""}
+                    onInput=${(e) => { const th = { ...(f.thresholds ?? {}) }; if (e.target.value === "") delete th[o]; else th[o] = Number(e.target.value); set({ thresholds: th }); }} /></td>
+                <td class="muted">${row ? (row.next != null ? `below ${row.next}` : "and above") : "not used"}</td></tr>`; })}</tbody></table>`}
+    </div>`;
+}
+
+let uidSeq = 0;
+const nextUid = () => `f${++uidSeq}`;
+/** Callout types for a select: the designer's styles (not plain quotes / "any other"), plus the current one if it isn't there */
+function calloutChoices(styles, current) {
+    const list = Object.entries(styles ?? {}).filter(([k]) => k !== "quote" && k !== "default").map(([k, st]) => [k, st.label ? `${st.label} (${k})` : k]);
+    if (!list.length) list.push(["status", "Status window (status)"], ["system", "System (system)"]);
+    if (current && !list.some(([k]) => k === current)) list.push([current, `${current} (no style yet)`]);
+    return list;
+}
+
+const blankTemplate = (name) => ({ name, description: "", default: false, callout: "status", layout: "status", "show-empty": false, panel: "", fields: [] });
 const blankField = () => normalizeTemplates({ t: { fields: [{ label: "", type: "number" }] } }).t.fields[0];
 
 function StatsTab({ folder, novel }) {
@@ -2239,15 +2447,21 @@ function StatHolders({ folder, data, index }) {
 }
 
 function TemplatesEditor({ folder, data, index }) {
-    const initial = () => Object.values(data.templates).map((t) => ({ ...t, fields: t.fields.map((f) => ({ ...f })), orig: t.name }));
+    // fields carry a _uid (never saved) so folding follows a field when it is moved or renamed
+    const initial = () => Object.values(data.templates).map((t) => ({ ...t, fields: t.fields.map((f) => ({ ...f, _uid: nextUid() })), orig: t.name }));
     const [list, setList] = useState(initial);
     const [sel, setSel] = useState(0);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState("");
     const [previewOwner, setPreviewOwner] = useState("");
     const [preview, setPreview] = useState(null);
-    const saved = JSON.stringify(initial().map(({ orig, ...t }) => t));
-    const dirty = JSON.stringify(list.map(({ orig, ...t }) => t)) !== saved;
+    const plain = (ts) => JSON.stringify(ts.map(({ orig, ...t }) => ({ ...t, fields: t.fields.map(({ _uid, ...f }) => f) })));
+    const saved = plain(initial());
+    const dirty = plain(list) !== saved;
+    // fields shown open (by _uid); the rest are folded to one line
+    const [openFields, setOpenFields] = useState(() => new Set());
+    const toggleField = (uid) => setOpenFields((o) => { const n = new Set(o); n.has(uid) ? n.delete(uid) : n.add(uid); return n; });
+    const { data: calloutData } = useApi("/api/callout-styles");
     useEffect(() => markDirty("page", `stat-templates:${folder}`, dirty), [dirty]);
     useEffect(() => () => markDirty("page", `stat-templates:${folder}`, false), []);
     // after a save (or an edit in Obsidian) take the vault's version when there are no local edits
@@ -2274,6 +2488,8 @@ function TemplatesEditor({ folder, data, index }) {
     const charFields = useMemo(() => [...new Set([...(index.schema.characters?.fields.map(([k]) => k) ?? [])])], [index]);
     const sections = t ? [...new Set(t.fields.map((f) => f.section).filter(Boolean))] : [];
     const collections = Object.keys(index.schema.collections);
+    // taxonomy facets a choice can take its values from (schema collections and folders that have notes)
+    const facets = useMemo(() => [...new Set([...collections, ...index.notes.map((n) => n.collection ?? "")].filter((c) => c?.startsWith("Taxonomy/")).map((c) => c.slice(9)))].sort(), [index]);
     const save = async () => {
         setBusy(true); setErr("");
         try {
@@ -2302,15 +2518,31 @@ function TemplatesEditor({ folder, data, index }) {
             <label>Options</label><div class="row">
                 <label class="row"><input type="checkbox" style="width:auto" checked=${t.default} onChange=${(e) => setList(list.map((x, i) => ({ ...x, default: i === sel ? e.target.checked : e.target.checked ? false : x.default })))} /> default for characters</label>
                 <label class="row"><input type="checkbox" style="width:auto" checked=${t["show-empty"]} onChange=${(e) => setT({ "show-empty": e.target.checked })} /> show empty fields in panels</label>
-                <label class="row muted">callout <input style="width:110px" value=${t.callout} onInput=${(e) => setT({ callout: e.target.value })} /></label>
+                <label class="row muted" title="The built-in stats panel: a status window (a table per section, bars for current / max) or the classic list">panel
+                    <select value=${t.layout ?? "status"} onChange=${(e) => setT({ layout: e.target.value, callout: e.target.value === "status" && t.callout === "system" ? "status" : e.target.value === "classic" && t.callout === "status" ? "system" : t.callout })}>
+                        <option value="status">status window</option><option value="classic">classic list</option></select></label>
+                <label class="row muted" title="The callout type the stats panel is written as; its look is set in the callout designer">callout
+                    <select value=${t.callout} onChange=${(e) => setT({ callout: e.target.value })}>
+                        ${calloutChoices(calloutData?.styles, t.callout).map(([v, label]) => html`<option value=${v}>${label}</option>`)}</select>
+                    <a class="small-link" href="#/callout-design" title="Change how callouts look">designer</a></label>
                 <${ConfirmButton} onConfirm=${removeTemplate}
                     title=${templateUsers.length ? `${templateUsers.length} notes use it: ${templateUsers.slice(0, 5).join(", ")}${templateUsers.length > 5 ? "…" : ""}` : "No notes use it"}>Delete template<//></div>
         </div>
-        <h3 style="margin-top:14px">Fields</h3>
+        <div class="spread" style="margin-top:14px"><h3 style="margin:0">Fields <span class="muted" style="font-weight:400">${t.fields.length}</span></h3>
+            <div class="row"><button class="small" onClick=${() => setOpenFields(new Set(t.fields.map((f) => f._uid)))}>Expand all</button>
+                <button class="small" onClick=${() => setOpenFields(new Set())}>Collapse all</button></div></div>
         <datalist id="stat-sections">${sections.map((s) => html`<option value=${s} />`)}</datalist>
         <datalist id="char-fields">${charFields.map((k) => html`<option value=${k} />`)}</datalist>
-        <div class="field-list">${t.fields.map((f, fi) => html`<div class="field-row" key=${fi}>
+        <div class="field-list">${t.fields.map((f, fi) => !openFields.has(f._uid) ? html`<div class="field-row folded" key=${f._uid ?? fi}>
+            <button class="fold-btn" aria-expanded="false" title="Show this field's settings" onClick=${() => toggleField(f._uid)}>▸</button>
+            <button class="field-summary" onClick=${() => toggleField(f._uid)}><b>${f.label || "Untitled field"}</b>
+                <span class="muted">${FIELD_TYPES[f.type] ?? f.type}${f.type === "choice" && f.facet ? ` · ${f.facet}` : ""}${f.from ? ` · follows ${t.fields.find((x) => x.key === f.from || x.id === f.from)?.label ?? f.from}` : ""}${f.section ? ` · ${f.section}` : ""}</span>
+                <span class="mono muted small-key">${f.key}</span></button>
+            <span class="row"><button class="small" title="Move up" onClick=${() => moveField(fi, -1)}>↑</button><button class="small" title="Move down" onClick=${() => moveField(fi, 1)}>↓</button>
+                <${ConfirmButton} title="Remove field" confirmLabel="Confirm" onConfirm=${() => setT({ fields: t.fields.filter((_, i) => i !== fi) })}>×<//></span>
+        </div>` : html`<div class="field-row" key=${f._uid ?? fi}>
             <div class="field-main">
+                <button class="fold-btn" aria-expanded="true" title="Fold this field" onClick=${() => toggleField(f._uid)}>▾</button>
                 <input aria-label="Label" placeholder="Label" value=${f.label} onInput=${(e) => setField(fi, { label: e.target.value })} />
                 <select aria-label="Type" value=${f.type} onChange=${(e) => setField(fi, { type: e.target.value })}>${Object.entries(FIELD_TYPES).map(([k, v]) => html`<option value=${k}>${v}</option>`)}</select>
                 <input aria-label="Section" placeholder="Section (optional)" list="stat-sections" value=${f.section} onInput=${(e) => setField(fi, { section: e.target.value })} />
@@ -2325,7 +2557,7 @@ function TemplatesEditor({ folder, data, index }) {
                     <label class="row">${f.type === "resource" ? "fixed max" : "max"} <input type="number" style="width:80px" value=${f.max ?? ""} onInput=${(e) => setField(fi, { max: e.target.value === "" ? null : Number(e.target.value) })} /></label>`}
                 ${f.type === "resource" && html`<label class="row">max from <select value=${f["max-field"]} onChange=${(e) => setField(fi, { "max-field": e.target.value })}><option value="">its own value (80/100)</option>
                     ${t.fields.filter((x) => x !== f && (x.type === "number" || x.type === "computed")).map((x) => html`<option value=${x.key}>${x.label}</option>`)}</select></label>`}
-                ${f.type === "choice" && html`<label class="row" style="flex:1">options <input style="flex:1" value=${f.options.join(", ")} placeholder="Common, Rare, Epic" onChange=${(e) => setField(fi, { options: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></label>`}
+                ${f.type === "choice" && html`<${ChoiceOptions} f=${f} t=${t} facets=${facets} index=${index} set=${(patch) => setField(fi, patch)} />`}
                 ${(f.type === "link" || f.type === "links") && html`
                     <label class="row">from <select value=${f.collection} onChange=${(e) => setField(fi, { collection: e.target.value })}><option value="">any note</option>${collections.map((c) => html`<option value=${c}>${collectionLabel(c)}</option>`)}</select></label>
                     <label class="row"><input type="checkbox" style="width:auto" checked=${f.describe} onChange=${(e) => setField(fi, { describe: e.target.checked })} /> show descriptions in panels</label>`}
@@ -2335,7 +2567,7 @@ function TemplatesEditor({ folder, data, index }) {
                 ${f.type !== "computed" && html`<label class="row" title="Use this character frontmatter field as the value until a Stats entry sets one">prefill from <input class="mono" style="width:150px" list="char-fields" value=${f.source} placeholder="sheet field" onInput=${(e) => setField(fi, { source: e.target.value })} /></label>`}
             </div>
         </div>`)}</div>
-        <button class="small" onClick=${() => setT({ fields: [...t.fields, blankField()] })}>+ Field</button>
+        <button class="small" onClick=${() => { const f = { ...blankField(), _uid: nextUid() }; setT({ fields: [...t.fields, f] }); setOpenFields((o) => new Set([...o, f._uid])); }}>+ Field</button>
         ${problems.length > 0 && html`<div class="warnbox" style="margin-top:10px">${problems.map((p) => html`<div>${p}</div>`)}</div>`}
         <div class="grid2" style="margin-top:14px">
             <details open=${!!t.panel}><summary><b>Custom panel layout</b> <span class="muted">(optional; the default is built from the sections)</span></summary>
@@ -2538,7 +2770,7 @@ function PlotBoard({ folder, plan }) {
     </div>`;
 }
 
-function EntryCard({ e, folder, behaviour, future, showOwner }) {
+function EntryCard({ e, folder, behaviour, future, showOwner, onEdit = null }) {
     const [showText, setShowText] = useState(false);
     const del = async () => {
         try { await api.send("DELETE", `/api/ledger/entry?${qs({ ledger: e.ledger, key: e.key })}`); toast("Deleted"); } catch (x) { toast(x.message); }
@@ -2553,13 +2785,13 @@ function EntryCard({ e, folder, behaviour, future, showOwner }) {
                 <button class="small" onClick=${() => copyText(e.callout)}>⧉ Copy</button>
                 ${e.fields.ref && html`<button class="small" onClick=${copyLinked}>⧉ Linked</button>`}
                 <button class="small" onClick=${() => setShowText(!showText)}>${showText ? "Hide" : "Callout"}</button>
-                ${!e.fields["mirror-of"] && html`<button class="small" onClick=${() => go(entryHref(folder, { owner: e.owner, type: e.type, ledger: e.ledger, key: e.key }))}>Edit</button>`}
+                ${!e.fields["mirror-of"] && html`<button class="small" onClick=${() => { const p = { owner: e.owner, type: e.type, ledger: e.ledger, key: e.key }; onEdit ? onEdit(p) : go(entryHref(folder, p)); }}>Edit</button>`}
                 <${ConfirmButton} title=${`Delete ${e.key} ${e.title}`} onConfirm=${del}>Delete<//>
             </div>
         </div>
         ${Object.entries(e.fields).filter(([k]) => !["id", "ref", "mirror-of"].includes(k)).map(([k, v]) => html`<span class="chip"><b>${k}</b> ${v}</span>`)}
         ${e.lines.length > 0 && html`<ul style="margin:6px 0 0;padding-left:18px">${e.lines.map((l) => html`<li>${behaviour === "state"
-            ? html`<b>${l.set}</b>${l.with ? html` (${linkLabel(l.with)})` : ""} → ${linkLabel(l.value ?? "")}`
+            ? html`<b>${l.set}</b>${l.with ? html` (${linkLabel(l.with)})` : ""}${l.value ? html` → ${linkLabel(l.value)}` : ""}${l.add != null && l.add !== "" ? html` ${Number(l.add) >= 0 ? "+" : ""}${l.add}` : ""}${l.note ? html` <span class="muted">· ${l.note}</span>` : ""}`
             : html`<span class="badge">${l.action ?? "add"}</span> ${l.qty ?? 1}${l.unit ? ` ${l.unit}` : ""} ${isLink(l.item) ? html`<${Chip} value=${l.item} />` : html`<span class="chip unresolved" title="Misc item, no data note">${l.item}</span>`}
                 ${l.to ? html` → ${linkLabel(l.to)}` : ""}${l["to-store"] ? html` → ${l["to-store"]}` : ""}${l.from ? html` ← ${linkLabel(l.from)}` : ""}${l.store && l.store !== "inventory" ? html` <span class="muted">@ ${l.store}</span>` : ""}${l.note ? html` <span class="muted">(${l.note})</span>` : ""}`}</li>`)}</ul>`}
         ${e.body && behaviour === "log" && html`<div class="md" style="margin-top:6px;white-space:pre-wrap">${e.body}</div>`}
@@ -2568,10 +2800,13 @@ function EntryCard({ e, folder, behaviour, future, showOwner }) {
 }
 
 /** An owner's ledgers and holdings at a chapter. `embedded`: inside a character's drawer page (its Ledger tab), without the heading and sheet */
-function OwnerView({ index, folder, owner, params, embedded = false }) {
+function OwnerView({ index, folder, owner, params, embedded = false, onEntry = null }) {
+    // entries open in the drawer's entry tab when embedded there, else on their own page
+    const toEntry = (p) => (onEntry ? onEntry(p) : go(entryHref(folder, p)));
     const [at, setAt] = useState(params.get("at") ? Number(params.get("at")) : null);
     const [compare, setCompare] = useState(null);
     const [tab, setTab] = useState(params.get("type") ?? null);
+    const [q, setQ] = useState("");
     const { data, error } = useApi(`/api/owner?${qs({ novel: folder, owner, at, compare })}`);
     const { data: novel } = useApi(`/api/novel?${qs({ folder })}`);
     if (!data || !novel) return html`<${Loading} error=${error} />`;
@@ -2581,12 +2816,21 @@ function OwnerView({ index, folder, owner, params, embedded = false }) {
     const behaviour = current?.computed.behaviour;
     const missingTypes = Object.keys(novel.ledgerTypes).filter((t) => !types.includes(t));
     const sheet = data.sheet;
+    // the filter: every word must appear in what a row shows (entries, holdings, changes, values, relationships, stats)
+    const hit = matcher(q);
+    const entryHit = (e) => hit(e.key, e.title, Object.values(e.fields), e.lines.map((l) => Object.values(l)), e.body);
+    const stackHit = (x) => hit(x.itemName, x.store, x.condition, x.rarity, x.mods);
+    const shownEntries = current ? [...current.entries].reverse().filter(entryHit) : [];
+    const stacks = current?.computed.stacks?.filter(stackHit) ?? [];
+    const diff = current?.computed.diff?.filter(stackHit) ?? null;
+    const relations = current?.computed.relations?.filter((r) => hit(r.withName, r.status, r.note)) ?? [];
+    const values = current?.computed.values?.filter((v) => !v.with && hit(v.field, v.value)) ?? [];
     return html`<div>
         <div class="spread">
             ${embedded ? html`<span />` : html`<div><div class="muted"><a href=${novelHref(folder)}>${novel.name}</a></div><h1>${owner}</h1></div>`}
             <div class="row">
                 ${sheet && !embedded && html`<button onClick=${() => go(noteHref(sheet.path))}>Sheet</button>`}
-                <button class="primary" onClick=${() => go(entryHref(folder, { owner, type: current?.type ?? "Inventory" }))}>New ${current?.type ?? ""} entry</button>
+                <button class="primary" onClick=${() => toEntry({ owner, type: current?.type ?? "Inventory" })}>New ${current?.type ?? ""} entry</button>
             </div>
         </div>
         ${sheet && !embedded && html`<div class="panel"><div class="row" style="align-items:flex-start">
@@ -2600,47 +2844,73 @@ function OwnerView({ index, folder, owner, params, embedded = false }) {
             <label class="row muted"><input type="checkbox" style="width:auto" checked=${compare != null} onChange=${(e) => setCompare(e.target.checked ? Math.max(0, chapter - 1) : null)} /> compare with</label>
             ${compare != null && html`<input type="number" min="0" value=${compare} style="width:70px" onInput=${(e) => setCompare(Number(e.target.value))} />`}
         </div>
-        <${StatsPanel} folder=${folder} owner=${owner} at=${chapter} />
+        <div class="row ledger-filter"><input class="grow" type="search" placeholder="Filter ledgers: items, names, notes, entries…" value=${q} onInput=${(e) => setQ(e.target.value)} aria-label="Filter ledgers" /></div>
+        <${StatsPanel} folder=${folder} owner=${owner} at=${chapter} filter=${q} onEntry=${onEntry} />
         <div class="tabs">
-            ${data.ledgers.map((l) => html`<button class=${l === current ? "on" : ""} onClick=${() => setTab(l.type)}>${l.type} <span class="muted">${l.entries.length}</span></button>`)}
-            ${missingTypes.length > 0 && html`<select onChange=${(e) => e.target.value && go(entryHref(folder, { owner, type: e.target.value }))} style="margin-left:8px"><option value="">+ start a ledger…</option>${missingTypes.map((t) => html`<option>${t}</option>`)}</select>`}
+            ${data.ledgers.map((l) => html`<button class=${l === current ? "on" : ""} onClick=${() => setTab(l.type)}>${l.type} <span class="muted">${q.trim() ? `${l.entries.filter(entryHit).length}/${l.entries.length}` : l.entries.length}</span></button>`)}
+            ${missingTypes.length > 0 && html`<select onChange=${(e) => e.target.value && toEntry({ owner, type: e.target.value })} style="margin-left:8px"><option value="">+ start a ledger…</option>${missingTypes.map((t) => html`<option>${t}</option>`)}</select>`}
         </div>
         ${!current ? html`<p class="muted">No ledgers yet.</p>` : html`
             ${current.computed.warnings.length > 0 && html`<div class="warnbox">${current.computed.warnings.map((w) => html`<div>${w.entry}: ${w.message}</div>`)}</div>`}
             ${behaviour === "stock" && html`<div class="grid2">
-                <div class="panel"><h3>Held at chapter ${chapter}</h3>${holdingsTable(current.computed.stacks, index)}</div>
-                ${current.computed.diff && html`<div class="panel"><h3>Changes from chapter ${compare} to ${chapter}</h3>
-                    <table><tbody>${current.computed.diff.map((d) => html`<tr><td>${d.itemPath ? html`<a href=${noteHref(d.itemPath)}>${d.itemName}</a>` : d.itemName}</td><td class="muted">${d.store}</td><td class="num" style=${`color:var(${d.change > 0 ? "--ok" : "--bad"})`}>${d.changeText}</td></tr>`)}</tbody></table></div>`}
+                <div class="panel"><h3>Held at chapter ${chapter}</h3>${q.trim() && !stacks.length && current.computed.stacks.length ? html`<p class="muted">Nothing held matches.</p>` : holdingsTable(stacks, index)}</div>
+                ${diff && html`<div class="panel"><h3>Changes from chapter ${compare} to ${chapter}</h3>
+                    <table><tbody>${diff.map((d) => html`<tr><td>${d.itemPath ? html`<a href=${noteHref(d.itemPath)}>${d.itemName}</a>` : d.itemName}</td><td class="muted">${d.store}</td><td class="num" style=${`color:var(${d.change > 0 ? "--ok" : "--bad"})`}>${d.changeText}</td></tr>`)}</tbody></table></div>`}
             </div>`}
-            ${behaviour === "state" && html`<div class="panel"><h3>Values at chapter ${chapter}</h3>
-                <table><tbody>${current.computed.values.map((v) => html`<tr><td><b>${v.field}</b>${v.with ? html` · ${v.withName}` : ""}</td><td>${linkLabel(v.value)}</td><td class="muted">since ${v.entry}</td></tr>`)}</tbody></table></div>`}
-            <h3>Entries</h3>
-            ${[...current.entries].reverse().map((e) => html`<${EntryCard} e=${e} folder=${folder} behaviour=${behaviour} future=${e.chapter > chapter} />`)}
+            ${behaviour === "state" && relations.length > 0 && html`<${RelationsBox} title=${`Relationships at chapter ${chapter}`} rel=${relationGroups(relations, index)} />`}
+            ${behaviour === "state" && (q.trim() ? values.length > 0 : !current.computed.relations?.length || values.length > 0) && html`<div class="panel"><h3>Values at chapter ${chapter}</h3>
+                <table><tbody>${values.map((v) => html`<tr><td><b>${v.field}</b></td><td>${linkLabel(v.value)}</td><td class="muted">since ${v.entry}</td></tr>`)}</tbody></table></div>`}
+            <h3>Entries${q.trim() ? html` <span class="muted" style="font-weight:400">${shownEntries.length} of ${current.entries.length}</span>` : ""}</h3>
+            ${q.trim() && !shownEntries.length && html`<p class="muted">No entries match “${q.trim()}”.</p>`}
+            ${shownEntries.map((e) => html`<${EntryCard} e=${e} folder=${folder} behaviour=${behaviour} future=${e.chapter > chapter} onEdit=${onEntry} />`)}
         `}
     </div>`;
 }
 
+/** The drawer's entry tab: "New Stats entry", "Edit 13.2" */
+const entryTabLabel = (q) => { const p = new URLSearchParams(q); return p.get("key") ? `Edit ${p.get("key")}` : `New ${p.get("type") ?? ""} entry`.replace("  ", " "); };
+
+/** A filter box's text -> (...parts) => does every word appear in them (any case; lists and [[links]] searched as text) */
+function matcher(q) {
+    const words = String(q ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return () => true;
+    return (...parts) => { const text = parts.flat(Infinity).map((x) => (x == null ? "" : String(x))).join(" ").toLowerCase(); return words.every((w) => text.includes(w)); };
+}
+
 // ------------------------------------------------------------------ stats: panels on owner and note pages
 
-const originText = (o) => (!o ? "" : o.from === "ledger" ? `ch ${o.chapter}` : o.from === "source" ? `from ${o.field}` : "sheet");
+const originText = (o) => (!o ? "" : o.unlinked ? `unlinked${o.chapter != null ? `, ch ${o.chapter}` : ""}` : o.from === "ledger" ? `ch ${o.chapter}` : o.from === "source" ? `from ${o.field}` : "sheet");
+/** "Qi 1500 is 301 over Foundation Establishment (Early) (1000–1199)" for an unlinked level outside its range */
+function driftText(template, f, values) {
+    const d = driftOf(template, f, values);
+    if (!d) return "";
+    const src = sourceOf(template, f);
+    return `${d.dir === "over" ? "Overflow" : "Underflow"}: ${src?.label ?? f.from} ${d.number} is ${d.by} ${d.dir} the range of ${d.option} (${d.min}${d.next != null ? `–${d.next - (Number.isInteger(d.next) ? 1 : 0)}` : "+"})`;
+}
 
 /** Stat values at a chapter as a table plus the stats panel callout */
-function StatsPanel({ folder, owner, at }) {
+function StatsPanel({ folder, owner, at, filter = "", onEntry = null }) {
     const { data, error } = useApi(`/api/stats?${qs({ novel: folder, owner, at })}`);
+    const [showCallout, setShowCallout] = useState(() => store.get("statsShowCallout", true));
     if (error || !data) return null;
+    const hit = matcher(filter);
+    const t0 = data.template;
+    if (t0 && filter.trim() && !t0.fields.some((f) => hit(f.section, f.label, data.display[f.key]))) return null;
     if (!data.template) return html`<div class="panel muted">No stat template for ${owner}. Assign one on the novel's Stats tab${data.templates.length ? "" : " (create a template first)"}.</div>`;
     const t = data.template;
+    const toggleCallout = () => { const v = !showCallout; setShowCallout(v); store.set("statsShowCallout", v); };
+    // the stats as a table (section · label, value, where it came from), the panel callout beside it when shown
+    const fields = t.fields.filter((f) => hit(f.section, f.label, data.display[f.key]));
+    const table = html`<table class="stats-table"><tbody>${fields.map((f) => { const o = data.origin[f.key]; const drift = driftText(t, f, data.values); return html`<tr><td class="muted">${f.section ? `${f.section} · ` : ""}${f.label}</td>
+        <td>${f.type === "link" || f.type === "links" ? html`<${Value} v=${data.values[f.key]} />` : data.display[f.key] || html`<span class="muted">—</span>`}${drift && html`<div class="stat-drift">${drift}</div>`}</td>
+        <td class="muted" style="font-size:12px">${f.type === "computed" ? "computed" : f.from && !o?.unlinked ? `from ${sourceOf(t, f)?.label ?? f.from}` : originText(o)}</td></tr>`; })}</tbody></table>`;
     return html`<div class="panel stats-panel">
         <div class="spread"><h3 style="margin:0">${t.name} stats${data.chapter != null ? html` <span class="muted" style="font-weight:400">at chapter ${data.chapter}</span>` : ""}</h3>
-            <div class="row"><a class="button" href=${entryHref(folder, { owner, type: "Stats", chapter: data.chapter ?? "" })}>Change stats</a>
+            <div class="row">${onEntry ? html`<button onClick=${() => onEntry({ owner, type: "Stats", chapter: data.chapter ?? "" })}>Change stats</button>` : html`<a class="button" href=${entryHref(folder, { owner, type: "Stats", chapter: data.chapter ?? "" })}>Change stats</a>`}
+                <button class="small" aria-pressed=${showCallout} onClick=${toggleCallout}>${showCallout ? "Hide callout" : "Show callout"}</button>
                 <button class="small" onClick=${() => copyText(data.panel, "Copied stats panel")}>⧉ Copy panel</button></div></div>
         ${data.problems.length > 0 && html`<div class="warnbox">${data.problems.map((p) => html`<div>${p}</div>`)}</div>`}
-        <div class="grid2" style="margin-top:8px">
-            <table><tbody>${t.fields.map((f) => html`<tr><td class="muted">${f.section ? `${f.section} · ` : ""}${f.label}</td>
-                <td>${f.type === "link" || f.type === "links" ? html`<${Value} v=${data.values[f.key]} />` : data.display[f.key] || html`<span class="muted">—</span>`}</td>
-                <td class="muted" style="font-size:12px">${f.type === "computed" ? "computed" : originText(data.origin[f.key])}</td></tr>`)}</tbody></table>
-            <div><${CalloutRender} text=${data.panel} /></div>
-        </div>
+        ${showCallout ? html`<div class="grid2" style="margin-top:8px">${table}<div><${CalloutRender} text=${data.panel} /></div></div>` : html`<div style="margin-top:8px">${table}</div>`}
     </div>`;
 }
 
@@ -2896,8 +3166,31 @@ function LinesEditor({ behaviour, lines, setLines, index, novel, owner, createNo
     const rarities = useMemo(() => rankedOptions(index, "Taxonomy/Rarity"), [index]);
     const owners = useMemo(() => [...new Set([...novel.characters.map((c) => c.name), ...novel.ledgers.map((l) => l.owner)])].filter((o) => o !== owner).map((o) => ({ label: o })), [novel, owner]);
     const conditions = useMemo(() => rankedOptions(index, "Taxonomy/Item Condition"), [index]);
+    // relationships can be with characters or forces (factions, sects)
+    const relTargets = useMemo(() => [...owners, ...(index?.inCollection("Factions") ?? []).map((n) => ({ label: n.name, hint: "faction" }))], [owners, index]);
     const upd = (i, patch) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
     const remove = (i) => setLines(lines.filter((_, j) => j !== i));
+    if (behaviour === "state" && withTarget) {
+        // relationships: who, where the owner stands with them, and a short note on why / how things are now
+        // (older lines, a status word and text in one value or separate note lines, are shown the same way and
+        // written as one line `[set:: relation] [with:: X] [value:: friendly] [note:: …]` once edited)
+        const view = (l) => {
+            const statusField = !/^(notes?|why|reason)$/i.test(l.set ?? "");
+            const m = statusField ? /^([A-Za-z]+)\s*(?:[:;,—–-]\s*|\s+|$)(.*)$/s.exec(String(l.value ?? "").trim()) : null;
+            const st = m && ["friendly", "neutral", "hostile"].includes(m[1].toLowerCase()) ? m[1].toLowerCase() : "";
+            return { status: st, note: l.note ?? (st ? m[2].trim() : String(l.value ?? "")) };
+        };
+        const put = (i, patch) => { const v = { ...view(lines[i]), ...patch }; setLines(lines.map((l, j) => (j === i ? { set: "relation", with: l.with ?? "", value: v.status, note: v.note } : l))); };
+        return html`<table class="lines-editor"><thead><tr><th>with</th><th style="width:130px">standing</th><th>note (why, or how things are now)</th><th></th></tr></thead><tbody>
+            ${lines.map((l, i) => { const v = view(l); return html`<tr>
+                <td><${Picker} value=${linkLabel(l.with ?? "")} options=${relTargets} onChange=${(o) => upd(i, { with: o ? toLink(o.label) : "" })} /></td>
+                <td><select value=${v.status} onChange=${(e) => put(i, { status: e.target.value })}>
+                    <option value="">(unchanged)</option><option value="friendly">Friendly</option><option value="neutral">Neutral</option><option value="hostile">Hostile</option></select></td>
+                <td><input value=${v.note} onInput=${(e) => put(i, { note: e.target.value })} placeholder="e.g. blames him for his mother's death" /></td>
+                <td><${ConfirmButton} confirmLabel="Confirm" onConfirm=${() => remove(i)}>×<//></td></tr>`; })}
+            </tbody></table>
+            <button class="small" onClick=${() => setLines([...lines, { set: "relation", with: "", value: "", note: "" }])}>+ Line</button>`;
+    }
     if (behaviour === "state") {
         return html`<table class="lines-editor"><thead><tr><th>field</th>${withTarget && html`<th>with</th>`}<th>value</th><th></th></tr></thead><tbody>
             ${lines.map((l, i) => html`<tr>
@@ -2966,9 +3259,14 @@ function StatInput({ field, value, onChange, index, template, values }) {
         case "boolean":
             return html`<select value=${value === true ? "yes" : value === false ? "no" : ""} onChange=${(e) => onChange(e.target.value === "" ? "" : e.target.value === "yes")}>
                 <option value="">—</option><option value="yes">Yes</option><option value="no">No</option></select>`;
-        case "choice":
-            return html`<select value=${value ?? ""} onChange=${(e) => onChange(e.target.value)}><option value="">—</option>
-                ${f.options.map((o) => html`<option value=${o}>${o}</option>`)}${value && !f.options.includes(value) && html`<option value=${value}>${value} (not an option)</option>`}</select>`;
+        case "choice": {
+            // a choice that follows a number is worked out from it
+            if (f.from) return html`<span class="muted" title=${`From ${f.from}`}>${template && values ? displayValue(template, f, computeValues(template, values)) || "—" : `follows ${f.from}`}</span>`;
+            const cur = value ? optionOf(f, value) : "";
+            const shown = value ? linkLabel(String(value)) : "";
+            return html`<select value=${cur ?? shown} onChange=${(e) => onChange(e.target.value === "" ? "" : f.facet ? `[[${e.target.value}]]` : e.target.value)}><option value="">—</option>
+                ${f.options.map((o) => html`<option value=${o}>${f.optionTitles?.[o] ?? o}</option>`)}${value && !cur && html`<option value=${shown}>${shown} (not an option)</option>`}</select>`;
+        }
         case "list": return html`<${ListInput} value=${value} onChange=${onChange} />`;
         case "link": case "links":
             return html`<${LinkField} value=${f.type === "links" ? asList(value) : value || ""} multiple=${f.type === "links"} target=${f.collection || ""} index=${index} onChange=${onChange} />`;
@@ -2995,14 +3293,40 @@ const statError = (index, f, v) => checkValue(f, v, { resolve: (x) => { const n 
  * Stats entry lines as a form over the owner's template: every field starts at its previous value; only the
  * fields you change become `set` lines. Lines for other fields stay in the generic editor below.
  */
+/** "+50" / "-20": keeps what is typed ("+", "-") while the line follows it */
+function ChangeBy({ value, onChange }) {
+    const ref = useRef(null);
+    const [text, setText] = useState(value);
+    useEffect(() => { if (document.activeElement !== ref.current) setText(value); }, [value]);
+    return html`<input ref=${ref} type="text" inputmode="decimal" placeholder="+50" value=${text} onInput=${(e) => { setText(e.target.value); onChange(e.target.value); }} onBlur=${() => setText(value)} />`;
+}
+
 function StatLinesEditor({ template, before, lines, setLines, index }) {
     const lineFor = (f) => lines.find((l) => !l.with && namesField(f, l.set));
-    const valueOf = (f) => { const l = lineFor(f); return l ? fromText(f, l.value) : before[f.key]; };
-    const current = Object.fromEntries(template.fields.map((f) => [f.key, valueOf(f)]));
+    // the values this entry comes to: its lines replayed on the values before it, as the server does (changes by an
+    // amount, levels set or unlinked)
+    const current = useMemo(() => { const st = stateFrom(template, before); for (const l of lines) replayLine(template, st, l); return valuesFromState(template, st); }, [template, before, lines]);
+    const beforeAll = useMemo(() => computeValues(template, before), [template, before]);
+    const setChange = (f, text) => {
+        const rest = lines.filter((l) => l !== lineFor(f));
+        const n = Number(String(text).replace(/^\s*\+\s*/, ""));
+        setLines(String(text).trim() === "" || !Number.isFinite(n) || n === 0 ? rest : [...rest, { set: f.key, add: String(n) }]);
+    };
     const setField = (f, v) => {
         const rest = lines.filter((l) => l !== lineFor(f));
         const same = JSON.stringify(v ?? "") === JSON.stringify(before[f.key] ?? "") || (Array.isArray(v) && !v.length && (before[f.key] == null || before[f.key] === ""));
         setLines(same ? rest : [...rest, { set: f.key, value: toText(f, v) }]);
+    };
+    // a level that follows a number: one line {set, value?, link?}; nothing left to say -> no line
+    const linkedBefore = (f) => !asList(before[UNLINKED]).includes(f.key);
+    const setLevel = (f, patch) => {
+        const rest = lines.filter((l) => l !== lineFor(f));
+        const next = { ...(lineFor(f) ?? { set: f.key }), ...patch };
+        if (next.link === "on" && linkedBefore(f)) delete next.link;
+        if (next.link === "off" && !linkedBefore(f)) delete next.link;
+        if (!next.value) delete next.value;
+        if (next.value && !next.link && optionOf(f, next.value) === optionOf(f, beforeAll[f.key] ?? "")) delete next.value;
+        setLines(next.value || next.link ? [...rest, next] : rest);
     };
     const sections = [...new Set(template.fields.map((f) => f.section))];
     return html`<div class="stat-lines">
@@ -3010,19 +3334,42 @@ function StatLinesEditor({ template, before, lines, setLines, index }) {
             <span class="muted">${lines.filter((l) => fieldNamed(template, l.set)).length} changed</span></div>
         ${sections.map((s) => html`${s && html`<h4 class="stat-section">${s}</h4>`}
             <div class="formgrid">${template.fields.filter((f) => f.section === s).map((f) => {
-                const changed = !!lineFor(f);
-                const err = f.type !== "computed" && statError(index, f, current[f.key]);
+                const line = lineFor(f);
+                const level = f.type === "choice" && !!f.from;
+                const shownNow = displayValue(template, f, current), shownBefore = displayValue(template, f, beforeAll);
+                const changed = !!line || (isDerived(f) && shownNow !== shownBefore) || (!isDerived(f) && JSON.stringify(current[f.key] ?? "") !== JSON.stringify(before[f.key] ?? ""));
+                const err = !isDerived(f) && statError(index, f, current[f.key]);
+                const amount = (f.type === "number" || f.type === "resource");
+                if (level) {
+                    const src = sourceOf(template, f);
+                    const linked = !asList(current[UNLINKED]).includes(f.key);
+                    const drift = driftOf(template, f, current);
+                    return html`<label class=${changed ? "changed" : ""} title=${f.key}>${f.label}</label>
+                        <div class="stat-cell">
+                            <select aria-label=${f.label} value=${optionOf(f, current[f.key] ?? "") ?? ""} onChange=${(e) => setLevel(f, { value: e.target.value ? (f.facet ? `[[${e.target.value}]]` : e.target.value) : "" })}>
+                                <option value="">—</option>${f.options.map((o) => html`<option value=${o}>${f.optionTitles?.[o] ?? o}</option>`)}</select>
+                            <label class="link-switch" title=${linked ? `The level follows ${src?.label ?? f.from}. Unlink it for an overflow, a special constitution or a deficiency: then the level and ${src?.label ?? f.from} change on their own` : `Unlinked: the level stays as set while ${src?.label ?? f.from} moves. Link it again to work it out from ${src?.label ?? f.from}`}>
+                                <input type="checkbox" role="switch" checked=${linked} onChange=${(e) => setLevel(f, { link: e.target.checked ? "on" : "off" })} />
+                                <span class="switch-track" aria-hidden="true"><span class="switch-thumb" /></span>
+                                <span class="muted">${linked ? `follows ${src?.label ?? f.from}` : `unlinked from ${src?.label ?? f.from}`}</span></label>
+                            <span class="muted stat-was">${changed ? `was ${shownBefore || "—"}${linkedBefore(f) !== linked ? (linkedBefore(f) ? ", linked" : ", unlinked") : ""}` : linked ? `setting a level moves ${src?.label ?? f.from} to its lowest value` : ""}
+                                ${line && html` <button class="small" onClick=${() => setLines(lines.filter((l) => l !== line))}>undo</button>`}</span>
+                            ${drift && html`<div class="stat-drift">${src?.label ?? f.from} ${drift.number} is ${drift.by} ${drift.dir === "over" ? "over" : "under"} the range of ${drift.option} (${drift.min}${drift.next != null ? `–${drift.next - (Number.isInteger(drift.next) ? 1 : 0)}` : "+"}): ${drift.dir === "over" ? "overflow" : "underflow"}</div>`}
+                        </div>`;
+                }
                 return html`<label class=${changed ? "changed" : ""} title=${f.key}>${f.label}</label>
                     <div class="stat-cell">
                         <${StatInput} field=${f} value=${current[f.key]} onChange=${(v) => setField(f, v)} index=${index} template=${template} values=${current} />
-                        <span class="muted stat-was">${f.type === "computed" ? "" : changed ? html`was ${displayValue(template, f, before) || "—"} <button class="small" onClick=${() => setField(f, before[f.key])}>undo</button>` : "unchanged"}</span>
+                        ${amount && html`<label class="stat-change muted" title="Change it by an amount instead (a reward: +50, a cost: -20); written as [add:: …]">change by
+                            <${ChangeBy} value=${line && isChange(line) ? (Number(line.add) > 0 ? `+${line.add}` : String(line.add)) : ""} onChange=${(text) => setChange(f, text)} /></label>`}
+                        <span class="muted stat-was">${f.type === "computed" ? (changed ? `was ${shownBefore || "—"}` : "") : changed ? html`was ${displayValue(template, f, beforeAll) || "—"}${line ? html` <button class="small" onClick=${() => setField(f, before[f.key])}>undo</button>` : ""}` : "unchanged"}</span>
                         ${err && html`<div class="error">${err}</div>`}
                     </div>`;
             })}</div>`)}
     </div>`;
 }
 
-function EntryEditor({ index, folder, params }) {
+function EntryEditor({ index, folder, params, embedded = false, onDone = null }) {
     const { data: novel } = useApi(`/api/novel?${qs({ folder })}`);
     // leaving the entry ends any item choosing it started in the drawer
     useEffect(() => () => { if (itemPick) setItemPick(null); }, []);
@@ -3076,7 +3423,7 @@ function EntryEditor({ index, folder, params }) {
             const r = await api.send("POST", "/api/ledger/entry", payload);
             if (copy) await copyText(r.linkedCallout || r.callout, "Saved and copied callout");
             else toast("Saved");
-            go(ownerHref(folder, owner) + `?type=${encodeURIComponent(typeName)}`);
+            if (onDone) onDone(); else go(ownerHref(folder, owner) + `?type=${encodeURIComponent(typeName)}`);
         } catch (e) { setErr(e.message); }
         setBusy(false);
     };
@@ -3085,9 +3432,9 @@ function EntryEditor({ index, folder, params }) {
     // a state ledger for an owner with a stat template edits as a form prefilled with the previous values
     const statTemplate = type?.behaviour === "state" && !withTarget && preview?.stats?.template ? preview.stats.template : null;
     const otherLines = statTemplate ? lines.filter((l) => !fieldNamed(statTemplate, l.set)) : [];
-    return html`<div>
-        <div class="muted"><a href=${novelHref(folder)}>${novel.name}</a></div>
-        <h1>${editKey ? `Edit entry ${editKey}` : "New entry"}</h1>
+    return html`<div class=${embedded ? "entry-embedded" : ""}>
+        ${!embedded && html`<div class="muted"><a href=${novelHref(folder)}>${novel.name}</a></div>`}
+        ${embedded ? html`<h2 style="margin:4px 0 10px">${editKey ? `Edit ${typeName} entry ${editKey}` : `New ${typeName} entry`}</h2>` : html`<h1>${editKey ? `Edit entry ${editKey}` : "New entry"}</h1>`}
         <div class="grid2" style="grid-template-columns: minmax(0,1.4fr) minmax(0,1fr)">
             <div>
                 <div class="panel"><div class="formgrid">
@@ -3118,7 +3465,7 @@ function EntryEditor({ index, folder, params }) {
                 <div class="row">
                     <button class="primary" disabled=${busy || !owner} onClick=${() => save(true)}>Save & copy callout</button>
                     <button disabled=${busy || !owner} onClick=${() => save(false)}>Save</button>
-                    <button onClick=${() => history.back()}>Cancel</button>
+                    <button onClick=${() => (onDone ? onDone() : history.back())}>Cancel</button>
                 </div>
             </div>
             <div>
@@ -3440,7 +3787,10 @@ function App() {
     return html`<div class=${`layout ${writer.open ? "writing" : ""} ${d.open ? "drawer-open" : ""} ${beside.current ? "writer-beside" : ""}`}>
         <${Sidebar} index=${index} novelFolder=${novelFolder} />
         <main class="main">
-            ${route.name !== "docs" && html`<div class="topbar"><${Search} index=${index} /><${NovelFilter} index=${index} value=${novelFilter} onChange=${setNF} /><span class="grow" /><button class="bot-button" title="AI assistant" aria-label="AI assistant" onClick=${toggleAi}><${BotIcon} /></button></div>`}
+            ${route.name === "docs" ? "" : TOOL_PAGES.has(route.name)
+                // the Tools pages have nothing to search or filter by novel: only the assistant's button, in the corner
+                ? html`<div class="topbar-float"><button class="bot-button" title="AI assistant" aria-label="AI assistant" onClick=${toggleAi}><${BotIcon} /></button></div>`
+                : html`<div class="topbar"><${Search} index=${index} /><${NovelFilter} index=${index} value=${novelFilter} onChange=${setNF} /><span class="grow" /><button class="bot-button" title="AI assistant" aria-label="AI assistant" onClick=${toggleAi}><${BotIcon} /></button></div>`}
             <div class=${`view view-${route.name}`} key=${route.name === "docs" ? "docs" : route.name + (a ?? "")}>${view}</div>
         </main>
         ${!noVault && html`<div class=${`drawer-backdrop ${d.open || writer.open ? "on" : ""}`} onClick=${() => { collapseDrawer(); collapseWriter(); }} />
@@ -3452,4 +3802,4 @@ function App() {
 render(html`<${App} />`, document.getElementById("app"));
 
 // shared with world.js and map-editor.js (used only inside components, so the import cycle is safe)
-export { api, useApi, qs, toast, store, go, noteHref, linkLabel, isLink, asList, openInDrawer, openDrawerTab, renameInDrawer, ConfirmButton, markDirty, confirmDiscard, Loading, useRoute, RenameDialog, Html, fieldInput, useNovelLinks };
+export { api, useApi, qs, toast, store, go, noteHref, linkLabel, isLink, asList, openInDrawer, openDrawerTab, renameInDrawer, ConfirmButton, markDirty, confirmDiscard, Loading, useRoute, RenameDialog, Html, fieldInput, useNovelLinks, copyText };

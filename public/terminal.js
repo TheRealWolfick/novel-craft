@@ -148,6 +148,8 @@ function overlay(t, on) {
     };
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
     let last = "", msgBg = null;
+    // bubbles are kept across redraws while they stay the same, so text selected in one survives Claude Code redrawing
+    let kept = new Map();
     const draw = () => {
         const buf = t.buffer.active;
         const rowH = screen.offsetHeight / t.rows;
@@ -165,10 +167,13 @@ function overlay(t, on) {
         const key = `${rowH}|${JSON.stringify(sc)}`;
         if (key === last) return;
         last = key;
+        const keep = new Map(), fresh = [];
         const parts = sc.bubbles.map((b) => {
             // rows Claude Code wrapped are one paragraph; a message sent from the box shows as typed (its line breaks)
             const joined = norm(b.lines.join(" "));
             const text = on.sent().find((m) => norm(m) === joined) ?? joined;
+            const id = `${rowH}|${b.r}|${b.n}|${b.cut ? 1 : 0}|${text}`;
+            if (kept.has(id)) { keep.set(id, kept.get(id)); return kept.get(id); }
             const row = el("div", "term-bubble-row");
             Object.assign(row.style, { top: `${b.r * rowH}px`, height: `${b.n * rowH}px` });
             const bubble = el("div", `term-bubble${b.cut ? " cut" : ""}`, text);
@@ -177,7 +182,11 @@ function overlay(t, on) {
             const pad = Math.round(rowH * 0.22);
             Object.assign(bubble.style, { lineHeight: `${rowH}px`, fontSize: `${Math.min(14, Math.round(rowH * 0.78))}px`, padding: `${pad}px 16px`,
                 marginTop: b.cut ? "0" : `${-pad}px`, maxHeight: `${b.n * rowH + pad * (b.cut ? 1 : 2)}px` });
+            // the bubble's own text can be selected and copied (the terminal would select the hidden text below it)
+            keepMouse(bubble);
             row.append(bubble);
+            keep.set(id, row);
+            fresh.push(bubble);
             return row;
         });
         // [[links]] as links: from a row's first link to its end the row is drawn again with each link as the note's
@@ -236,7 +245,25 @@ function overlay(t, on) {
             card.append(foot);
             parts.push(card);
         }
-        layer.replaceChildren(...parts);
+        kept = keep;
+        // replaceChildren would remove and re-add kept bubbles too, losing a selection in them: only change what changed
+        const want = new Set(parts);
+        for (const n of [...layer.children]) if (!want.has(n)) n.remove();
+        parts.forEach((n, i) => { if (layer.children[i] !== n) layer.insertBefore(n, layer.children[i] ?? null); });
+        for (const b of fresh) fit(b);
+    };
+    // the bubble's font is wider than the terminal's cells and the bubble narrower than the row, so a long message
+    // can need more lines than Claude Code's rows: then the bubble may grow to the row's width, and if it still
+    // doesn't fit, its text gets smaller (font and line height together) until the whole message shows
+    const fit = (b) => {
+        const over = () => b.scrollHeight > b.clientHeight + 1;
+        if (!over()) return;
+        b.style.maxWidth = "100%";
+        let size = parseFloat(b.style.fontSize), lh = parseFloat(b.style.lineHeight);
+        for (let i = 0; i < 12 && over() && size > 8; i++) {
+            size *= 0.92; lh *= 0.92;
+            Object.assign(b.style, { fontSize: `${size}px`, lineHeight: `${lh}px` });
+        }
     };
     let queued = false;
     const soon = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; draw(); }); } };
@@ -315,6 +342,9 @@ async function makeTerminal(host) {
     // Code), Ctrl+V pastes; Ctrl+Shift+C / V too
     t.attachCustomKeyEventHandler((e) => {
         if (e.type !== "keydown" || !e.ctrlKey || e.altKey || e.metaKey) return true;
+        // text selected in a bubble (the page's own selection, inside the terminal)
+        const pageSel = window.getSelection();
+        if (e.code === "KeyC" && pageSel && !pageSel.isCollapsed && T.inner.contains(pageSel.anchorNode)) { navigator.clipboard?.writeText(pageSel.toString()); return false; }
         if (e.code === "KeyC" && (e.shiftKey || t.hasSelection())) { const sel = t.getSelection(); if (sel) { navigator.clipboard?.writeText(sel); t.clearSelection(); } return false; }
         if (e.code === "KeyV") { navigator.clipboard?.readText().then((txt) => txt && t.paste(txt)); return false; }
         return true;

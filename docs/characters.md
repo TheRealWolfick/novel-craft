@@ -15,10 +15,10 @@ Each novel keeps its characters in its `Characters/` folder, one note (a sheet) 
 
 ## The sheet
 
-A character's note page shows its fields, editable in place, with **Save changes** (<kbd>Ctrl</kbd>+<kbd>S</kbd>). Fields named `relations/…` (`relations/ally`, `relations/rival`…) pick from the novel's characters and the factions.
+A character's note page shows its fields, editable in place, with **Save changes** (<kbd>Ctrl</kbd>+<kbd>S</kbd>). Fields named `relations/…` pick from the novel's characters and the factions. `relations/friendly`, `relations/neutral` and `relations/hostile` come from the character's [Relationships ledger](docs:ledgers#relationships), and the sheet's **Relationships** box shows each person with the current note.
 
 Below the fields, the body's `## Bio`, `### Appearance` and other sections are [blocks](docs:notes-and-blocks) you can edit, move and add to.
 
 Fields the ledgers manage (inventory, stat values) are read-only on the sheet: they come from the [ledgers](docs:ledgers) and are written back when entries are saved. **Sync sheets** on the novel page refreshes every sheet at once.
 
-![The Novel tab in the side drawer](img/drawer-novel-dark.png)
+![The Novel tab in the side drawer](img/drawer-novel.png)

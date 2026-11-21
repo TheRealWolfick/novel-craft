@@ -11,7 +11,7 @@ const chapterHref = (folder, n) => `#/chapter/${encodeURIComponent(folder)}/${n}
 
 // ------------------------------------------------------------------ writer drawer state
 
-// {folder, n, open}: the chapter in the writer; collapsed it is a tab on the left edge and stays mounted
+// {folder, n, open}: the chapter in the writer; collapsed it stays mounted (the sidebar's "Open writer" brings it back)
 let writer = (() => { try { const w = JSON.parse(localStorage.getItem("writerState")); if (w?.folder) return { folder: w.folder, n: Number(w.n), open: !!w.open }; } catch { /* none */ } return { folder: null, n: null, open: false }; })();
 const writerListeners = new Set();
 const setWriter = (w) => { writer = w; writerListeners.forEach((f) => f(w)); try { localStorage.setItem("writerState", JSON.stringify(w)); } catch { /* private window */ } };
@@ -44,7 +44,6 @@ export function WriterDrawer({ index }) {
     const w = useWriter();
     if (!w.folder) return null;
     return html`<div class=${`writer-wrap ${w.open ? "open" : "collapsed"}`}>
-        <button class="writer-tab" title=${`Open the writer: chapter ${w.n} (Ctrl+[)`} onClick=${expandWriter} tabIndex=${w.open ? -1 : 0}><span>✎ Chapter ${w.n}</span></button>
         <aside class="writer" inert=${!w.open} aria-label="Chapter writer">
             <${ChapterWriter} key=${`${w.folder}:${w.n}`} folder=${w.folder} n=${w.n} index=${index} />
         </aside>

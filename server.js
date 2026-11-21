@@ -14,11 +14,9 @@ import { DataStore } from "./lib/datastore.js";
 import { Plans } from "./lib/plans.js";
 import { Stats } from "./lib/stats.js";
 import { Worlds } from "./lib/worlds.js";
-import { fromText, fieldNamed } from "./public/stats-core.js";
 import { patchNote, trashNote, createNote } from "./lib/write.js";
 import { renderMarkdown } from "./lib/render.js";
-import { asCallout, renderTemplate } from "./lib/template.js";
-import { foldStock } from "./lib/ledger.js";
+import { previewEntry } from "./lib/ledger-preview.js";
 import { Renamer } from "./lib/rename.js";
 import { Search } from "./lib/search.js";
 import { Importer } from "./lib/importer.js";
@@ -108,6 +106,7 @@ const STATIC = {
     "/docs.js": ["public/docs.js", "text/javascript"],
     "/writer.js": ["public/writer.js", "text/javascript"],
     "/stats-core.js": ["public/stats-core.js", "text/javascript"],
+    "/levels.js": ["public/levels.js", "text/javascript"],
     "/map-core.js": ["public/map-core.js", "text/javascript"],
     "/world.js": ["public/world.js", "text/javascript"],
     "/map-editor.js": ["public/map-editor.js", "text/javascript"],
@@ -147,6 +146,14 @@ function getNovel(folder) {
 }
 const ledgerAt = (p) => { const n = vault.notes.get(need(p, "ledger")); if (!n || n.fm.type !== "ledger") throw fail(404, `No ledger ${p}`); return novels.readLedger(n); };
 const novelOfPath = (p) => getNovel(p.split("/")[0]);
+/** A character's relationships from its novel's ledgers (null for other notes, or without relation lines) */
+const relationsFor = (p) => {
+    let novel = null;
+    try { novel = novelOfPath(p); } catch { return null; }
+    const n = vault.notes.get(p);
+    if (!novel || !n || !p.startsWith(`${novel.charactersFolder}/`)) return null;
+    return novels.relationsOf(novel, n.name);
+};
 
 /** Ledger entry + its computed callout, for API responses */
 function entryOut(novel, ledger, e, placed) {
@@ -240,7 +247,7 @@ const routes = {
         for (const n of vault.inFolder(folder)) if (n.path !== p) for (const m of n.body.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)) if (!/^images$/i.test(m[1])) used.set(m[1], (used.get(m[1]) ?? 0) + 1);
         const own = new Set(sections.map((x) => x.title.toLowerCase()));
         const sectionTitles = [...used].filter(([t]) => !own.has(t.toLowerCase())).sort((a, b) => b[1] - a[1]).slice(0, 30).map(([t]) => t);
-        return { ...page, pre: { text: parts.pre, html: parts.pre.trim() ? renderMarkdown(parts.pre, vault) : "" }, sections, sectionTitles, plan: plans.describe(p), stats: stats.describeNote(p), creatureStats: page.collection === "Creatures" ? stats.creatureUses(p) : undefined };
+        return { ...page, pre: { text: parts.pre, html: parts.pre.trim() ? renderMarkdown(parts.pre, vault) : "" }, sections, sectionTitles, plan: plans.describe(p), stats: stats.describeNote(p), creatureStats: page.collection === "Creatures" ? stats.creatureUses(p) : undefined, relations: relationsFor(p) };
     },
     "GET /api/blueprint": ({ q }) => blueprints.tree(need(q.get("item"), "item"), Number(q.get("count") ?? 1)),
     "GET /api/search": ({ q }) => search.run({ q: q.get("q") ?? "", novel: q.get("novel") || null, kind: q.get("kind") || null, limit: Math.min(200, Number(q.get("limit") ?? 80) || 80) }),
@@ -276,6 +283,17 @@ const routes = {
     },
     "POST /api/render": async ({ req }) => ({ html: renderMarkdown((await json(req)).markdown ?? "", vault) }),
 
+    // a new taxonomy facet (schema entry + folder), optionally with values from a pasted list
+    "POST /api/taxonomy/facet": async ({ req }) => {
+        const b = await json(req);
+        const collection = await store.createFacet(need(b.name, "name"), { levels: !!b.levels, ordered: b.ordered !== false });
+        const paths = b.values?.length ? await store.addFacetValues(collection, b.values, { powerSystem: b.powerSystem }) : [];
+        return { collection, paths };
+    },
+    "POST /api/taxonomy/values": async ({ req }) => {
+        const b = await json(req);
+        return { paths: await store.addFacetValues(need(b.collection, "collection"), b.values ?? [], { powerSystem: b.powerSystem }) };
+    },
     "POST /api/note": async ({ req }) => {
         const b = await json(req);
         return { path: await store.create(need(b.collection, "collection"), need(b.name, "name"), b.fm ?? {}, b.body ?? "") };
@@ -417,35 +435,7 @@ const routes = {
     },
     "POST /api/ledger/preview": async ({ req }) => {
         const b = await json(req);
-        const novel = getNovel(b.novel);
-        const type = novels.ledgerTypes(novel)[b.type];
-        if (!type) throw fail(400, `Unknown ledger type ${b.type}`);
-        const existing = novels.ownerLedgers(novel, b.owner).find((l) => l.type === b.type);
-        const ledger = existing ?? { path: "", name: `${b.owner} - ${b.type}`, owner: b.owner, type: b.type, entries: [] };
-        const chapter = Number(b.entry.chapter);
-        const seq = b.replaceKey ? Number(String(b.replaceKey).split(".")[1]) : novels.nextSeq(novel, chapter);
-        const draft = { chapter, seq, key: `${chapter}.${seq}`, title: b.entry.title ?? "", fields: b.entry.fields ?? {}, lines: (b.entry.lines ?? []).filter((l) => l.item || l.set), body: b.entry.body ?? "", warnings: [] };
-        const others = ledger.entries.filter((e) => e.key !== b.replaceKey);
-        const out = { callout: asCallout(renderTemplate(novels.templateFor(novel, ledger, draft), novels.entryView(novel, ledger, draft))) };
-        if (type.behaviour === "stock") {
-            out.before = foldStock(vault, others, { until: chapter }).stacks;
-            const after = foldStock(vault, [...others, draft], { until: chapter });
-            out.after = after.stacks;
-            out.warnings = foldStock(vault, [...others, draft]).warnings.filter((w) => !foldStock(vault, others).warnings.some((x) => x.message === w.message));
-        }
-        if (type.behaviour === "state") {
-            out.warnings = stats.checkLines(novel, b.owner, b.type, draft.lines).map((message) => ({ message }));
-            // previous values at this chapter (for prefilling) and the stats panel with this entry applied
-            const holder = stats.holder(novel, b.owner);
-            const template = holder && stats.templates(novel)[holder.template];
-            if (template) {
-                const before = stats.valuesAt(novel, holder, template, chapter - 1e-9);
-                const after = { ...before.values };
-                for (const l of draft.lines) { const f = !l.with && fieldNamed(template, l.set); if (f) after[f.key] = fromText(f, l.value); }
-                out.stats = { template, before: before.values, panel: stats.panel(novel, holder, template, after, chapter) };
-            }
-        }
-        return out;
+        return previewEntry({ vault, novels, stats }, getNovel(b.novel), b);
     },
     "DELETE /api/ledger/entry": async ({ q }) => {
         const ledger = ledgerAt(q.get("ledger"));

@@ -54,13 +54,13 @@ The running cost of the conversation (an estimate) shows at the top of the tab. 
 
 ## Reviewing changes
 
-Ask it to create or change something (a new item, a character, field values, a rewrite of a passage) and it prepares the changes instead of writing them. They open in the drawer's viewer for review:
+Ask it to create or change something (a new item, a character, field values, a rewrite of a passage, a ledger entry) and it prepares the changes instead of writing them. They open in the drawer's viewer for review:
 
-- each change on its own card: a new note with its fields and text, field changes as *now → after*, text edits with the removed words struck through and the new ones highlighted, in their paragraph;
+- each change on its own card: a new note with its fields and text, field changes as *now → after*, text edits with the removed words struck through and the new ones highlighted, in their paragraph; a ledger entry as its callout (beside the current one when it replaces an entry), with what it changes in the holdings at that chapter and any warnings, such as stock going below zero;
 - **Apply** or **Reject** on each card, or **Apply all** / **Reject all** at the top;
 - **Back to the conversation** returns to the AI tab, where a card for the proposal opens it again.
 
-Nothing is written until you apply it, and each change is checked again first (a passage you've edited in the meantime is refused, not overwritten). The assistant hears what you applied and rejected with your next message. Ledger entries and novel settings can't be changed this way.
+Nothing is written until you apply it, and each change is checked again first (a passage you've edited in the meantime is refused, not overwritten). The assistant hears what you applied and rejected with your next message. An applied ledger entry is saved the way the ledger editor saves one: it gets its number in the chapter, a transfer writes the receiver's entry too, and character sheets are updated. Entries that mirror a transfer can't be changed directly (change the giving entry), and novel settings can't be changed this way.
 
 > [!note] What it can read
 > Only your novel folders and the data store, nothing else in the vault (not your Templater notes, not `.obsidian`). It reads a little at a time: overviews, search results, the parts of a note or chapter it needs.

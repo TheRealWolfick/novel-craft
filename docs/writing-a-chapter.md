@@ -12,7 +12,7 @@ The writer opens a chapter note on the left of the window while the chapter's pl
 
 1. Open a chapter: on a novel's [Grand plan](docs:planning), click a chapter row.
 2. Press **✎ Write**. A chapter without a note offers **Create chapter**, which names the file the way the Templater Chapter template does.
-3. Close or reopen the writer any time with <kbd>Ctrl</kbd>+<kbd>[</kbd>, and the right drawer with <kbd>Ctrl</kbd>+<kbd>]</kbd>.
+3. Close or reopen the writer any time with <kbd>Ctrl</kbd>+<kbd>[</kbd>, and the right drawer with <kbd>Ctrl</kbd>+<kbd>]</kbd>. A closed writer keeps your unsaved text; **✎ Open writer** in the sidebar, under World builder, brings it back and shows which chapter it holds (on a chapter page with nothing in the writer, it opens that chapter; otherwise it is greyed out).
 
 ![The writer beside chapter 1's plan](img/writer.png)
 

@@ -39,4 +39,3 @@ The **Layers** panel holds layers such as floors of a building; layers below the
 
 Maps save automatically (**Autosave**) or with <kbd>Ctrl</kbd>+<kbd>S</kbd>. Stamps you used are embedded in the image, so the map shows in Obsidian and on other computers. Stamps and textures are tracked by their content: see [Map assets](docs:map-assets).
 
-![The same floor plan in dark mode](img/map-floor-dark.png)

@@ -4,7 +4,7 @@
 
 Everything stays in your vault as ordinary markdown notes. There is no database and no account: World Builder reads your notes, notices when you change them in Obsidian, and writes back in the same shape Obsidian, Dataview, Bases and Templater expect.
 
-![The chapter writer beside the chapter's plan](docs/img/writer.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/writer.dark.png"><img alt="The chapter writer beside the chapter's plan" src="docs/img/writer.png"></picture>
 
 ## What you can do with it
 
@@ -14,7 +14,7 @@ The writer opens a chapter on the left while its plan and ledger entries stay on
 
 | Light | Dark |
 | --- | --- |
-| ![Writer, light](docs/img/writer.png) | ![Writer, dark](docs/img/writer-dark.png) |
+| ![Writer, light](docs/img/writer.png) | ![Writer, dark](docs/img/writer.dark.png) |
 
 ### Plan books, volumes and chapters
 
@@ -22,7 +22,7 @@ A grand plan per novel: volumes with their main plot and subplots, every chapter
 
 | Grand plan | Plot board |
 | --- | --- |
-| ![Grand plan, dark](docs/img/novel-plan-dark.png) | ![Plots](docs/img/novel-plots.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/novel-plan.dark.png"><img alt="Grand plan" src="docs/img/novel-plan.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/novel-plots.dark.png"><img alt="Plots" src="docs/img/novel-plots.png"></picture> |
 
 ### Track characters through the story
 
@@ -30,7 +30,7 @@ Ledgers record what a character gains, loses and learns in each chapter: invento
 
 | A character's ledgers | Writing an entry |
 | --- | --- |
-| ![Owner page](docs/img/owner.png) | ![Entry editor](docs/img/entry-editor.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/owner.dark.png"><img alt="Owner page" src="docs/img/owner.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/entry-editor.dark.png"><img alt="Entry editor" src="docs/img/entry-editor.png"></picture> |
 
 ### Keep your world's encyclopedia
 
@@ -38,13 +38,13 @@ Every collection (items, materials, recipes, creatures, races, factions, locatio
 
 | Collections | A note in the side drawer |
 | --- | --- |
-| ![Items](docs/img/collection-items.png) | ![Drawer, dark](docs/img/drawer-note.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/collection-items.dark.png"><img alt="Items" src="docs/img/collection-items.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/drawer-note.dark.png"><img alt="Side drawer" src="docs/img/drawer-note.png"></picture> |
 
 ### Look anything up without losing your place
 
 The side drawer keeps a note, a lookup across everything (notes, taxonomy, chapter text), the whole data store and the novel you're in one click away while you write.
 
-![Lookup in the side drawer](docs/img/drawer-lookup.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/drawer-lookup.dark.png"><img alt="Lookup in the side drawer" src="docs/img/drawer-lookup.png"></picture>
 
 ### Build worlds and draw their maps
 
@@ -52,8 +52,8 @@ Each world's places as an outline you rearrange by dragging, and a map for any o
 
 | A floor plan | A region map |
 | --- | --- |
-| ![Floor plan](docs/img/map-floor.png) | ![Region map](docs/img/map-region.png) |
-| ![World outline](docs/img/world-outline.png) | ![Floor plan, dark](docs/img/map-floor-dark.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/map-floor.dark.png"><img alt="Floor plan" src="docs/img/map-floor.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/map-region.dark.png"><img alt="Region map" src="docs/img/map-region.png"></picture> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/world-outline.dark.png"><img alt="World outline" src="docs/img/world-outline.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/world-atlas.dark.png"><img alt="Atlas" src="docs/img/world-atlas.png"></picture> |
 
 ### Share worlds and datasets
 
@@ -61,7 +61,7 @@ Export a world (its places, maps, stamps and textures, and optionally the notes 
 
 | Exporting a world | Importing a dataset |
 | --- | --- |
-| ![Export](docs/img/world-export.png) | ![Import](docs/img/import-check.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/world-export.dark.png"><img alt="Export" src="docs/img/world-export.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/import-check.dark.png"><img alt="Import" src="docs/img/import-check.png"></picture> |
 
 ### Make it yours
 
@@ -69,7 +69,7 @@ Design how each kind of callout looks, pick the app's colour, fonts and text siz
 
 | Callout designer | Settings |
 | --- | --- |
-| ![Callout designer](docs/img/callout-designer.png) | ![Settings](docs/img/settings.png) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/callout-designer.dark.png"><img alt="Callout designer" src="docs/img/callout-designer.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/settings.dark.png"><img alt="Settings" src="docs/img/settings.png"></picture> |
 
 ## Install
 

@@ -393,6 +393,7 @@ export function ProposalView({ id }) {
 
 function ChangeCard({ c, busy, act }) {
     const head = c.action === "create_note" ? html`New ${c.kind === "character" ? "character" : `entry in ${c.collection}`}: <b>${c.name}</b>${c.renamed ? html` <span class="muted small">(name taken, so renamed)</span>` : ""}`
+        : c.action === "ledger_entry" ? html`${c.replaceKey ? `Change ${c.type} entry ${c.replaceKey}` : `New ${c.type} entry`} for <b>${c.owner}</b>, chapter ${c.entry.chapter}${c.entry.title ? html`: ${c.entry.title}` : ""}${c.status === "applied" && c.key ? html` <span class="muted small">(${c.key})</span>` : ""}`
         : c.action === "edit_fields" ? html`Fields of <b>${c.name}</b>`
         : c.action === "edit_text" ? html`Text of <b>${c.name}</b>` : html`Add to <b>${c.name}</b>`;
     return html`<div class=${`change ${c.status}`}>
@@ -408,6 +409,14 @@ function ChangeCard({ c, busy, act }) {
                 ${Object.keys(c.fields ?? {}).length > 0 && html`<table class="change-fields"><tbody>${Object.entries(c.fields).map(([k, v]) => html`<tr><th>${k}</th><td class="ins">${Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v)}</td></tr>`)}</tbody></table>`}
                 ${c.text && html`<div class="change-text"><ins>${c.text}</ins></div>`}
                 <p class="muted small">${c.path}</p>`}
+            ${c.action === "ledger_entry" && html`
+                ${c.warnings?.length > 0 && html`<div class="warnbox">${c.warnings.map((w) => html`<div>${w}</div>`)}</div>`}
+                ${c.beforeHtml ? html`<div class="change-callouts"><div><div class="muted small">Now</div><${Html} html=${c.beforeHtml} /></div><div><div class="muted small">After</div><${Html} html=${c.calloutHtml} /></div></div>`
+                    : html`<${Html} html=${c.calloutHtml} />`}
+                ${c.holdings?.length > 0 && html`<table class="change-fields"><thead><tr><th>Holdings at chapter ${c.entry.chapter}</th><th>Now</th><th>After</th></tr></thead><tbody>
+                    ${c.holdings.map((r) => html`<tr><th>${r.item}${r.store && r.store !== "inventory" ? html` <span class="muted">@ ${r.store}</span>` : ""}</th><td class="del">${r.before || html`<span class="muted">none</span>`}</td><td class="ins">${r.after || html`<span class="muted">none</span>`}</td></tr>`)}</tbody></table>`}
+                ${c.statsHtml && html`<details><summary class="muted small">Stats panel with this entry</summary><${Html} html=${c.statsHtml} /></details>`}
+                <p class="muted small">${c.name} · ${c.novelName}${c.entry.lines?.some((l) => l.action === "transfer-out") ? " · the receiver's ledger gets the transfer too" : ""}</p>`}
             ${c.action === "edit_fields" && html`<table class="change-fields"><thead><tr><th>Field</th><th>Now</th><th>After</th></tr></thead><tbody>
                 ${c.rows.map((r) => html`<tr><th>${r.key}</th><td class="del">${r.before || html`<span class="muted">empty</span>`}</td><td class="ins">${r.removed ? html`<span class="muted">removed</span>` : r.after || html`<span class="muted">empty</span>`}</td></tr>`)}</tbody></table>`}
             ${c.action === "edit_text" && html`<div class="change-text"><span class="ctx">${c.context.before}</span>${wordDiff(c.find, c.replace).map((d, k) => (d.t === "same" ? d.s : d.t === "del" ? html`<del key=${k}>${d.s}</del>` : html`<ins key=${k}>${d.s}</ins>`))}<span class="ctx">${c.context.after}</span></div>`}

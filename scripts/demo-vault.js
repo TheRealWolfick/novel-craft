@@ -48,6 +48,27 @@ await vault.load();
     console.log(`starter data: ${a.added} files`);
 }
 
+// ---------------------------------------------------------------- a level system: Emberwork and its ranks
+{
+    // the taxonomy goes into the schema like World Builder's "+ New taxonomy" does
+    const schemaFile = path.join(ROOT, "90. Templater", "Data Store Schema.md");
+    const text = fs.readFileSync(schemaFile, "utf8");
+    const json = text.match(/```json\n([\s\S]*?)\n```/)[1];
+    const schema = JSON.parse(json);
+    const facet = "Taxonomy/Ember Ranks";
+    schema.collections[facet] = { label: "Ember Ranks", fields: [["title", ""], ["aliases", []], ["type", "ember-ranks"], ["facet", "Ember Ranks"], ["parent", ""], ["ordered", true], ["class", ""], ["threshold", ""], ["power-system", ""], ["description", ""], ["created-date", ""], ["tags", []]],
+        links: { parent: facet, "power-system": "Power Systems" } };
+    fs.writeFileSync(schemaFile, text.replace(json, () => JSON.stringify(schema, null, 1)));
+    await note(`${DS}/Power Systems/Emberwork.md`, { title: "Emberwork", type: "power-system", status: "draft", novels: [L("Ashfall Road")],
+        description: "Couriers carry heat from the waystation lamps in their blood; the more heat they hold, the further the ash lets them walk." });
+    let cls = 0;
+    const rank = async (name, title, parent, threshold) => note(`${DS}/${facet}/${name}.md`, { title, type: "ember-ranks", facet: "Ember Ranks", ...(parent ? { parent: L(parent) } : {}), ordered: true, class: ++cls, ...(threshold != null ? { threshold } : {}), "power-system": L("Emberwork") });
+    for (const [top, steps] of [["Spark", [["Lit 1", 0], ["Lit 2", 50], ["Lit 3", 120]]], ["Kindled", [["Low", 250], ["High", 400]]], ["Blaze", [["Low", 700], ["High", 1000]]]]) {
+        await rank(top, top, null, null);
+        for (const [step, n] of steps) await rank(`${top} ${step}`, `${top} (${step})`, top, n);
+    }
+}
+
 // ---------------------------------------------------------------- shared data: races, worlds, factions, items
 await fsp.mkdir(path.join(ROOT, "99. Resources"), { recursive: true });
 await fsp.writeFile(path.join(ROOT, "99. Resources", "pb-ember-line.svg"), `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="14" viewBox="0 0 420 14"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#b5482f" stop-opacity="0"/><stop offset=".5" stop-color="#b5482f"/><stop offset="1" stop-color="#b5482f" stop-opacity="0"/></linearGradient></defs><rect y="6" width="420" height="2" fill="url(#g)"/><circle cx="210" cy="7" r="4" fill="#b5482f"/></svg>\n`);
@@ -96,7 +117,17 @@ await note(`${DS}/Recipes/Signal Lantern (Blueprint).md`, { title: "Signal Lante
 const AR = "1. Ashfall Road", GO = "2. The Glass Orchard";
 await note(`${DS}/Taxonomy/Novels/Ashfall Road.md`, { title: "Ashfall Road", type: "novel", facet: "Novels", folder: AR });
 await note(`${DS}/Taxonomy/Novels/The Glass Orchard.md`, { title: "The Glass Orchard", type: "novel", facet: "Novels", folder: GO });
-await note(`${AR}/config.md`, { type: "config", blueprints: true, "contains-system": false, accent: "#b5482f" }, "Settings for this novel.\n");
+await note(`${AR}/config.md`, {
+    type: "config", blueprints: true, "contains-system": false, accent: "#b5482f",
+    // a level system: Rank and Step follow Heat through the Ember Ranks taxonomy (levels of Emberwork)
+    "stat-templates": { Courier: { description: "A guild courier who carries ember-heat", default: true, fields: [
+        { key: "stats/heat", label: "Heat", type: "number", integer: true, section: "Emberwork" },
+        { key: "stats/rank", label: "Rank", type: "choice", facet: "Ember Ranks", depth: "top", from: "stats/heat", section: "Emberwork" },
+        { key: "stats/step", label: "Step", type: "choice", facet: "Ember Ranks", depth: "bottom", from: "stats/heat", section: "Emberwork" },
+        { key: "stats/stamina", label: "Stamina", type: "resource", integer: true, max: 100, section: "Body" },
+        { key: "stats/grit", label: "Grit", type: "number", integer: true, section: "Body" },
+    ] } },
+}, "Settings for this novel.\n");
 await note(`${GO}/config.md`, { type: "config", blueprints: false, "contains-system": false, accent: "#2e7f86" }, "Settings for this novel.\n");
 
 const char = (novel, name, fm, body) => note(`${novel}/Characters/${name}.md`, { name, title: name, type: "character", novel: novel.replace(/^\d+\.\s/, ""), ...fm }, body);
@@ -189,6 +220,26 @@ id:: demo0000002
 id:: demo0000003
 - [action:: remove] [item:: [[Ration Tin]]] [qty:: 1]
 - [action:: add] [item:: [[Signal Lantern]]] [qty:: 1] [rarity:: [[rare]]]
+`);
+await ledger("Mara Venn", "Stats", `# Chapter 1
+## 1.3 Leaving Nine
+id:: demo0000010
+- [set:: stats/heat] [value:: 40]
+- [set:: stats/stamina] [value:: 80]
+- [set:: stats/grit] [value:: 6]
+
+# Chapter 3
+## 3.2 Lit the dead tower
+id:: demo0000011
+- [set:: stats/heat] [add:: 90]
+- [set:: stats/stamina] [add:: -25]
+
+# Chapter 4
+## 4.1 The lantern answers
+id:: demo0000012
+- [set:: stats/rank] [link:: off]
+- [set:: stats/step] [link:: off]
+- [set:: stats/heat] [add:: 400]
 `);
 await ledger("Mara Venn", "Journal", `# Chapter 2
 ## 2.1 Day one

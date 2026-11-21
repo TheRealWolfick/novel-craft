@@ -19,7 +19,7 @@ export const FONTS = {
 // the designer's form: [key, label, type, options] in groups; colour keys can differ in dark mode
 export const STYLE_GROUPS = [
     ["Box", [
-        ["font", "Font", "choice", Object.keys(FONTS)], ["fontSize", "Font size (em)", "range", [0.7, 1.4, 0.01]],
+        ["font", "Font", "choice", Object.keys(FONTS)], ["fontSize", "Text size (× chapter text)", "range", [0.6, 1.4, 0.01]],
         ["width", "Width (%)", "range", [40, 100, 1]], ["align", "Position", "choice", ["center", "left"]],
         ["padding", "Padding (px)", "range", [0, 40, 1]], ["radius", "Corner radius (px)", "range", [0, 24, 1]],
         ["margin", "Space above and below (em)", "range", [0, 4, 0.1]], ["rotate", "Tilt (degrees)", "range", [-3, 3, 0.1]],
@@ -66,43 +66,92 @@ export const BASE_STYLE = {
     quoteMark: false, quoteMarkColor: "", inset: false, css: "", dark: {},
 };
 
-// The look of the vault's DeezThing theme
-const GAME = {
-    font: "mono", width: 90, align: "center", radius: 8, padding: 0, background: "#1a1a1a", background2: "#2d2d2d",
-    shadowColor: "#b6b6b6", shadowSize: 12, shadowOpacity: 0.15, titleColor: "#d8d8d8", titleWeight: "700", titleSpacing: 1,
-    textColor: "#c2c2c2", contentBackground: "#000000", contentOpacity: 0.1, boldColor: "#4a9eff", linkColor: "#aa5b02",
-    grid: true, gridColor: "#4a9eff", gridOpacity: 0.03, gridSize: 20, lineHeight: 1.5,
-};
-const FRAMED = (bg, bg2, border, glow, glowA, title) => ({
-    ...GAME, width: 92, radius: 6, background: bg, background2: bg2, borderColor: border, borderWidth: 1,
-    shadowColor: glow, shadowSize: 20, shadowOpacity: glowA, titleBackground: title, titleFade: true, titleWeight: "300", titleSize: 0.85, titleSpacing: 1,
+/**
+ * The modern card most callouts share: a white card (deep slate in dark mode) with a thin border and a soft shadow,
+ * a small uppercase label in the type's accent colour over the title, #### headings as small accent headers.
+ * accent / accentDark colour the label, bold text, links and headings; tint / tintDark the card's lower edge.
+ */
+const cardCss = (tag) => [
+    "& > .callout-title { padding: 11px 16px 9px; border-bottom: 1px solid var(--co-border); border-radius: 0; }",
+    tag ? `& > .callout-title::before { content: '${tag}'; display: block; margin-bottom: 1px; font-size: .62em; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--co-prefix); }` : "",
+    "& > .callout-content { padding: 8px 16px 12px; }",
+    "& h4 { font-size: .74em; letter-spacing: .14em; margin: 12px 0 4px; padding-bottom: 3px; border-bottom-color: color-mix(in srgb, var(--co-h4-line) 35%, transparent); }",
+    "& h5 { margin: 10px 0 2px; }",
+    "& ul { margin: 4px 0; padding-left: 1.2em; } & li::marker { color: var(--co-bold); }",
+    "& code { font-size: .88em; padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--co-text) 8%, transparent); }",
+].filter(Boolean).join(" ");
+const CARD = ({ label, tag, accent, accentDark, tint, tintDark, extra = {}, dark = {}, css = "" }) => ({
+    label, font: "inherit", width: 88, align: "center", padding: 0, radius: 12, margin: 1.1, lineHeight: 1.5,
+    background: "#ffffff", background2: tint, gradientAngle: 180, borderColor: "#dfe3ea", borderWidth: 1,
+    shadowColor: "#1d2b4a", shadowSize: 16, shadowOpacity: 0.09,
+    titleColor: "#1b2333", titleSize: 1.05, titleWeight: "700", titleSpacing: 0.1, titlePrefixColor: accent,
+    textColor: "#2a3140", boldColor: accent, linkColor: accent, h4Color: accent, h4Underline: accent, h4Case: "uppercase", h5Color: "#1b2333",
+    ...extra,
+    dark: { background: "#181c24", background2: tintDark, borderColor: "#2b3240", shadowColor: "#000000", titleColor: "#eef2f8", titlePrefixColor: accentDark,
+        textColor: "#d8dee9", boldColor: accentDark, linkColor: accentDark, h4Color: accentDark, h4Underline: accentDark, h5Color: "#eef2f8", ...dark },
+    css: [cardCss(tag), css].filter(Boolean).join(" "),
 });
+
 export const DEFAULT_STYLES = {
-    default: { label: "Any other callout", barColor: "#6a4fc4", barWidth: 4, background: "#6a4fc4", contentOpacity: 0, css: "& { background: color-mix(in srgb, #6a4fc4 12%, transparent); }" },
-    quote: { label: "Plain quote (> text)", width: 80, align: "center", padding: 16, radius: 15, margin: 2, borderWidth: 1, borderColor: "#c2c2c2", background: "#646464",
-        css: "& { background: rgba(100, 100, 100, .1); }", dark: { borderColor: "#6f6a60" } },
-    system: { label: "System", ...GAME, titleBackground: "#003775", titleFade: true, titleCase: "uppercase", titleSize: 0.9,
-        h4Color: "#7321dd", h4Underline: "#4a9eff", h4Case: "uppercase", h5Color: "#27abbd", padding: 0,
-        dark: { background: "#0a0a0a", background2: "#1a1a1a", textColor: "#f0f0f0", contentOpacity: 0.5 } },
-    sysnotify: { label: "System notification", ...GAME, titleBackground: "#3e4042", titleFade: true, titleWeight: "300", titleSize: 0.85,
-        h4Color: "#7321dd", h4Underline: "#4a9eff", h4Case: "uppercase", h5Color: "#27abbd",
-        dark: { background: "#0a0a0a", background2: "#1a1a1a", textColor: "#f0f0f0", contentOpacity: 0.5 } },
-    inventory: { label: "Inventory", ...FRAMED("#06282e", "#0a4452", "#025d79", "#147179", 0.2, "#233744"), h4Color: "#848485", boldColor: "" },
-    item: { label: "Item", ...FRAMED("#1e2226", "#2b3135", "#6b747c", "#96a0aa", 0.14, "#3a4046"), boldColor: "#a9b3bc" },
-    blueprint: { label: "Blueprint", ...FRAMED("#1b2430", "#283748", "#6f8db3", "#82a0c8", 0.14, "#3f5573"), boldColor: "#b2c3d8",
-        titlePrefix: "Blueprint ·", titlePrefixColor: "#a9bddb" },
-    journal: {
-        label: "Journal", font: "serif", width: 85, align: "center", padding: 22, radius: 6, margin: 2, background: "#fbf6ea", background2: "#f1e8d4", gradientAngle: 180,
-        titlePosition: "bottom", titleAlign: "right", titleWeight: "400", titleCase: "small-caps", titleSize: 0.9, titleColor: "#8a6a3b", titleSpacing: 0.5, titlePrefix: "—",
-        textColor: "#3b3226", italic: true, lineHeight: 1.8, paragraphGap: 0, indent: 1.5, ruled: true, ruleColor: "#b08d57", ruleOpacity: 0.22,
-        quoteMark: true, quoteMarkColor: "#8a6a3b", inset: true, shadowColor: "#000000", shadowSize: 10, shadowOpacity: 0.35,
-        dark: { background: "#2b251e", background2: "#211c16", textColor: "#e4d8c3", titleColor: "#b08d57", titlePrefixColor: "#b08d57", quoteMarkColor: "#b08d57" },
-        css: "& { border-radius: 3px 10px 10px 3px; }",
+    // any other callout: a soft tint of its bar colour, which follows the theme
+    default: { label: "Any other callout", barColor: "#6a4fc4", barWidth: 3, radius: 8, padding: 0, titleColor: "#4b36a8", titleWeight: "700", textColor: "",
+        dark: { barColor: "#a594f9", titleColor: "#c4b8ff" },
+        css: "& { background: color-mix(in srgb, var(--co-bar) 9%, transparent); } & > .callout-title { padding: 8px 14px 2px; } & > .callout-content { padding: 4px 14px 10px; }" },
+    // a plain > quote: a quiet card, set off from the text around it
+    quote: { label: "Plain quote (> text)", width: 80, align: "center", padding: 14, radius: 12, margin: 1.6, borderWidth: 1, borderColor: "#e3dfd6", barColor: "#b9ab8f", barWidth: 3,
+        textColor: "#4a4438", italic: true, lineHeight: 1.65,
+        dark: { borderColor: "#3a3730", barColor: "#8a7c60", textColor: "#d6cfbf" },
+        css: "& { background: color-mix(in srgb, var(--co-bar) 7%, transparent); }" },
+    system: CARD({ label: "System", tag: "System", accent: "#5a48d0", accentDark: "#a99cff", tint: "#f5f3fe", tintDark: "#16141f",
+        extra: { grid: true, gridColor: "#5a48d0", gridOpacity: 0.035, gridSize: 18 }, dark: { gridColor: "#a99cff" } }),
+    // the stats panel's status window: a card that follows the theme (a light page in light mode, deep slate in dark),
+    // a small "STATUS" label over the name, a table per section, bars in their own column in the accent colour
+    status: {
+        label: "Status window (stats)", font: "inherit", width: 86, align: "center", padding: 0, radius: 12, margin: 1.2,
+        background: "#ffffff", background2: "#f4f7fc", gradientAngle: 180, borderColor: "#dde3ee", borderWidth: 1,
+        shadowColor: "#1d2b4a", shadowSize: 18, shadowOpacity: 0.1,
+        titleColor: "#1b2436", titleSize: 1.1, titleWeight: "700", titleSpacing: 0.2, titlePrefixColor: "#3461c4",
+        textColor: "#263042", boldColor: "#3461c4", h4Color: "#3461c4", lineHeight: 1.45,
+        css: "& > .callout-title { padding: 12px 16px 10px; border-bottom: 1px solid var(--co-border); border-radius: 0; }"
+            + " & > .callout-title::before { content: 'Status'; display: block; margin-bottom: 1px; font-size: .6em; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: var(--co-prefix); }"
+            + " & > .callout-content { padding: 4px 16px 12px; }"
+            + " & > .callout-content > p:first-child { margin: 6px 0 2px; font-size: .78em; letter-spacing: .04em; color: color-mix(in srgb, var(--co-text) 58%, transparent); }"
+            + " & table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 10px 0 2px; font-variant-numeric: tabular-nums; }"
+            + " & th { padding: 4px 8px; text-align: left; font-size: .68em; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--co-bold); background: none; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--co-bold) 35%, transparent); }"
+            + " & td { padding: 4px 8px; background: none; border: 0; }"
+            + " & tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--co-text) 4.5%, transparent); }"
+            + " & td:first-child { color: color-mix(in srgb, var(--co-text) 70%, transparent); }"
+            + " & td:nth-child(2) { color: var(--co-bold); white-space: nowrap; font-size: .8em; letter-spacing: -.5px; text-align: right; }"
+            + " & td:last-child { text-align: right; font-weight: 600; white-space: nowrap; }"
+            + " & h4 { font-size: .72em; letter-spacing: .16em; text-transform: uppercase; margin: 12px 0 4px; }",
+        dark: { background: "#181d27", background2: "#10141c", borderColor: "#2a3343", shadowColor: "#000000", titleColor: "#eef2f8",
+            titlePrefixColor: "#86a8ff", textColor: "#d9e0ec", boldColor: "#86a8ff", h4Color: "#86a8ff" },
     },
+    // a notification: a slimmer card with an accent bar, like a toast
+    sysnotify: CARD({ label: "System notification", tag: "Notification", accent: "#0d8a84", accentDark: "#4fd1c5", tint: "#f2fbfa", tintDark: "#121c1e",
+        extra: { width: 80, radius: 10, barColor: "#0d8a84", barWidth: 4, titleSize: 0.98, shadowSize: 22, shadowOpacity: 0.12 }, dark: { barColor: "#4fd1c5" } }),
+    inventory: CARD({ label: "Inventory", tag: "Inventory", accent: "#0f7a5f", accentDark: "#5fd3a9", tint: "#f1faf6", tintDark: "#121d19" }),
+    item: CARD({ label: "Item", tag: "Item", accent: "#9a5b0c", accentDark: "#e8b25c", tint: "#fdf8f0", tintDark: "#1f1a12",
+        extra: { width: 84 } }),
+    // a blueprint: drafting-paper blue with a fine grid
+    blueprint: CARD({ label: "Blueprint", tag: "Blueprint", accent: "#1f5fae", accentDark: "#7fb2ff", tint: "#eef4fd", tintDark: "#0f1a2b",
+        extra: { grid: true, gridColor: "#1f5fae", gridOpacity: 0.07, gridSize: 16, borderColor: "#cddcf2" }, dark: { gridColor: "#7fb2ff", borderColor: "#24364f" } }),
+    // a journal page: warm paper, ruled lines, the writer's name signed at the bottom
+    journal: {
+        label: "Journal", font: "serif", width: 85, align: "center", padding: 22, radius: 10, margin: 2, background: "#fdf9ef", background2: "#f4ecdb", gradientAngle: 180,
+        borderColor: "#eadfca", borderWidth: 1,
+        titlePosition: "bottom", titleAlign: "right", titleWeight: "400", titleCase: "small-caps", titleSize: 0.9, titleColor: "#8a6a3b", titleSpacing: 0.5, titlePrefix: "—",
+        textColor: "#3b3226", italic: true, lineHeight: 1.8, paragraphGap: 0, indent: 1.5, ruled: true, ruleColor: "#b08d57", ruleOpacity: 0.2,
+        quoteMark: true, quoteMarkColor: "#8a6a3b", shadowColor: "#5a4320", shadowSize: 16, shadowOpacity: 0.12,
+        dark: { background: "#2a241d", background2: "#201b15", borderColor: "#3d3428", textColor: "#e6dac5", titleColor: "#c39a5f", titlePrefixColor: "#c39a5f", quoteMarkColor: "#c39a5f",
+            ruleColor: "#c39a5f", shadowColor: "#000000" },
+        css: "& { border-radius: 4px 12px 12px 4px; }",
+    },
+    // a note in the margin, in pencil
     pencil: {
-        label: "Pencil note", font: "hand", width: 85, align: "center", padding: 4, radius: 0, margin: 0.4, rotate: -0.5, fontSize: 0.92,
-        titleColor: "#6c675f", titleWeight: "400", titleSize: 0.92, textColor: "#6c675f", highlight: "underline", lineHeight: 1.5, barColor: "#6c675f", barWidth: 1,
-        dark: { titleColor: "#bcb5b1", textColor: "#bcb5b1", barColor: "#bcb5b1" },
+        label: "Pencil note", font: "hand", width: 85, align: "center", padding: 6, radius: 0, margin: 0.4, rotate: -0.5, fontSize: 0.92,
+        titleColor: "#5f5a52", titleWeight: "400", titleSize: 0.92, textColor: "#5f5a52", highlight: "underline", lineHeight: 1.5, barColor: "#8d867b", barWidth: 2,
+        dark: { titleColor: "#c2bbb5", textColor: "#c2bbb5" },   // the bar's graphite reads on both
         css: "& .callout-title { text-decoration: underline wavy color-mix(in srgb, currentColor 60%, transparent) 1px; text-underline-offset: .25em; }\n& { border-radius: .45em 0 0 .45em / 40% 0 0 40%; }",
     },
 };
@@ -165,7 +214,7 @@ function colorVars(s, dark) {
  * A stylesheet for the styles. `scope` prefixes every selector (the designer's preview uses a scope so drafts beat the
  * saved styles there); `chapter` adds the chapter text rules (justified, indented paragraphs, centred images).
  */
-export function calloutCss(styles, { scope = "" } = {}) {
+export function calloutCss(styles, { scope = "", obsidian = false } = {}) {
     const out = [];
     const pre = scope ? `${scope} ` : "";
     for (const [type, s] of Object.entries(styles)) {
@@ -175,11 +224,14 @@ export function calloutCss(styles, { scope = "" } = {}) {
         // the designer's preview can show either mode whatever the app's theme
         if (scope) out.push(`${scope}.co-force-light ${typeSel(type)} { ${colorVars(s, false).replace(/;/g, " !important;")} !important }`,
             `${scope}.co-force-dark ${typeSel(type)} { ${colorVars(s, true).replace(/;/g, " !important;")} !important }`);
-        out.push(`:root[data-theme="dark"] ${sel} { ${colorVars(s, true)} }`);
-        out.push(`@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) ${sel} { ${colorVars(s, true)} } }`);
+        if (obsidian) out.push(`.theme-dark ${sel} { ${colorVars(s, true)} }`);
+        else {
+            out.push(`:root[data-theme="dark"] ${sel} { ${colorVars(s, true)} }`);
+            out.push(`@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) ${sel} { ${colorVars(s, true)} } }`);
+        }
         const shadows = [s.shadowSize ? `0 0 ${s.shadowSize}px var(--co-shadow)` : "", s.inset ? "inset 0 0 40px rgba(0,0,0,.18)" : ""].filter(Boolean).join(", ") || "none";
         const grid = s.grid ? `linear-gradient(var(--co-grid) 1px, transparent 1px), linear-gradient(90deg, var(--co-grid) 1px, transparent 1px), ` : "";
-        out.push(`${sel} { position: relative; box-sizing: border-box; font-family: ${FONTS[s.font] ?? "inherit"}; font-size: ${s.fontSize}em;
+        out.push(`${sel} { position: relative; box-sizing: border-box; font-family: ${FONTS[s.font] ?? "inherit"}; font-size: ${obsidian ? `calc(var(--font-text-size, 16px) * ${s.fontSize})` : `calc(var(--writer-size, 18px) * ${s.fontSize})`};
             width: ${s.width}%; margin: ${s.margin}em ${s.align === "center" ? "auto" : "0"}; padding: ${s.padding}px; border-radius: ${s.radius}px;
             background: ${grid}var(--co-bg); ${s.ruled ? `background-image: ${grid}linear-gradient(to bottom, transparent calc(100% - 1px), var(--co-rule) calc(100% - 1px)), var(--co-bg); background-size: ${s.grid ? `${s.gridSize}px ${s.gridSize}px, ${s.gridSize}px ${s.gridSize}px, ` : ""}100% ${s.lineHeight}em, 100% 100%; background-position: ${s.grid ? "0 0, 0 0, " : ""}0 ${-(s.lineHeight * 0.3).toFixed(2)}em, 0 0;`
                 : s.grid ? `background-size: ${s.gridSize}px ${s.gridSize}px, ${s.gridSize}px ${s.gridSize}px, 100% 100%;` : ""}
@@ -194,7 +246,7 @@ export function calloutCss(styles, { scope = "" } = {}) {
                 background: var(--co-title-bg); color: var(--co-title); font-size: ${s.titleSize}em; font-weight: ${s.titleWeight}; text-align: ${s.titleAlign};
                 text-transform: ${s.titleCase === "uppercase" ? "uppercase" : "none"}; font-variant: ${s.titleCase === "small-caps" ? "small-caps" : "normal"};
                 letter-spacing: ${s.titleSpacing}px; border-radius: ${Math.max(0, s.radius - 2)}px; font-style: normal; }`);
-            if (s.titlePrefix) out.push(`${sel} > .callout-title::before { content: "${cssEsc(s.titlePrefix)} "; color: var(--co-prefix); }`);
+            if (s.titlePrefix) out.push(`${sel} > .callout-title::before { content: "${cssEsc(s.titlePrefix)} "; color: var(--co-prefix);${obsidian ? " margin-right: .3em;" : ""} }`);
             out.push(`${sel} > .callout-content { position: relative; padding: ${s.padding ? 0 : "10px 15px"}; background: var(--co-body); border-radius: 0 0 ${Math.max(0, s.radius - 2)}px ${Math.max(0, s.radius - 2)}px;
                 ${s.italic ? "font-style: italic;" : ""} }`);
             out.push(`${sel} > .callout-content p { margin: 0; text-indent: 0; } ${sel} > .callout-content p + p, ${sel} > .callout-content ul + p, ${sel} > .callout-content p + ul { margin-top: ${s.paragraphGap}em; }`);
@@ -206,8 +258,47 @@ export function calloutCss(styles, { scope = "" } = {}) {
         out.push(`${sel} img { display: block; margin: 1em auto; max-width: 80%; }`);
         if (s.highlight === "underline") out.push(`${sel} mark { background: none; color: inherit; text-decoration: underline currentColor 1.5px; text-underline-offset: .2em; }`);
         if (s.css?.trim()) out.push(scopeCss(s.css, sel));
+        if (obsidian && !blockquote) out.push(obsidianFixes(sel, s));
     }
     return out.join("\n");
+}
+
+/**
+ * What Obsidian's callouts need on top: its icon hidden, its title a flex row (icon, title, fold) that wraps so a
+ * label drawn before the title sits above it, its own colour, blend and table rules switched off, internal links
+ * in the link colour.
+ */
+function obsidianFixes(sel, s) {
+    const justify = { left: "flex-start", center: "center", right: "flex-end" }[s.titleAlign] ?? "flex-start";
+    return [
+        `${sel} { --callout-color: 106, 79, 196; mix-blend-mode: normal; --callout-padding: 0; --table-border-width: 0; --table-header-border-width: 0; --table-header-background: transparent; --table-header-background-hover: transparent; --table-row-background-hover: transparent; --table-row-alt-background: transparent; --table-row-alt-background-hover: transparent; }`,
+        `${sel} > .callout-title .callout-icon { display: none; }`,
+        `${sel} > .callout-title { ${s.titleShow ? "display: flex;" : "display: none;"} flex-wrap: wrap; align-items: baseline; justify-content: ${justify}; gap: 0; }`,
+        `${sel} > .callout-title .callout-title-inner { color: inherit; font-weight: inherit; }`,
+        s.titlePrefix ? "" : `${sel} > .callout-title::before { flex-basis: 100%; }`,
+        `${sel} .internal-link, ${sel} .external-link { color: var(--co-link); text-decoration: none; }`,
+        `${sel} .callout-content { color: var(--co-text); }`,
+    ].filter(Boolean).join("\n");
+}
+
+/**
+ * An Obsidian CSS snippet for callout styles (all but "any other callout" and plain quotes, which would restyle
+ * every callout and quote in the vault). Sizes follow Obsidian's text size the way World Builder's follow the
+ * chapter text size.
+ */
+export function obsidianCss(styles, { skip = ["default", "quote"] } = {}) {
+    const picked = Object.fromEntries(Object.entries(styles).filter(([k]) => !skip.includes(k)));
+    return [
+        "/*",
+        " * World Builder callouts for Obsidian, made by World Builder's callout designer.",
+        " * Put this file in your vault's .obsidian/snippets/ folder and turn it on under",
+        " * Settings → Appearance → CSS snippets. Light and dark follow Obsidian's theme;",
+        " * text sizes are multiples of your editor text size.",
+        ` * Types: ${Object.keys(picked).join(", ")}`,
+        " */",
+        calloutCss(picked, { obsidian: true }),
+        "",
+    ].join("\n");
 }
 
 /** "& .x { … }" -> "<sel> .x { … }"; rules without "&" apply inside the callout */
