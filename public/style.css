@@ -286,12 +286,6 @@ section.group:first-of-type > h2 { margin-top: 4px; }
 .threshold-table { width: auto; }
 .threshold-table input { width: 100px; }
 /* ranked taxonomy values in class order, across both columns */
-.class-strip { display: flex; gap: 0; margin: 0 0 14px; border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; background: var(--panel); }
-.class-strip a { flex: 1 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; color: var(--text); font-size: 13px; white-space: nowrap; border-left: 1px solid var(--line); }
-.class-strip a:first-child { border-left: none; }
-.class-strip a:hover { background: var(--panel-2); text-decoration: none; }
-.class-strip a.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.class-strip .rank { font-size: 11px; opacity: .65; font-variant-numeric: tabular-nums; }
 @media (max-width: 1000px) {
     .note-cols { grid-template-columns: minmax(0, 1fr); }
     .note-side { order: -1; }
@@ -1263,7 +1257,10 @@ html.covered { overflow: hidden; }
 .term-inner { height: 100%; }
 /* the AI tab's second copy (side drawer and left drawer at once): the screen as live text */
 .term-mirror-host { position: relative; overflow: hidden; }
-.term-mirror { margin: 0; height: 100%; overflow: hidden; font: 13px/1.25 var(--mono); white-space: pre; color: var(--text); padding-bottom: var(--term-box-h, 0px); }
+.term-mirror { position: relative; margin: 0; height: 100%; overflow: hidden; color: var(--text); }
+/* the other drawer's terminal drawn again on the same grid, scaled to fit, the overlay laid over it */
+.term-mirror-screen { position: absolute; left: 0; top: 0; transform-origin: 0 0; font-family: var(--mono, monospace); white-space: pre; }
+.term-mirror-row { height: var(--row); line-height: var(--row); overflow: hidden; }
 .term-takeover { position: absolute; top: 8px; right: 10px; }
 /* overflow: clip, not hidden: a hidden box is a scroll container, and touchpad scrolling over a link would stop there */
 .term-linkrow { position: absolute; background: var(--panel); color: var(--text); font-family: var(--mono, monospace); font-size: 13.5px; white-space: pre; overflow: clip; pointer-events: auto; }
@@ -1288,10 +1285,23 @@ html.covered { overflow: hidden; }
 .np-cols { display: grid; grid-template-columns: minmax(0, 760px) 270px; gap: 48px; justify-content: center; align-items: start; }
 .np-cols.single { grid-template-columns: minmax(0, 820px); }
 .np-main { min-width: 0; }
-.np-side { position: sticky; top: 12px; max-height: calc(100vh - 32px); overflow-y: auto; padding: 0 2px 12px; }
+/* 24px of padding on the right (taken back by the margin) is room the indented tree rows may reach into without scrolling */
+.np-side { position: sticky; top: 12px; max-height: calc(100vh - 32px); overflow-y: auto; padding: 0 24px 12px 2px; margin-right: -24px; scrollbar-width: none; }
+.np-side::-webkit-scrollbar { display: none; }
+/* no scrollbar: a fade with an arrow where there is more (sticky, no height of its own); a click scrolls that way */
+.np-more-hint { position: sticky; z-index: 3; display: block; width: 100%; height: 0; padding: 0; margin: 0; border: 0; background: none; overflow: visible; pointer-events: none; }
+.np-more-hint.up { top: 0; }
+.np-more-hint.down { bottom: 0; }
+.np-more-hint > span { position: absolute; left: 0; right: 0; height: 30px; display: flex; justify-content: center; color: var(--muted); font-size: 18px; line-height: 1; opacity: 0; transition: opacity .15s, color .15s; cursor: pointer; }
+.np-more-hint.up > span { top: 0; align-items: flex-start; padding-top: 2px; background: linear-gradient(var(--bg) 35%, transparent); }
+.np-more-hint.down > span { bottom: -12px; align-items: flex-end; padding-bottom: 2px; background: linear-gradient(transparent, var(--bg) 65%); }
+.np-more-hint.show > span { opacity: 1; pointer-events: auto; }
+.np-more-hint > span:hover { color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .np-more-hint > span { transition: none; } }
 @container (max-width: 1000px) {
     .np-cols, .np-cols.single { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-    .np-side { position: static; max-height: none; order: -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 28px; align-items: start; }
+    .np-more-hint { display: none; }
+    .np-side { position: static; max-height: none; overflow: visible; padding-right: 2px; margin-right: 0; order: -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 28px; align-items: start; }
     .np-side > .np-slider { grid-column: 1 / -1; }
     .np-side > .np-side-sec { border-top: 1px solid var(--line); padding-top: 12px; }
     .np-head { grid-template-columns: minmax(0, 1fr); }
@@ -1314,6 +1324,30 @@ html.covered { overflow: hidden; }
 .np-sec-head h2, .np-h2 { font: 600 21px/1.25 var(--serif); margin: 0; }
 .np-sec.changed > .np-sec-head h2 { color: var(--accent); }
 .np-prose { font-family: var(--font-read, var(--serif)); font-size: var(--read-size, 17px); line-height: 1.6; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* a text field shown formatted (rendered markdown) and edited with the block editor */
+.np-md { white-space: normal; }
+.np-md > :first-child { margin-top: 0; }
+.np-md > :last-child { margin-bottom: 0; }
+.np-md p { margin: 0 0 .7em; }
+.np-sec-blocks { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: var(--panel); }
+.np-sec-actions { margin-top: 10px; align-items: center; }
+/* on a note page, added blocks look like the page's own sections (heading with a rule, text below); only their tools
+   (edit, move, delete) set them apart */
+.np-main .nblock { background: none; border: 0; border-radius: 0; padding: 0; margin: 46px 0 0; box-shadow: none; }
+.np-main .nblock.pre { margin-top: 28px; }
+.np-main .nblock-head { border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-bottom: 10px; align-items: baseline; }
+.np-main .nblock-head h3 { font: 600 21px/1.25 var(--serif); }
+.np-main .nblock.pre .nblock-head { border-bottom: 0; margin-bottom: 0; }
+.np-main .nblock .md { font-family: var(--font-read, var(--serif)); font-size: var(--read-size, 17px); line-height: 1.6; }
+.np-main .nblock.moving { border-radius: 8px; box-shadow: 0 0 0 3px var(--accent-soft); }
+.np-main .nblock.editing .nblock-edit { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: var(--panel); }
+.np-main .note-blocks { margin-top: 0; }
+.power-levels-facet + .power-levels-facet { margin-top: 22px; }
+.power-levels-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.power-levels-head h4 { margin: 0; font: 600 16px var(--serif); }
+.power-levels-use { margin-top: 16px; gap: 8px; }
+.power-levels .levels-table td { border-bottom: 0; border-top: 1px solid var(--line); }
+.power-levels .levels-table tr:first-child td { border-top: 0; }
 textarea.np-sec-text { width: 100%; font-family: var(--font-read, var(--serif)); font-size: 16.5px; line-height: 1.55; min-height: 110px; }
 .np-mini { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; margin: 12px -8px 0; }
 .np-mini .np-prop { grid-template-columns: 110px minmax(0, 1fr); border-top: 1px solid var(--line); border-radius: 0; }
@@ -1322,6 +1356,14 @@ textarea.np-sec-text { width: 100%; font-family: var(--font-read, var(--serif));
 .np-sec.only-mini > .np-mini { margin-top: 0; }
 @container (max-width: 640px) { .np-mini { grid-template-columns: minmax(0, 1fr); } .np-prop { grid-template-columns: 120px minmax(0, 1fr); } }
 .np-body { margin-top: 28px; }
+/* an item's build tree: part of the page, the tree beside what the whole build takes */
+.np-build { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 32px; }
+.np-build-side h3 { font: 600 16px/1.3 var(--serif); margin: 0 0 6px; }
+.np-build-side > :not(h3) + h3 { margin-top: 22px; }
+.np-build-side td { padding: 6px 0; border-bottom: none; border-top: 1px solid var(--line); }
+.np-build-side td.num { padding-left: 12px; }
+.np-build-side tr:hover td { background: none; }
+@container (max-width: 640px) { .np-build { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
 .np-parent { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 10px; background: var(--panel-2); margin-bottom: 12px; }
 .np-sub { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: var(--panel); }
 .np-sub-title { font-size: 16px; font-weight: 600; }
@@ -1330,15 +1372,26 @@ textarea.np-sec-text { width: 100%; font-family: var(--font-read, var(--serif));
 .np-slider b { color: var(--text); }
 .np-slider input { width: 100%; accent-color: var(--accent); margin: 4px 0 0; padding: 0; border: 0; background: none; }
 .np-side-sec { border-top: 1px solid var(--line); padding: 12px 0; }
-.np-side > .np-side-sec:first-child { border-top: 0; padding-top: 0; }
+.np-side > .np-side-sec:first-child, .np-side > .np-more-hint:first-child + .np-side-sec { border-top: 0; padding-top: 0; }
 .np-side-sec h4 { margin: 0 0 6px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .np-side-row { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; font-size: 13.5px; }
 .np-side-row > :last-child { text-align: right; }
 .np-side .np-more { padding: 4px 0; }
 .linkish-text { color: var(--accent); font-weight: 500; }
 .np-side-row .rel-friendly { color: var(--ok); } .np-side-row .rel-hostile { color: var(--bad); }
-.np-pill { display: block; width: 100%; text-align: left; border-radius: 999px; padding: 6px 13px; margin-bottom: 6px; font-size: 13.5px; }
+.np-pill { display: block; width: 100%; text-align: left; border-radius: 999px; padding: 6px 13px; margin-bottom: 6px; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; }
 .np-pill.on { border: 2px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; padding: 5px 12px; cursor: default; }
+/* what a source teaches: pills as a tree (sub-arts indented), and the ‹ 1 / 3 › cycle over several sources */
+.np-tree { list-style: none; margin: 0; padding: 0; }
+.np-tree .np-tree { padding-left: 14px; margin-left: 6px; border-left: 1px solid var(--line); }
+/* indented rows reach 12px further right per level (two levels: the column's spare padding), then end with … */
+.np-tree .np-tree { margin-right: -12px; }
+.np-tree .np-tree .np-tree .np-tree { margin-right: 0; }
+.np-side-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.np-side-h h4 { margin: 0; }
+.np-cycle { display: inline-flex; align-items: center; gap: 2px; }
+.np-rank { display: inline-block; min-width: 1.4em; margin-right: 6px; font-size: 11px; opacity: .6; font-variant-numeric: tabular-nums; }
+.np-cycle .icon { padding: 0 6px; font-size: 16px; line-height: 1; }
 .np-tabpage { margin-top: 2px; }
 .np-links section + section { margin-top: 28px; }
 .np-linkgroup { margin: 10px 0; }
@@ -1368,3 +1421,14 @@ h4.np-plot-title { font-size: 16px; }
 .np-list .chip { all: unset; color: var(--accent); cursor: pointer; }
 .np-list a.chip:hover { text-decoration: underline; }
 .np-sec-input { margin-top: 4px; }
+
+/* a chapter's controls on its plan (number, archive), and the archive in the Grand plan */
+.chapter-tools { margin: 8px 0 10px; }
+.chapter-renumber { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.chapter-renumber p { margin: 0; }
+.chapter-renumber button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.chapter-moves { display: flex; flex-wrap: wrap; gap: 2px 14px; max-height: 120px; overflow-y: auto; }
+.archive > summary { cursor: pointer; }
+.archive > summary h2 { display: inline; }
+.archived-chapter { cursor: default; }
+.archived-tools { margin-top: 8px; align-items: center; }

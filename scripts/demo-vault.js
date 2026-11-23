@@ -58,13 +58,16 @@ await vault.load();
     const json = text.match(/```json\n([\s\S]*?)\n```/)[1];
     const schema = JSON.parse(json);
     const facet = "Taxonomy/Ember Ranks";
-    schema.collections[facet] = { label: "Ember Ranks", fields: [["title", ""], ["aliases", []], ["type", "ember-ranks"], ["facet", "Ember Ranks"], ["parent", ""], ["ordered", true], ["class", ""], ["threshold", ""], ["power-system", ""], ["description", ""], ["created-date", ""], ["tags", []]],
+    schema.collections[facet] = { label: "Ember Ranks", fields: [["title", ""], ["aliases", []], ["type", "ember-ranks"], ["facet", "Ember Ranks"], ["parent", ""], ["ordered", true], ["class", ""], ["threshold", ""], ["power-system", []], ["description", ""], ["created-date", ""], ["tags", []]],
         links: { parent: facet, "power-system": "Power Systems" } };
     fs.writeFileSync(schemaFile, text.replace(json, () => JSON.stringify(schema, null, 1)));
     await note(`${DS}/Power Systems/Emberwork.md`, { title: "Emberwork", type: "power-system", status: "draft", novels: [L("Ashfall Road")],
         description: "Couriers carry heat from the waystation lamps in their blood; the more heat they hold, the further the ash lets them walk." });
+    // an offshoot with the same ranks (they name both power systems)
+    await note(`${DS}/Power Systems/Cinderwork.md`, { title: "Cinderwork", type: "power-system", status: "draft", novels: [L("Ashfall Road")],
+        description: "Emberwork turned inward: the heat is drawn from the courier's own years instead of the lamps. The guild forbids it; the ranks are the same." });
     let cls = 0;
-    const rank = async (name, title, parent, threshold) => note(`${DS}/${facet}/${name}.md`, { title, type: "ember-ranks", facet: "Ember Ranks", ...(parent ? { parent: L(parent) } : {}), ordered: true, class: ++cls, ...(threshold != null ? { threshold } : {}), "power-system": L("Emberwork") });
+    const rank = async (name, title, parent, threshold) => note(`${DS}/${facet}/${name}.md`, { title, type: "ember-ranks", facet: "Ember Ranks", ...(parent ? { parent: L(parent) } : {}), ordered: true, class: ++cls, ...(threshold != null ? { threshold } : {}), "power-system": [L("Emberwork"), L("Cinderwork")] });
     for (const [top, steps] of [["Spark", [["Lit 1", 0], ["Lit 2", 50], ["Lit 3", 120]]], ["Kindled", [["Low", 250], ["High", 400]]], ["Blaze", [["Low", 700], ["High", 1000]]]]) {
         await rank(top, top, null, null);
         for (const [step, n] of steps) await rank(`${top} ${step}`, `${top} (${step})`, top, n);
@@ -77,6 +80,14 @@ await fsp.writeFile(path.join(ROOT, "99. Resources", "pb-ember-line.svg"), `<svg
 
 for (const [n, d] of [["Human", "The most common people of the Reach, scattered along the caravan roads."], ["Ashborn", "People born under the ash cloud, grey-eyed and said to sense coming storms."]])
     await note(`${DS}/Races/${n}.md`, { title: n, type: "race", description: d, novels: [L("Ashfall Road")] });
+
+for (const [n, parent, d] of [["Dustborn", "Ashborn", "Ashborn families who walk the Flats and never sleep under a roof."], ["Lampborn", "Ashborn", "Ashborn raised in the waystations, who lose the storm sense and keep the grey eyes."], ["Vent-Dustborn", "Dustborn", "Dustborn who winter in the steam hollows of Kettle Flats."]])
+    await note(`${DS}/Races/${n}.md`, { title: n, type: "race", "parent-race": L(parent), description: d, novels: [L("Ashfall Road")] });
+// arts, and two manuals that teach them
+for (const [n, parent, d] of [["Lamp Walking", "", "Drawing heat from a waystation lamp and carrying it into the ash."], ["Ember Step", "Lamp Walking", "Spending held heat in a single stride."], ["Banked Flame", "Lamp Walking", "Holding heat through a night without a lamp."], ["Long Ember Step", "Ember Step", "Three strides on one breath of heat."]])
+    await note(`${DS}/Abilities/${n}.md`, { title: n, type: "ability", "power-system": [L("Emberwork")], ...(parent ? { "parent-art": L(parent) } : {}), description: d, novels: [L("Ashfall Road")] });
+await note(`${DS}/Items/Lamplighter's Primer.md`, { title: "Lamplighter's Primer", type: "item", rarity: L("uncommon"), teaches: [L("Lamp Walking")], value: 40, description: "The guild's first book. Every courier's copy has **someone else's notes** in the margins.", novels: [L("Ashfall Road")] });
+await note(`${DS}/Items/Torn Stride Manual.md`, { title: "Torn Stride Manual", type: "item", rarity: L("rare"), teaches: [L("Ember Step")], value: 220, description: "Half a manual, the wrong half.", novels: [L("Ashfall Road")] });
 
 await note(`${DS}/Worlds/The Cinder Reach.md`, {
     title: "The Cinder Reach", type: "world", status: "draft", genre: [L("Post-Apocalyptic"), L("Steampunk")], races: [L("Human"), L("Ashborn")], novels: [L("Ashfall Road")],
@@ -181,6 +192,8 @@ await chapter(AR, 3, "What the Syndicate Carries", `Pell's Crossing was a bridge
 It was. Mara had noticed at the third post and decided not to.
 `);
 await chapter(AR, 4, "The Silent Towers", ``);
+await chapter(AR, 5, "", ``);
+await chapter(AR, 6, "", ``);
 await chapter(GO, 1, "Glass in the Fog", `The orchard had been roofed in glass for a hundred years, and in all that time, Elodie was told, not one pane had cracked.
 
 She found the first broken one on her third morning.
@@ -198,11 +211,14 @@ const plans = [
     [6, "", "- The Glass Coast\n\n- First sight of Halvard"],
 ];
 for (const [n, title, plan] of plans) await note(`${AR}/Plan/Chapter Plans/Plan ${String(n).padStart(3, "0")} (Ashfall Road).md`, { type: "chapter-plan", chapter: n, title, volume: "1 - The Long Haul", plan });
+// an archived chapter and its plan
+await note(`${AR}/Archive/Chapters/003 - The Toll at Pell's Bridge.md`, { type: "chapter", novel: "Ashfall Road", arc: "The Long Haul", chapter: 3, "chapter title": "The Toll at Pell's Bridge" }, "The bridge keeper wanted a wick for the crossing and another for his silence.\n\nMara paid for the crossing.\n");
+await note(`${AR}/Archive/Chapter Plans/Plan 003 (Ashfall Road) (Archived).md`, { type: "chapter-plan", chapter: 3, title: "The Toll at Pell's Bridge", volume: "1 - The Long Haul", plan: "- The keeper asks for two wicks\n\t- One for the bridge, one for his silence\n\n- Mara pays for one", archived: "2026-11-09", "archived-chapter": L("1. Ashfall Road/Archive/Chapters/003 - The Toll at Pell's Bridge") });
 await note(`${GO}/Plan/Chapter Plans/Plan 001 (The Glass Orchard).md`, { type: "chapter-plan", chapter: 1, title: "Glass in the Fog", plan: "- Elodie arrives at the orchard\n\n- The first broken pane" });
 const plot = (novel, title, fm) => note(`${novel}/Plots/${title}.md`, { type: "plot", title: title.replace(/ \(Plot\)$/, ""), ...fm });
 await plot(AR, "Mara's Debt", { rating: "[[Excellent (Rating)|Excellent]]", characters: [L("Mara Venn"), L("Sister Ilse")], mood: "dogged", plot: "Mara owes the guild for her mother's passage; the Syndicate job would clear it, if she survives delivering it." });
 await plot(AR, "The Silent Towers (Plot)", { rating: "[[Good (Rating)|Good]]", characters: [L("Mara Venn")], mood: "eerie", plot: "The signal towers on the old line have gone dark, but something still answers the codes." });
-await plot(AR, "Tobin's Brother", { rating: "Average", characters: [L("Tobin Hale")], mood: "bittersweet", plot: "Tobin's brother works for the Syndicate in Halvard and wants him to stop asking questions." });
+await plot(AR, "Tobin's Brother", { rating: "Average", "subplot-of": L("Mara's Debt"), characters: [L("Tobin Hale")], mood: "bittersweet", plot: "Tobin's brother works for the Syndicate in Halvard and wants him to stop asking questions." });
 await plot(GO, "The First Cracked Pane", { rating: "[[Good (Rating)|Good]]", characters: [L("Elodie Marsh"), L("Professor Augustin Quill")], plot: "A pane that should not break, breaks; the professor is not surprised." });
 
 // ledgers

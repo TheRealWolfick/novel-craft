@@ -38,6 +38,9 @@ A taxonomy is a set of category values, one note per value in `80. Global Data S
 
 - **+ New taxonomy** at the bottom of the sidebar's Taxonomy section makes a new one: its entry in the data store schema and its folder. Paste values to make them at once, in rank order.
 - **Add several…** on a taxonomy's page adds values from a list; **New** adds one.
+- **Delete…** on a taxonomy's page deletes the whole taxonomy: its values move to the vault's `.trash`, after showing which notes link to them. Taxonomies the app or a field needs (Rarity, Genres…) are required and can't be deleted, nor can one a stat template uses; single values can, on their own pages.
 - A list line `Name (A, B, C)` or `Name (Layer 1 - 9)` makes a value with sub-levels; indented lines are sub-levels of the line above; `= 100` at the end gives a value its number.
-- Ticking **levels with a number each** gives every value a `threshold` and a `power-system`: levels of a power system that a [stat template](docs:stat-templates#choices) can work out from a stat. See [Levels and mastery systems](docs:levels-and-mastery).
+- Ticking **levels with a number each** gives every value a `threshold` and a `power-system`: levels of a power system that a [stat template](docs:stat-templates#choices) can work out from a stat. The levels can belong to several power systems. See [Levels and mastery systems](docs:levels-and-mastery).
+- A value's page lists every value of a ranked taxonomy in the column beside it, in rank order.
 
+![A rank, with the others beside it](img/taxonomy-ranks.png)

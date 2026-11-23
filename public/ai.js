@@ -5,7 +5,7 @@ import { h } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
 import { api, toast, Html, ConfirmButton, openInDrawer, openDrawerTab, useApi } from "./app.js";
-import { writerNow } from "./writer.js";
+import { writerNow, showLeftTab } from "./writer.js";
 import { ClaudeTerminal } from "./terminal.js";
 
 const html = htm.bind(h);
@@ -96,6 +96,17 @@ export function ago(t) {
 const TOOL_LABELS = { search: "Searching", novel_overview: "Reading the novel overview", read_chapter: "Reading a chapter", read_note: "Reading a note", query_collection: "Listing a collection", schema: "Reading the fields", character_state: "Checking ledgers", world_tree: "Reading the world outline", taxonomy: "Reading taxonomy values", current_view: "Looking at the screen", propose_changes: "Preparing changes for review" };
 const money = (n) => (n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
 const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M tokens` : n >= 1000 ? `${Math.round(n / 1000)}k tokens` : `${n} tokens`);
+
+// The AI tab can be in both drawers; the conversation is where you used it last (for Claude Code, the copy holding the
+// terminal). "Back to the conversation" goes there, not always to the side drawer.
+let aiLastPlace = "right";
+addEventListener("pointerdown", (e) => { const t = e.target.closest?.(".ai-pane, .ai-term"); if (t) aiLastPlace = t.closest(".writer-wrap") ? "left" : "right"; }, true);
+function backToConversation() {
+    const leftHas = writerNow().tabs.includes("pane:ai");
+    const holder = document.querySelector(".ai-term .term-host:not(.term-mirror-host)");
+    const place = holder ? (holder.closest(".writer-wrap") ? "left" : "right") : aiLastPlace;
+    if (leftHas && place === "left") showLeftTab("pane:ai"); else openDrawerTab("ai");
+}
 
 export function AiPane({ active }) {
     const [c, set] = useState(chat);
@@ -459,7 +470,7 @@ export function ProposalView({ id }) {
         <div class="proposal-head">
             <div><h2>${p.title}</h2><p class="muted small">Proposed by the assistant · ${p.changes.length} change${p.changes.length === 1 ? "" : "s"}${pending && pending < p.changes.length ? `, ${pending} waiting` : ""}. Nothing is written until you apply it.</p></div>
             <div class="row">
-                <button class="small" onClick=${() => openDrawerTab("ai")}>Back to the conversation</button>
+                <button class="small" onClick=${backToConversation}>Back to the conversation</button>
                 ${pending > 0 && html`<button disabled=${busy} onClick=${() => act("reject", "all")}>Reject all</button>
                     <button class="primary" disabled=${busy} onClick=${() => act("apply", "all")}>Apply ${pending === p.changes.length ? "all" : `the ${pending} left`}</button>`}
             </div>
@@ -473,6 +484,12 @@ function ChangeCard({ c, busy, act }) {
         : c.action === "ledger_entry" ? html`${c.replaceKey ? `Change ${c.type} entry ${c.replaceKey}` : `New ${c.type} entry`} for <b>${c.owner}</b>, chapter ${c.entry.chapter}${c.entry.title ? html`: ${c.entry.title}` : ""}${c.status === "applied" && c.key ? html` <span class="muted small">(${c.key})</span>` : ""}`
         : c.action === "delete_ledger_entry" ? html`Delete ${c.type} entry ${c.key} of <b>${c.owner}</b>, chapter ${c.chapter}${c.title ? html`: ${c.title}` : ""}`
         : c.action === "edit_fields" ? html`Fields of <b>${c.name}</b>`
+        : c.action === "create_facet" ? html`New taxonomy <b>${c.name}</b>${c.levels ? " (levels)" : ""}`
+        : c.action === "add_facet_values" ? html`Add ${c.values.length} value${c.values.length === 1 ? "" : "s"} to <b>${c.collection.slice(9)}</b>`
+        : c.action === "set_facet_systems" ? html`Power systems of <b>${c.collection.slice(9)}</b>`
+        : c.action === "link_facet_system" ? html`<b>${c.system}</b> uses <b>${c.collection.slice(9)}</b>${c.from ? html` instead of <b>${c.from.slice(9)}</b>` : ""}`
+        : c.action === "unlink_facet_system" ? html`<b>${c.system}</b> stops using <b>${c.collection.slice(9)}</b>`
+        : c.action === "remove_facet" ? html`Remove the taxonomy <b>${c.collection.slice(9)}</b>`
         : c.action === "edit_text" ? html`Text of <b>${c.name}</b>` : html`Add to <b>${c.name}</b>`;
     return html`<div class=${`change ${c.status}`}>
         <div class="change-head">
@@ -501,6 +518,20 @@ function ChangeCard({ c, busy, act }) {
             ${c.action === "edit_fields" && html`<table class="change-fields"><thead><tr><th>Field</th><th>Now</th><th>After</th></tr></thead><tbody>
                 ${c.rows.map((r) => html`<tr><th>${r.key}</th><td class="del">${r.before || html`<span class="muted">empty</span>`}</td><td class="ins">${r.removed ? html`<span class="muted">removed</span>` : r.after || html`<span class="muted">empty</span>`}</td></tr>`)}</tbody></table>`}
             ${c.action === "edit_text" && html`<div class="change-text"><span class="ctx">${c.context.before}</span>${wordDiff(c.find, c.replace).map((d, k) => (d.t === "same" ? d.s : d.t === "del" ? html`<del key=${k}>${d.s}</del>` : html`<ins key=${k}>${d.s}</ins>`))}<span class="ctx">${c.context.after}</span></div>`}
+            ${(c.action === "create_facet" || c.action === "add_facet_values") && html`
+                ${c.values.length > 0 ? html`<table class="change-fields"><thead><tr><th>Value</th>${c.levels && html`<th>Number</th>`}</tr></thead><tbody>
+                    ${c.values.map((v) => html`<tr><td class="ins" style=${v.parent ? "padding-left:22px" : ""}>${v.title || v.name}</td>${c.levels && html`<td class="ins num">${v.threshold ?? ""}</td>`}</tr>`)}</tbody></table>`
+                    : html`<p class="muted small">No values yet.</p>`}
+                <p class="muted small">${c.collection}${c.powerSystems?.length ? ` · levels of ${c.powerSystems.join(", ")}` : ""}${c.action === "add_facet_values" ? ` · ranked after its ${c.existing} value${c.existing === 1 ? "" : "s"}` : ""}</p>`}
+            ${c.action === "set_facet_systems" && html`<table class="change-fields"><thead><tr><th></th><th>Now</th><th>After</th></tr></thead><tbody>
+                <tr><th>Power systems</th><td class="del">${c.before.join(", ") || html`<span class="muted">none</span>`}</td><td class="ins">${c.powerSystems.join(", ") || html`<span class="muted">none</span>`}</td></tr></tbody></table>
+                <p class="muted small">Set on all ${c.count} values of ${c.collection.slice(9)}</p>`}
+            ${(c.action === "link_facet_system" || c.action === "unlink_facet_system") && html`<table class="change-fields"><thead><tr><th>Power systems of</th><th>Now</th><th>After</th></tr></thead><tbody>
+                <tr><th>${c.collection.slice(9)}</th><td class="del">${c.before.join(", ") || html`<span class="muted">none</span>`}</td><td class="ins">${c.after.join(", ") || html`<span class="muted">none</span>`}</td></tr>
+                ${c.from && html`<tr><th>${c.from.slice(9)}</th><td class="del">${c.fromBefore.join(", ") || html`<span class="muted">none</span>`}</td><td class="ins">${c.fromBefore.filter((x) => x.toLowerCase() !== c.system.toLowerCase()).join(", ") || html`<span class="muted">none</span>`}</td></tr>`}</tbody></table>
+                <p class="muted small">Written on all ${c.count} values${c.from ? ` of ${c.collection.slice(9)} and on the values of ${c.from.slice(9)}` : ""}; other power systems stay.</p>`}
+            ${c.action === "remove_facet" && html`<div class="change-deleted"><p>${c.values.length} value${c.values.length === 1 ? "" : "s"} go to the vault's trash${c.values.length ? `: ${c.values.slice(0, 12).join(", ")}${c.values.length > 12 ? "…" : ""}` : ""}; the taxonomy leaves the schema.</p></div>
+                ${c.linkedFrom.length > 0 && html`<div class="warnbox">${c.linkedFrom.length} note${c.linkedFrom.length === 1 ? " links" : "s link"} to these values and will show them as unresolved: ${c.linkedFrom.slice(0, 10).join(", ")}${c.linkedFrom.length > 10 ? "…" : ""}</div>`}`}
             ${c.action === "add_text" && html`<div class="change-text">${c.after ? html`<span class="ctx">${c.context.before}${c.after}${c.context.after}</span>` : html`<span class="ctx">…${c.context}</span>`}${"\n\n"}<ins>${c.text}</ins></div>`}
         </div>
     </div>`;

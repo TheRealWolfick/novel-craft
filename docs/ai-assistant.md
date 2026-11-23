@@ -56,13 +56,18 @@ The running cost of the conversation (an estimate) shows at the top of the tab. 
 
 ## Reviewing changes
 
-Ask it to create or change something (a new item, a character, field values, a rewrite of a passage, a new ledger entry, a change to one or its deletion) and it prepares the changes instead of writing them. They open in the drawer's viewer for review:
+Ask it to create or change something (a new item, a character, field values, a rewrite of a passage, a new ledger entry, a change to one or its deletion, a taxonomy such as a power system's levels) and it prepares the changes instead of writing them. They open in the drawer's viewer for review:
 
-- each change on its own card: a new note with its fields and text, field changes as *now → after*, text edits with the removed words struck through and the new ones highlighted, in their paragraph; a ledger entry as its callout (beside the current one when it changes an entry; a change can be as small as a new title, the rest stays as it is), an entry to delete as its callout greyed out with *to be deleted* (and any transfer it wrote into another ledger, which goes with it), with what it changes in the holdings at that chapter and any warnings, such as stock going below zero;
+- each change on its own card: a new note with its fields and text, field changes as *now → after*, text edits with the removed words struck through and the new ones highlighted, in their paragraph; a ledger entry as its callout (beside the current one when it changes an entry; a change can be as small as a new title, the rest stays as it is), an entry to delete as its callout greyed out with *to be deleted* (and any transfer it wrote into another ledger, which goes with it), with what it changes in the holdings at that chapter and any warnings, such as stock going below zero; a taxonomy with every value and its number, the power systems it belongs to as *now → after*, or, for one to remove, the values that go and the notes that link to them;
 - **Apply** or **Reject** on each card, or **Apply all** / **Reject all** at the top;
-- **Back to the conversation** returns to the AI tab, where a card for the proposal opens it again.
+- **Back to the conversation** returns to the AI tab you used last, in whichever drawer it is, where a card for the proposal opens it again.
 
 Nothing is written until you apply it, and each change is checked again first (a passage you've edited in the meantime is refused, not overwritten). The assistant hears what you applied and rejected with your next message. An applied ledger entry is saved the way the ledger editor saves one: it gets its number in the chapter, a transfer writes the receiver's entry too, and character sheets are updated. An applied delete removes the entry the way the ledger editor does, with its mirrored transfers, and syncs the sheets again. Entries that mirror a transfer can't be changed or deleted directly (change the giving entry), and novel settings can't be changed this way.
+
+The assistant can make taxonomies, add values to them, link them to power systems or unlink them, and remove them. Required taxonomies, and ones a stat template uses, can't be removed. It can't change a chapter's number, or give a chapter the number and title of an archived one.
+
+> [!tip] After updating the app
+> Press **New** in the AI tab: a Claude Code conversation from before the update may still have the older list of what it can propose.
 
 > [!note] What it can read
 > Only your novel folders and the data store, nothing else in the vault (not your Templater notes, not `.obsidian`). It reads a little at a time: overviews, search results, the parts of a note or chapter it needs.

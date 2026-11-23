@@ -11,7 +11,7 @@ The writer opens a chapter note on the left of the window while the chapter's pl
 ## Opening the writer
 
 1. Open a chapter: on a novel's [Grand plan](docs:planning), click a chapter row.
-2. Press **✎ Write**. A chapter without a note offers **Create chapter**, which names the file the way the Templater Chapter template does.
+2. Press **✎ Write**. A planned chapter already has an empty note to write in; a chapter with neither plan nor note offers **Create chapter**, which names the file the way the Templater Chapter template does.
 3. Close or reopen the writer any time with <kbd>Ctrl</kbd>+<kbd>[</kbd>, and the right drawer with <kbd>Ctrl</kbd>+<kbd>]</kbd>. A closed writer keeps your unsaved text; **✎ Open writer** in the sidebar, under World builder, brings it back and shows which chapter it holds (on a chapter page with nothing in the writer, it opens that chapter; otherwise it is greyed out).
 
 ![The writer beside chapter 1's plan](img/writer.png)
@@ -20,7 +20,7 @@ With both open, the writer and the drawer share the window half and half. <kbd>C
 
 ## Fields on top
 
-**Details** above the text holds the chapter note's frontmatter (title, arc, characters mentioned…), one field per row. Fold it away while writing.
+**Details** above the text holds the chapter note's frontmatter (title, arc, characters mentioned…), one field per row. Fold it away while writing. The title is the [plan](docs:planning#writing-a-chapter-plan)'s title too, and renames the file when its name was made from it; the number is changed on the plan.
 
 ## Writing in blocks
 
@@ -47,11 +47,11 @@ While you edit a block the arrow keys move through its text. On its first or las
 - <kbd>Shift</kbd>+<kbd>Enter</kbd> adds an empty paragraph after the selection and puts the cursor in it (press it again for a line break inside it).
 - <kbd>Backspace</kbd> turns the selection red; press it again to delete the blocks. Any other key cancels.
 - <kbd>Ctrl</kbd>+<kbd>B</kbd>, <kbd>I</kbd> and the other formatting keys format every selected block; if all of them have it already, it comes off.
-- <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> copy or cut the blocks as markdown, <kbd>Ctrl</kbd>+<kbd>V</kbd> pastes after them, <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> move them.
+- <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> copy or cut the blocks as markdown (formatting included), <kbd>Ctrl</kbd>+<kbd>V</kbd> pastes after them, <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> move them.
 
 <kbd>Escape</kbd> again, or a click on any text, leaves block navigation. While editing, <kbd>Shift</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> with the selection already at the block's start or end selects this block and the next, so a selection can reach across paragraphs.
 
-> [!tip] Note blocks and the scratchpad use the same editor, so this works there too.
+> [!tip] Note blocks, long text fields such as a description, plots and the scratchpad use the same editor, so this works there too.
 
 ## Scene breaks, callouts and images
 

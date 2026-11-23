@@ -73,12 +73,38 @@ export function openOnLeft(key) {
     setWriter({ ...writer, tabs, active: key, open: true });
 }
 /** A renamed note's left tab follows it */
-export function renameLeftTab(from, to) { if (writer.tabs.includes(from)) setWriter({ ...writer, tabs: writer.tabs.map((t) => (t === from ? to : t)), active: writer.active === from ? to : writer.active }); }
+// a tab that follows a link keeps its key, so its page stays mounted (a note page then only swaps its content)
+const tabKeys = new Map();   // href -> an id of its own (never the href: the page a tab left can be opened again beside it)
+let tabIds = 0;
+const tabKey = (k) => { if (!tabKeys.has(k)) tabKeys.set(k, `t${++tabIds}`); return tabKeys.get(k); };
+export function renameLeftTab(from, to) {
+    if (!writer.tabs.includes(from) || from === to) return;
+    if (writer.tabs.includes(to)) { closeLeftTab(from); return showLeftTab(to); }   // already open in another tab
+    tabKeys.set(to, tabKey(from)); tabKeys.delete(from);
+    setWriter({ ...writer, tabs: writer.tabs.map((t) => (t === from ? to : t)), active: writer.active === from ? to : writer.active });
+}
+/**
+ * Chapters of a novel changed number, or left for the archive (`numbers`: Map old -> new, null = gone): the writer
+ * follows, and the left tabs as `to` says (Map href -> new href, null = close), all at once, since chapters can change
+ * places. `drop(tab)`: other tabs to close.
+ */
+export function followChapters(folder, numbers, to, drop) {
+    const ids = new Map([...to].map(([a]) => [a, tabKeys.get(a)]));
+    for (const a of to.keys()) tabKeys.delete(a);
+    for (const [a, b] of to) if (b && ids.get(a)) tabKeys.set(b, ids.get(a));
+    const next = (t) => (drop(t) ? null : to.has(t) ? to.get(t) : t);
+    const tabs = [...new Set(writer.tabs.map(next).filter(Boolean))];
+    const here = writer.folder === folder && numbers.has(writer.n) ? numbers.get(writer.n) : writer.n;
+    const active = writer.active === "writer" ? "writer" : next(writer.active) ?? "writer";
+    const gone = writer.folder && here == null;
+    setWriter({ ...writer, folder: gone ? null : writer.folder, n: here, tabs, active, open: writer.open && (!gone || tabs.length > 0) });
+}
 export function showLeftTab(key) { setWriter({ ...writer, active: key, open: true }); }
 export function closeLeftTab(key) {
     const i = writer.tabs.indexOf(key);
     if (i < 0) return;
     const tabs = writer.tabs.filter((t) => t !== key);
+    tabKeys.delete(key);
     const active = writer.active !== key ? writer.active : tabs[Math.min(i, tabs.length - 1)] ?? "writer";
     setWriter({ ...writer, tabs, active, open: writer.open && (!!writer.folder || tabs.length > 0) });
 }
@@ -118,14 +144,14 @@ export function WriterDrawer({ index }) {
                 ${w.folder ? html`<${ChapterWriter} key=${`${w.folder}:${w.n}`} folder=${w.folder} n=${w.n} index=${index} />`
                     : html`<div class="writer-body"><div class="drawer-empty muted"><p>No chapter in the writer. Open a chapter and press ✎ Write.</p></div></div>`}
             </div>
-            ${w.tabs.map((k) => html`<div key=${k} class="drawer-pane" hidden=${active !== k}><${LeftTab} tab=${k} index=${index} active=${w.open && active === k} /></div>`)}
+            ${w.tabs.map((k) => html`<div key=${tabKey(k)} class="drawer-pane" hidden=${active !== k}><${LeftTab} tab=${k} index=${index} active=${w.open && active === k} /></div>`)}
         </aside>
     </div>`;
 }
 
 // ------------------------------------------------------------------ chapter writer
 
-const READONLY = new Set(["type", "created date", "created-date"]);
+const READONLY = new Set(["type", "created date", "created-date", "chapter"]);   // (the number is changed on the plan)
 const LIST_KEYS = new Set(["characters-mentioned", "cssclasses", "tags", "aliases"]);
 const sameVal = (a, b) => JSON.stringify(a ?? "") === JSON.stringify(b ?? "");
 const coerceNum = (v) => (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : v);
@@ -163,6 +189,7 @@ function ChapterWriter({ folder, n, index }) {
     const fm = !c ? {} : fresh ? c.fm : { ...c.fm, ...saved.fm };
     const body = !c ? "" : fresh ? c.body : saved.body ?? c.body;
     const mtime = Math.max(c?.mtime ?? 0, saved.mtime);
+    const path = fresh ? c?.path : saved.path ?? c.path;   // (a new title renames the file)
     const text = draft ?? body;
     const changedKeys = Object.keys(fmEdits).filter((k) => !sameVal(fmEdits[k], fm[k]));
     const bodyChanged = draft != null && draft !== body;
@@ -182,8 +209,8 @@ function ChapterWriter({ folder, n, index }) {
         try {
             const set = Object.fromEntries(changedKeys.map((k) => [k, coerceNum(fmEdits[k])]));
             const sentDraft = draft, sentFm = fmEdits;
-            const r = await api.send("PATCH", "/api/note", { path: c.path, set, body: bodyChanged ? draft : undefined, baseMtime: baseMtime ?? mtime });
-            setSaved({ mtime: r.mtime, fm: { ...(fresh ? {} : saved.fm), ...set }, body: bodyChanged ? draft : fresh ? null : saved.body });
+            const r = await api.send("PATCH", "/api/note", { path, set, body: bodyChanged ? draft : undefined, baseMtime: baseMtime ?? mtime });
+            setSaved({ mtime: r.mtime, path: r.path, fm: { ...(fresh ? {} : saved.fm), ...set }, body: bodyChanged ? draft : fresh ? null : saved.body });
             // what was typed while the save was on its way stays (resetting to the sent text lost it and closed the block)
             const later = latest.current;
             const keepDraft = later.draft !== sentDraft;
@@ -247,7 +274,7 @@ function ChapterWriter({ folder, n, index }) {
             <div class=${`savebar ${dirty ? "dirty" : ""}`}>
                 <button class="primary" disabled=${!dirty || busy} onClick=${save}>${busy ? "Saving…" : "Save changes"}</button>
                 ${dirty && html`<button onClick=${reset}>Discard</button><span class="muted">Ctrl+S</span>`}
-                <span class="muted grow" style="text-align:right">${c.path.split("/").pop()}</span>
+                <span class="muted grow" style="text-align:right">${path.split("/").pop()}</span>
             </div>
         </footer>`}
     </div>`;
@@ -477,7 +504,7 @@ const windowBlur = () => typeof document.hasFocus === "function" && !document.ha
  * Tab / Shift+Tab indent list items, Alt+↑↓ moves a block. Typing "# ", "- ", "1. ", "> " or "- [ ] " at the start of
  * a paragraph turns it into that block; "---" + Enter makes a divider. Ctrl+Z / Ctrl+Shift+Z undo and redo.
  */
-export function BlockEditor({ value, onChange, breaks = [], callouts = true, sceneBreaks = true, compact = false, autoFocus = false, api: handle = null }) {
+export function BlockEditor({ value, onChange, breaks = [], callouts = true, sceneBreaks = true, compact = false, autoFocus = false, api: handle = null, onEscape = null }) {
     const [doc, setDoc] = useState(() => withBlock(parseBlocks(value)));
     const [editing, setEditing] = useState(null); // id of the block whose text is being edited (the others show formatted)
     // block mode: whole blocks selected (anchor .a, head .h: indices), the arrows move by block; armed: Backspace pressed once
@@ -670,7 +697,8 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
             return e.shiftKey ? selectBlocks(bsel.a, h) : selectBlocks(h);
         }
         if (key === "Home" || key === "End") { e.preventDefault(); const h = key === "Home" ? 0 : blocks.length - 1; return e.shiftKey ? selectBlocks(bsel.a, h) : selectBlocks(h); }
-        if (key === "Escape") { e.preventDefault(); e.stopPropagation(); setBsel(null); setArmed(false); page.current.blur(); return; }
+        // Escape in block mode leaves the editor: `onEscape` lets the page close it (the first Escape went to block mode)
+        if (key === "Escape") { e.preventDefault(); e.stopPropagation(); setBsel(null); setArmed(false); page.current.blur(); onEscape?.(); return; }
         if (key === "Enter" && e.shiftKey && !mod) {
             // a new paragraph after the selection, ready to type in
             e.preventDefault();
@@ -697,14 +725,25 @@ export function BlockEditor({ value, onChange, breaks = [], callouts = true, sce
         }
     };
     const armTimer = useRef();
-    const onPageCopy = (cut) => (e) => {
-        if (e.target !== page.current || !bsel) return;
+    // with whole blocks selected there is no text selection, so the browser sends copy / cut / paste to the document,
+    // not to the focused page: listen there while the page has the focus
+    const clip = useRef();
+    clip.current = { copy: (e) => onPageCopy(false)(e, true), cut: (e) => onPageCopy(true)(e, true), paste: (e) => onPagePaste(e, true) };
+    useEffect(() => {
+        if (!bsel) return;
+        const on = (type) => (e) => { if (document.activeElement === page.current && !e.defaultPrevented) clip.current[type](e); };
+        const handlers = ["copy", "cut", "paste"].map((t) => [t, on(t)]);
+        handlers.forEach(([t, f]) => document.addEventListener(t, f));
+        return () => handlers.forEach(([t, f]) => document.removeEventListener(t, f));
+    }, [!!bsel]);
+    const onPageCopy = (cut) => (e, fromDoc = false) => {
+        if ((!fromDoc && e.target !== page.current) || !bsel) return;
         e.preventDefault();
         e.clipboardData?.setData("text/plain", selectedMarkdown());
         if (cut) removeSelected();
     };
-    const onPagePaste = (e) => {
-        if (e.target !== page.current || !bsel) return;
+    const onPagePaste = (e, fromDoc = false) => {
+        if ((!fromDoc && e.target !== page.current) || !bsel) return;
         const pasted = (e.clipboardData?.getData("text/plain") ?? "").replace(/\s+$/, "");
         if (!pasted) return;
         e.preventDefault();

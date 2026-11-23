@@ -1,6 +1,6 @@
 {
   "name": "world-builder",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "description": "Local web app for novels in an Obsidian vault: worldbuilding data store, chapter ledgers, plans, world and map builder",
   "type": "module",

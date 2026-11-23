@@ -25,7 +25,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const PORT = 9400 + Math.floor(Math.random() * 400);
 const electron = fs.readdirSync("/usr/bin").filter((f) => /^electron\d*$/.test(f)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop();
 const app = spawn(`/usr/bin/${electron}`, ["--ozone-platform-hint=auto", ROOT, `--remote-debugging-port=${PORT}`, "--vault", vault], {
-    env: { ...process.env, WB_HIDDEN: "1", XDG_CONFIG_HOME: path.join(tmp, "conf") }, stdio: "ignore",
+    env: { ...process.env, WB_HIDDEN: "1", XDG_CONFIG_HOME: path.join(tmp, "conf"), XDG_DATA_HOME: path.join(tmp, "data") }, stdio: "ignore",
 });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 let page = null;

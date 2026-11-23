@@ -18,6 +18,7 @@ import { patchNote, trashNote, createNote } from "./lib/write.js";
 import { renderMarkdown } from "./lib/render.js";
 import { previewEntry } from "./lib/ledger-preview.js";
 import { Renamer } from "./lib/rename.js";
+import { Chapters } from "./lib/chapters.js";
 import { Search } from "./lib/search.js";
 import { Importer } from "./lib/importer.js";
 import { Docs } from "./lib/docs.js";
@@ -51,7 +52,7 @@ async function writeSettings(patch) {
 const VAULT_SOURCES = [["--vault", arg("vault")], ["settings", readSettings().vault], ["BOOKS_VAULT", process.env.BOOKS_VAULT]];
 const startSource = VAULT_SOURCES.find(([, v]) => v);
 // the AI assistant: its tools read the open vault's services
-const assistant = new Assistant({ settingsFile: SETTINGS_FILE, readSettings, writeSettings, ctx: () => ({ vault, novels, store, plans, worlds, search, stats }) });
+const assistant = new Assistant({ settingsFile: SETTINGS_FILE, readSettings, writeSettings, ctx: () => ({ vault, novels, store, plans, worlds, search, stats, chapters }) });
 // Claude Code: Novel Craft's MCP server, and the terminal it runs in (the AI tab); proposals it makes open in the app
 const mcp = new McpServer(assistant, { onProposal: (p) => { const msg = `event: proposal\ndata: ${JSON.stringify(p)}\n\n`; for (const res of clients) res.write(msg); } });
 const terminal = new Terminal();
@@ -61,7 +62,7 @@ for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.once(sig, () => { ter
 let listenPort = null;
 const isFolder = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
-let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, search, importer, assets, exporter;
+let vault = null, novels, blueprints, store, plans, stats, worlds, renamer, chapters, search, importer, assets, exporter;
 let vaultSource = null, vaultProblem = null, epoch = 0;
 const clients = new Set();
 const version = () => epoch * 1e9 + (vault?.version ?? 0);
@@ -79,6 +80,7 @@ async function openVault(dir, source) {
     stats = new Stats(vault, novels, store);
     worlds = new Worlds(vault, store);
     renamer = new Renamer(vault, store, worlds);
+    chapters = new Chapters(vault, novels, plans, renamer);
     search = new Search(vault, novels, store);
     assets = new Assets(vault, worlds);
     worlds.assets = assets;
@@ -130,6 +132,7 @@ const send = (res, status, body, type = "application/json") => {
 };
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const need = (v, what) => { if (v == null || v === "") throw fail(400, `Missing ${what}`); return v; };
+const chapterNo = (v) => { const n = Number(need(v, "chapter")); if (!Number.isFinite(n) || n < 0) throw fail(400, "Chapter must be a number"); return n; };
 const found = (v, what) => { if (v == null) throw fail(404, `${what} not found`); return v; };
 
 async function readBody(req, limit = 20 * 1024 * 1024) {
@@ -291,13 +294,25 @@ const routes = {
     "POST /api/taxonomy/facet": async ({ req }) => {
         const b = await json(req);
         const collection = await store.createFacet(need(b.name, "name"), { levels: !!b.levels, ordered: b.ordered !== false });
-        const paths = b.values?.length ? await store.addFacetValues(collection, b.values, { powerSystem: b.powerSystem }) : [];
+        const paths = b.values?.length ? await store.addFacetValues(collection, b.values, { powerSystem: b.powerSystem, powerSystems: b.powerSystems }) : [];
         return { collection, paths };
     },
     "POST /api/taxonomy/values": async ({ req }) => {
         const b = await json(req);
-        return { paths: await store.addFacetValues(need(b.collection, "collection"), b.values ?? [], { powerSystem: b.powerSystem }) };
+        return { paths: await store.addFacetValues(need(b.collection, "collection"), b.values ?? [], { powerSystem: b.powerSystem, powerSystems: b.powerSystems }) };
     },
+    // the power systems a facet's values belong to (several can share one set of levels)
+    "POST /api/taxonomy/systems": async ({ req }) => {
+        const b = await json(req);
+        return { changed: await store.setFacetSystems(need(b.collection, "collection"), b.systems ?? []) };
+    },
+    // one power system on or off a facet's values (others kept); `from`: the facet it leaves in the same step
+    "POST /api/taxonomy/system": async ({ req }) => {
+        const b = await json(req);
+        return { changed: await store.linkFacetSystem(need(b.collection, "collection"), need(b.system, "system"), { linked: b.linked !== false, from: b.from || null }) };
+    },
+    "GET /api/taxonomy/remove": async ({ q }) => store.facetRemoval(q.get("collection")),
+    "DELETE /api/taxonomy/facet": async ({ q }) => store.removeFacet(q.get("collection")),
     "POST /api/note": async ({ req }) => {
         const b = await json(req);
         return { path: await store.create(need(b.collection, "collection"), need(b.name, "name"), b.fm ?? {}, b.body ?? "") };
@@ -307,9 +322,11 @@ const routes = {
     "GET /api/rename": ({ q }) => renamer.preview(need(q.get("path"), "path")),
     "POST /api/rename": async ({ req }) => {
         const b = await json(req);
-        const r = await renamer.rename({ path: need(b.path, "path"), name: b.name, title: b.title, baseMtime: b.baseMtime });
+        chapters.checkRename(need(b.path, "path"), b.name);
+        const r = await renamer.rename({ path: b.path, name: b.name, title: b.title, baseMtime: b.baseMtime });
         if (r.renamed) await importer.renamed(b.path, r.path); // an imported note: later imports find it under its new name
         await plans.afterPatch(r.path);
+        await chapters.afterPatch(r.path, ["@name"]);
         return r;
     },
     "PATCH /api/note": async ({ req }) => {
@@ -318,9 +335,12 @@ const routes = {
         if (!vault.notes.has(p)) throw fail(404, "Note not found");
         const problems = stats.checkPatch(p, b.set ?? {});
         if (problems.length) throw fail(400, problems.join("\n"));
+        chapters.checkPatch(p, b);
+        const before = chapters.titleOf(p);
         const n = await patchNote(vault, p, { set: b.set ?? {}, unset: b.unset ?? [], body: b.body, baseMtime: b.baseMtime });
         await plans.afterPatch(p);
-        return { path: p, mtime: vault.notes.get(p)?.mtime ?? n.mtime };
+        const r = await chapters.afterPatch(p, [...Object.keys(b.set ?? {}), ...(b.unset ?? [])], before);
+        return { path: r.path, files: r.files, mtime: vault.notes.get(r.path)?.mtime ?? n.mtime };
     },
     "DELETE /api/note": async ({ q }) => {
         const p = need(q.get("path"), "path");
@@ -377,7 +397,7 @@ const routes = {
         const volume = plans.volumeOf(volumes, n);
         const nums = plans.chapters(novel).map((c) => c.number);
         return {
-            chapter, n, entries, copyAll: entries.map((e) => e.callout).join("\n\n"),
+            chapter, n, written: !!chapter && !!vault.notes.get(chapter.path)?.body.trim(), entries, copyAll: entries.map((e) => e.callout).join("\n\n"),
             plan: planNote ? { path: planNote.path, fm: planNote.fm, mtime: planNote.mtime } : null,
             volume: volume ? { path: volume.path, title: volume.title, label: plans.volumeLabel(volume) } : null,
             prev: nums.filter((x) => x < n).at(-1) ?? null, next: nums.find((x) => x > n) ?? null,
@@ -409,7 +429,7 @@ const routes = {
     "POST /api/write/chapter": async ({ req }) => {
         const b = await json(req);
         const novel = getNovel(b.novel);
-        const rel = await novels.createChapter(novel, Number(need(b.n, "chapter")), b.title ?? "");
+        const rel = await chapters.createChapter(novel, chapterNo(b.n), b.title ?? "");
         await plans.afterPatch(rel);
         return { path: rel };
     },
@@ -514,13 +534,22 @@ const routes = {
     "POST /api/textures": async ({ req }) => { const b = await json(req); return worlds.saveTextures(b.textures, b.baseMtime); },
     "POST /api/stamps": async ({ req, q }) => worlds.addStamp(need(q.get("filename"), "filename"), await readBody(req, 9 * 1024 * 1024), q.get("set") || "Pasted"),
     // ---- planning
-    "GET /api/plan": ({ q }) => plans.overview(getNovel(q.get("novel"))),
+    "GET /api/plan": ({ q }) => { const novel = getNovel(q.get("novel")); return { ...plans.overview(novel), archive: chapters.archive(novel) }; },
+    // a chapter's number (its note, plan and ledger entries together), and the archive
+    "GET /api/plan/renumber": ({ q }) => chapters.preview(getNovel(q.get("novel")), chapterNo(q.get("from")), q.get("to") === "" || q.get("to") == null ? NaN : Number(q.get("to")), { mode: q.get("mode") || null, ledgers: q.get("ledgers") !== "0" }),
+    "POST /api/plan/renumber": async ({ req }) => {
+        const b = await json(req);
+        return chapters.renumber(getNovel(b.novel), chapterNo(b.from), chapterNo(b.to), { mode: b.mode || null, ledgers: b.ledgers !== false });
+    },
+    "POST /api/plan/archive": async ({ req }) => { const b = await json(req); return chapters.archiveChapter(getNovel(b.novel), chapterNo(b.n)); },
+    "POST /api/plan/restore": async ({ req }) => { const b = await json(req); return chapters.restore(getNovel(b.novel), need(b.id, "id"), b.n == null || b.n === "" ? null : chapterNo(b.n)); },
+    "DELETE /api/plan/archive": async ({ q }) => chapters.remove(getNovel(q.get("novel")), need(q.get("id"), "id")),
     "POST /api/plan/chapter": async ({ req }) => {
         const b = await json(req);
-        const n = Number(need(b.n, "chapter"));
-        if (!Number.isFinite(n) || n < 0) throw fail(400, "Chapter must be a number");
-        return plans.saveChapterPlan(getNovel(b.novel), n, { set: b.set ?? {}, baseMtime: b.baseMtime });
+        return chapters.savePlan(getNovel(b.novel), chapterNo(b.n), { set: b.set ?? {}, baseMtime: b.baseMtime });
     },
+    // a plan made outside the app may have no chapter note yet: opening it makes one
+    "POST /api/plan/chapter-note": async ({ req }) => { const b = await json(req); return { path: await chapters.ensureNote(getNovel(b.novel), chapterNo(b.n)) }; },
     "POST /api/plan/volume": async ({ req }) => {
         const b = await json(req);
         const novel = getNovel(b.novel);

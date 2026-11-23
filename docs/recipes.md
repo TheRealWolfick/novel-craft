@@ -18,6 +18,6 @@ The recipe is saved as `Recipes/<Item> (Blueprint).md`, and the item links to it
 
 ## Build tree and bill of materials
 
-An item or blueprint page shows the **build tree** (every component down to raw materials) and the **bill of materials** for any number of units. **Copy callout** copies a blueprint callout for that count.
+The page of an item with a recipe, and of the recipe, has a **Build tree** section: every component down to raw materials, beside the total materials, the parts without a blueprint and the knowledge needed. **Build** sets the number of units, and **Copy callout** copies a blueprint callout for that count. An item without a recipe has no such section.
 
 Materials and items show **Used in**: every blueprint that needs them.

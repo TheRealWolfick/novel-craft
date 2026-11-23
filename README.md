@@ -18,7 +18,7 @@ The writer opens a chapter on the left while its plan and ledger entries stay on
 
 ### Plan books, volumes and chapters
 
-A grand plan per novel: volumes with their main plot and subplots, every chapter's outline, plot ideas graded on a board, and a scratchpad for loose ideas.
+A grand plan per novel: volumes with their main plot and subplots, every chapter's outline, plot ideas graded on a board, and a scratchpad for loose ideas. Renumber a chapter and its plan, ledger entries and links follow; set one aside in the archive and bring it back later.
 
 | Grand plan | Plot board |
 | --- | --- |
@@ -34,7 +34,11 @@ Ledgers record what a character gains, loses and learns in each chapter: invento
 
 ### Keep your world's encyclopedia
 
-Every collection (items, materials, recipes, creatures, races, factions, locations…) as filterable tables, with notes you edit in place, blocks of information you can add and reorder, and crafting blueprints with their bill of materials.
+Every collection (items, materials, recipes, creatures, races, factions, locations…) as filterable tables, with notes that read like documents and are edited in place, blocks of information you can add and reorder, and crafting blueprints with their bill of materials. A column beside each note links its family: what teaches an ability, a race's lineage, the ranks of a ladder, a volume's plots.
+
+| An item's page | What teaches an ability |
+| --- | --- |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/note-item.dark.png"><img alt="An item's page" src="docs/img/note-item.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/teaching.dark.png"><img alt="Teaching column" src="docs/img/teaching.png"></picture> |
 
 | Collections | A note in the side drawer |
 | --- | --- |
@@ -161,6 +165,7 @@ Keep using Obsidian for writing notes freely; open Novel Craft when you want str
 │   ├── Ledgers/                    "<Owner> - <Ledger type>.md" (made by the app)
 │   ├── Creatures/                  per-novel creature stat notes (optional)
 │   ├── Plots/                      plot ideas
+│   ├── Archive/                    archived chapters and their plans (made by the app)
 │   └── Plan/
 │       ├── Book Plan/              volumes
 │       └── Chapter Plans/          "Plan 014 (<Novel>).md"

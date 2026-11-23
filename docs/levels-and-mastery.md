@@ -7,7 +7,7 @@ blurb: 'Cultivation realms, ranks or weapon mastery: levels with numbers, worked
 ---
 A level system is a ladder of named steps that a character climbs: cultivation realms and their stages, adventurer ranks, mastery of a sword art. In Novel Craft it has three parts:
 
-1. **The levels** are values of a [taxonomy](docs:collections#taxonomies), each with a number: the lowest value of a stat that reaches it. They can belong to a power system.
+1. **The levels** are values of a [taxonomy](docs:collections#taxonomies), each with a number: the lowest value of a stat that reaches it. They can belong to one or several power systems.
 2. **A stat template** has a number field (qi, experience, mastery points) and a choice field that **follows** it: the level is worked out from the number.
 3. **Stats entries** in the ledger change the number (a reward of `+50` qi), and the level follows, chapter by chapter.
 
@@ -18,7 +18,7 @@ The example below builds cultivation for a novel where Wade's realm and stage de
 In the sidebar, open **Taxonomy** and click **+ New taxonomy** at the bottom of the list.
 
 - **Name**: *Cultivation Levels*.
-- Tick **levels with a number each**, and choose the power system they belong to under **Levels of the power system** (*Cultivation*). This adds `threshold` and `power-system` to every value.
+- Tick **levels with a number each**, and choose the power systems they belong to under **Levels of the power systems** (*Cultivation*). This adds `threshold` and `power-system` to every value.
 - Paste the levels, one per line, highest last:
 
 ```
@@ -40,6 +40,14 @@ Type each level's **number** in the preview table, or write it on the line: `Gol
 > **Add several…** on the taxonomy's page adds more values the same way; they rank after the existing ones. **New** adds a single value. Every value is an ordinary note: change its `threshold`, `class` or title on its page.
 
 The power system's page (*Cultivation*) now lists its **Levels**, with sub-levels indented and their numbers.
+
+### Sharing levels between power systems
+
+*Demonic Cultivation* climbs the same ladder as *Cultivation*. On its page, under **Levels**, choose the taxonomy in **Use levels from**: every level now names both systems. Nothing is inherited from a parent system, so another offshoot can have levels of its own.
+
+- **Change** swaps a system's taxonomy for another in one step.
+- **Stop using** takes this system off the levels; the others keep them.
+- Any taxonomy can be chosen. One made without numbers gets a `threshold` and a `power-system` when a system starts to use it.
 
 ![A power system's levels, sub-levels indented, with the number each starts from](img/power-levels.png)
 
@@ -80,7 +88,7 @@ Setting a level while it is unlinked changes only the level.
 
 Saved, the entry's callout reads like `- stats/qi: +50` (or `- stats/stage: Golden Core Early (unlinked)`), the character sheet gets the new qi, realm and stage, and the stats panel on the owner page shows them at any chapter: move the **chapter** slider to see when Wade reached Foundation Establishment.
 
-The [assistant](docs:ai-assistant) writes the same lines: `{set: "qi", add: 50}` for a reward, `{set: "stage", value: "Golden Core Early"}` for a breakthrough, `{set: "stage", link: "off"}` to unlink.
+The [assistant](docs:ai-assistant) writes the same lines: `{set: "qi", add: 50}` for a reward, `{set: "stage", value: "Golden Core Early"}` for a breakthrough, `{set: "stage", link: "off"}` to unlink. It can also propose the levels themselves: a new taxonomy with its values, more values, and which power systems use them.
 
 ## Mastery and other ladders
 

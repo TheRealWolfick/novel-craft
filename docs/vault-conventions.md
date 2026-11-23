@@ -10,7 +10,7 @@ blurb: 'Folders, unique names, taxonomy links and the schema: the rules the app 
 
 | Folder | Holds |
 | --- | --- |
-| `1. <Novel>/` … `19. <Novel>/` | A novel: `config.md`, `Chapters/`, `Characters/`, `Ledgers/`, `Plan/`, `Plots/` |
+| `1. <Novel>/` … `19. <Novel>/` | A novel: `config.md`, `Chapters/`, `Characters/`, `Ledgers/`, `Plan/`, `Plots/`, `Archive/` (archived chapters and their plans) |
 | `80. Global Data Store/<Collection>/` | Shared notes, one flat folder per collection |
 | `80. Global Data Store/Taxonomy/<Facet>/` | Category values |
 | `80. Global Data Store/_Attachments/` | Images, `Maps/`, `Map Stamps/`, `Map Blueprints/` |
@@ -19,8 +19,9 @@ blurb: 'Folders, unique names, taxonomy links and the schema: the rules the app 
 ## Rules
 
 - **Collections are flat.** Sub-categories are fields, never sub-folders (Obsidian Bases select rows by folder).
-- **Categories are links to taxonomy notes**: `rarity: "[[rare]]"`, `genre: ["[[Steampunk]]"]`. A new category is a new note in `Taxonomy/<Facet>/`. Taxonomy notes can have a `parent`, and ranked facets (Rarity, Location Scales…) have `ordered: true` and a `class`. A new taxonomy (facet) is an entry in the schema plus its folder: **+ New taxonomy** in the sidebar makes both ([Taxonomies](docs:collections#taxonomies)).
+- **Categories are links to taxonomy notes**: `rarity: "[[rare]]"`, `genre: ["[[Steampunk]]"]`. A new category is a new note in `Taxonomy/<Facet>/`. Taxonomy notes can have a `parent`, and ranked facets (Rarity, Location Scales…) have `ordered: true` and a `class`. Levels have a `threshold` and a `power-system`: one link, or a list when several power systems share them. A new taxonomy (facet) is an entry in the schema plus its folder: **+ New taxonomy** in the sidebar makes both ([Taxonomies](docs:collections#taxonomies)).
 - **Note names are unique across the vault**, ignoring case, because Obsidian links by name. A clash gets a label: `Good (Rating)`, `Good (Item Condition)`. The display name is the `title` field.
+- **Chapters and plans** belong together by number: `Chapters/014 - Title.md` and `Plan/Chapter Plans/Plan 014 (<Novel>).md`, with one title (`chapter title` and `title`). Every plan has a chapter note, empty until it's written. A live and an archived chapter never share number and title.
 - **Locations** form a tree through `parent` and belong to a world through `world`; their `scale` links to `Taxonomy/Location Scales`.
 - **Field order and defaults** come from `90. Templater/Data Store Schema.md`. Edit it to add fields or collections.
 
@@ -33,4 +34,4 @@ blurb: 'Folders, unique names, taxonomy links and the schema: the rules the app 
 | `scene-break` | The writer's default scene break image |
 | `ledger-types` | Extra ledger types or callout templates for this novel |
 | `stat-templates` | Stat templates (made on the Stats tab) |
-| `characters-folder`, `chapters-folder`, `ledgers-folder`, `volumes-folder`, `chapter-plans-folder`, `plots-folder`, `creatures-folder`, `scratchpad` | Other folder or note names |
+| `characters-folder`, `chapters-folder`, `ledgers-folder`, `volumes-folder`, `chapter-plans-folder`, `plots-folder`, `creatures-folder`, `archive-folder`, `scratchpad` | Other folder or note names |

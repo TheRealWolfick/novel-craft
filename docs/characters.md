@@ -29,7 +29,7 @@ The column beside it starts with a **chapter slider**. Below it, at that chapter
 
 `relations/friendly`, `relations/neutral` and `relations/hostile` come from the character's [Relationships ledger](docs:ledgers#relationships); they are on the **Links & more** tab with the other fields the ledgers write.
 
-Below the fields, the body's `## Bio`, `### Appearance` and other sections are [blocks](docs:notes-and-blocks) you can edit, move and add to.
+Below the fields, the body's `## ` sections are [blocks](docs:notes-and-blocks) you can edit, move and add to (**+ Block** in the header).
 
 Fields the ledgers manage (inventory, stat values) are read-only on the sheet: they come from the [ledgers](docs:ledgers) and are written back when entries are saved. **Sync sheets** on the novel page refreshes every sheet at once.
 

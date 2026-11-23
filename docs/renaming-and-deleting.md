@@ -16,10 +16,12 @@ When a note is renamed:
 - a location's map file is renamed with it;
 - an imported note keeps its place in the import record, so later imports still find it.
 
-The new name must not be used by another note anywhere in the vault. Config, ledger and `90. Templater/` notes can't be renamed here.
+The new name must not be used by another note anywhere in the vault. Config, ledger and `90. Templater/` notes can't be renamed here. A chapter's file follows its title and number, which are changed on its [plan](docs:planning#change-a-chapter-s-number).
 
 ## Deleting
 
 **Delete** (two clicks) moves the note to the vault's `.trash/` folder, the same as Obsidian's trash. Links to it are left as they are and show as unresolved. Config, ledger and `90. Templater/` notes can't be deleted here.
+
+A whole taxonomy is deleted from its page ([Taxonomies](docs:collections#taxonomies)). To put a chapter aside without deleting it, [archive it](docs:planning#archive-a-chapter) with its plan.
 
 > [!tip] To bring a note back, move it out of `.trash/` in your file manager or in Obsidian.

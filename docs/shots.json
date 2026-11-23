@@ -81,7 +81,8 @@
  },
  {
   "name": "item-blueprint",
-  "hash": "#/note/80.%20Global%20Data%20Store%2FItems%2FSignal%20Lantern.md"
+  "hash": "#/note/80.%20Global%20Data%20Store%2FItems%2FSignal%20Lantern.md",
+  "do": "$(\".np-build-sec\")?.scrollIntoView({block:\"start\"}); scrollBy(0, -70); await w(400);"
  },
  {
   "name": "drawer-lookup",
@@ -167,6 +168,43 @@
  },
  {
   "name": "power-levels",
-  "hash": "#/note/80.%20Global%20Data%20Store%2FPower%20Systems%2FEmberwork.md"
+  "hash": "#/note/80.%20Global%20Data%20Store%2FPower%20Systems%2FEmberwork.md",
+  "do": "$(\".power-levels\")?.scrollIntoView({block:\"start\"}); scrollBy(0, -70); await w(400);"
+ },
+ {
+  "name": "note-item",
+  "hash": "#/note/80.%20Global%20Data%20Store%2FItems%2FLamplighter's%20Primer.md"
+ },
+ {
+  "name": "teaching",
+  "hash": "#/note/80.%20Global%20Data%20Store%2FAbilities%2FEmber%20Step.md"
+ },
+ {
+  "name": "race-lineage",
+  "hash": "#/note/80.%20Global%20Data%20Store%2FRaces%2FDustborn.md"
+ },
+ {
+  "name": "taxonomy-ranks",
+  "hash": "#/note/80.%20Global%20Data%20Store%2FTaxonomy%2FEmber%20Ranks%2FKindled%20Low.md"
+ },
+ {
+  "name": "volume",
+  "hash": "#/note/1.%20Ashfall%20Road%2FPlan%2FBook%20Plan%2FThe%20Long%20Haul.md",
+  "do": "[...$$(\"main .np-sec\")].find(s => s.querySelector(\"h2\")?.textContent === \"Main plot\")?.scrollIntoView({block:\"start\"}); scrollBy(0, -90); await w(500);"
+ },
+ {
+  "name": "note-edit",
+  "hash": "#/note/80.%20Global%20Data%20Store%2FItems%2FLamplighter's%20Primer.md",
+  "do": "$(\"main button[aria-label='Edit Description']\").click(); await w(700); const t = $(\".np-sec-blocks textarea\"); t.focus(); t.value += \" She added her own.\"; t.dispatchEvent(new Event(\"input\", {bubbles:true})); await w(500);"
+ },
+ {
+  "name": "chapter-number",
+  "hash": "#/chapter/1.%20Ashfall%20Road/2",
+  "do": "btn(\"Change number\", $(\"main\")).click(); await w(200); type($(\"main .chapter-renumber input\"), \"4\"); await w(800); btn(\"Make room\", $(\"main\")).click(); await w(800);"
+ },
+ {
+  "name": "chapter-archive",
+  "hash": "#/novel/1.%20Ashfall%20Road",
+  "do": "btn(\"Grand plan\").click(); await w(600); const a = $(\"main .archive\"); a.open = true; a.scrollIntoView({block:\"center\"}); await w(500);"
  }
 ]

@@ -2,7 +2,7 @@
 // its workspace (lib/claude-code.js). Output arrives as server-sent events, keys go back in order. While it runs, the
 // page tells the server what is on screen, for Claude Code's current_view tool.
 import { h } from "preact";
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import htm from "htm";
 import { api, toast, openInDrawer } from "./app.js";
 import { screenView, ago } from "./ai.js";
@@ -128,13 +128,15 @@ export function readScreen(rows, { msgBg = null } = {}) {
  * The layer over the terminal: bubbles on your messages, a cover over Claude Code's own input area (you type in the box
  * below instead), and questions as a card with the choices as buttons. Claude Code runs full screen and redraws as it
  * likes, so after every redraw (next animation frame) the visible rows are read again (readScreen).
- * on: {sent() -> your messages, choose(i, prompt), answer(i), cancel(), state({menu, prompt})}
+ * on: {sent() -> your messages, choose(i, prompt), answer(i), cancel(), state({menu, prompt}), link(target)}
+ * `into`: the element to lay it over (default the terminal's own screen; the other drawer's copy passes its mirror of the
+ * screen, laid out on the same grid). Returns a function that takes it away again.
  */
 const norm = (x) => x.replace(/\s+/g, " ").trim();
 const TYPED = /^(type something|other|something else)\b/i;
-function overlay(t, on) {
-    const screen = t.element?.querySelector(".xterm-screen");
-    if (!screen) return;
+function overlay(t, on, into = null) {
+    const screen = into ?? t.element?.querySelector(".xterm-screen");
+    if (!screen) return () => {};
     const layer = Object.assign(document.createElement("div"), { className: "term-bubbles" });
     screen.append(layer);
     // the mouse over the card and the cover stays there: Claude Code follows the mouse (hovering would move its
@@ -265,12 +267,11 @@ function overlay(t, on) {
             Object.assign(b.style, { fontSize: `${size}px`, lineHeight: `${lh}px` });
         }
     };
-    let queued = false;
-    const soon = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; draw(); }); } };
-    t.onWriteParsed(soon);
-    t.onScroll(soon);
-    t.onResize(soon);
-    t.onRender(soon);
+    let queued = false, gone = false;
+    const soon = () => { if (!queued && !gone) { queued = true; requestAnimationFrame(() => { queued = false; if (!gone) draw(); }); } };
+    const subs = [t.onWriteParsed(soon), t.onScroll(soon), t.onResize(soon), t.onRender(soon)];
+    soon();
+    return () => { gone = true; subs.forEach((d) => d?.dispose?.()); layer.remove(); };
 }
 
 /** A clicked [[link]] or path: the note in the drawer's viewer */
@@ -295,26 +296,96 @@ const ownerListeners = new Set();
 const claimTerminal = (who) => { if (T.owner === who) return; T.owner = who; ownerListeners.forEach((f) => f(who)); };
 const each = (k) => (...a) => copies.forEach((c) => c.current[k]?.(...a));
 const ownerDoes = (k) => (...a) => T.owner?.current[k]?.(...a);
-T.ui = { setRunning: each("setRunning"), setExit: each("setExit"), setStatus: each("setStatus"), state: each("state"), answer: ownerDoes("answer"), focus: ownerDoes("focus") };
+T.ui = { setRunning: each("setRunning"), setExit: each("setExit"), setStatus: each("setStatus"), setSession: each("setSession"), state: each("state"), answer: ownerDoes("answer"), focus: ownerDoes("focus") };
 
-/** The terminal's screen as text, for the copy of the AI tab that doesn't hold the terminal (updated as output arrives) */
-function TermMirror() {
+// xterm.js's default 16 colours (the terminal keeps them; only its background, text and cursor follow the app's theme)
+const ANSI = ["#2e3436", "#cc0000", "#4e9a06", "#c4a000", "#3465a4", "#75507b", "#06989a", "#d3d7cf", "#555753", "#ef2929", "#8ae234", "#fce94f", "#729fcf", "#ad7fa8", "#34e2e2", "#eeeeec"];
+const LEVELS = [0, 95, 135, 175, 215, 255];
+const hex = (n) => `#${n.toString(16).padStart(6, "0")}`;
+const palette = (i) => (i < 16 ? ANSI[i] : i < 232 ? `rgb(${LEVELS[Math.floor((i - 16) / 36)]},${LEVELS[Math.floor((i - 16) / 6) % 6]},${LEVELS[(i - 16) % 6]})` : `rgb(${8 + (i - 232) * 10},${8 + (i - 232) * 10},${8 + (i - 232) * 10})`);
+const fgOf = (c) => (c.isFgRGB() ? hex(c.getFgColor()) : c.isFgPalette() ? palette(c.getFgColor()) : null);
+const bgOf = (c) => (c.isBgRGB() ? hex(c.getBgColor()) : c.isBgPalette() ? palette(c.getBgColor()) : null);
+const MIRROR_FONT = 13.5, MIRROR_ROW = Math.ceil(13.5 * 1.3);
+let mirrorCellW = 0;
+const cellWidth = () => {
+    if (mirrorCellW) return mirrorCellW;
+    const probe = Object.assign(document.createElement("span"), { textContent: "M".repeat(100) });
+    Object.assign(probe.style, { font: `${MIRROR_FONT}px ${cssVar("--mono", "monospace")}`, position: "absolute", visibility: "hidden", whiteSpace: "pre" });
+    document.body.append(probe);
+    mirrorCellW = probe.getBoundingClientRect().width / 100 || MIRROR_FONT * 0.6;
+    probe.remove();
+    return mirrorCellW;
+};
+
+/**
+ * The terminal as the copy of the AI tab that doesn't hold it shows it: the screen drawn again from xterm's buffer on
+ * the same grid (rows and columns, colours, bold, italic), scaled to fit, with the same overlay on top (bubbles, the
+ * cover, question cards, [[links]]), so both drawers look the same. `on`: this copy's overlay handlers.
+ */
+function TermMirror({ on }) {
     const [, tick] = useState(0);
+    const host = useRef(null), screen = useRef(null);
+    const [fitTo, setFitTo] = useState({ k: 1, y: 0 });   // scale, and how far up it moves when this pane is shorter
+    const t = T.term;
     useEffect(() => {
-        const t = T.term;
         if (!t) return;
         let raf = 0;
         const later = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; tick((x) => x + 1); }); };
         const subs = [t.onWriteParsed?.(later), t.onResize?.(later), t.onScroll?.(later)].filter(Boolean);
         return () => { subs.forEach((d) => d.dispose()); cancelAnimationFrame(raf); };
-    }, [T.term]);
-    const t = T.term;
+    }, [t]);
+    // the overlay reads the same buffer and lays itself over this screen
+    const onRef = useRef(on);
+    onRef.current = on;
+    useEffect(() => {
+        if (!t || !screen.current) return;
+        return overlay(t, { sent: () => T.sent, state: () => {}, choose: (...a) => onRef.current.choose(...a), answer: (i) => onRef.current.answer(i), cancel: () => onRef.current.cancel(), link: (x) => openLink(x) }, screen.current);
+    }, [t]);
+    // the real terminal's cell size (measured while it shows; kept for when its drawer is hidden), so the copy is laid
+    // out exactly like it, at the same size
+    const real = t?.element?.querySelector(".xterm-screen");
+    if (real?.offsetHeight && t.rows) T.cell = { w: real.offsetWidth / t.cols, h: real.offsetHeight / t.rows };
+    const cellW = T.cell?.w ?? cellWidth(), rowH = T.cell?.h ?? MIRROR_ROW;
+    const w = (t?.cols ?? 80) * cellW, h = (t?.rows ?? 24) * rowH;
+    // full size and from the top, like the real terminal (which fits whole rows from the top and leaves what is left
+    // at the bottom); in a shorter pane it moves up so the newest rows stay in view; smaller only when the other
+    // terminal is wider than this drawer
+    useLayoutEffect(() => {
+        const el = host.current;
+        if (!el) return;
+        const fitIt = () => {
+            const k = Math.min(1, el.clientWidth / w) || 1, y = Math.min(0, el.clientHeight - h * k);
+            setFitTo((f) => (Math.abs(f.k - k) < 0.001 && Math.abs(f.y - y) < 0.5 ? f : { k, y }));
+        };
+        fitIt();
+        const ro = typeof ResizeObserver === "function" ? new ResizeObserver(fitIt) : null;
+        ro?.observe(el);
+        return () => ro?.disconnect();
+    }, [w, h]);
     if (!t) return html`<div class="term-mirror muted">Starting…</div>`;
     const b = t.buffer.active;
     const rows = [];
-    for (let y = 0; y < t.rows; y++) rows.push(b.getLine(b.viewportY + y)?.translateToString(true) ?? "");
-    while (rows.length && !rows.at(-1).trim()) rows.pop();
-    return html`<pre class="term-mirror" aria-label="Claude Code (mirror)">${rows.join("\n")}</pre>`;
+    const cell = b.getNullCell?.();
+    for (let y = 0; y < t.rows; y++) {
+        const line = b.getLine(b.viewportY + y);
+        const runs = [];
+        if (line) {
+            let cur = null;
+            for (let x = 0; x < t.cols; x++) {
+                const c = line.getCell(x, cell);
+                if (!c || c.getWidth() === 0) continue;   // the second half of a wide character
+                let fg = fgOf(c), bg = bgOf(c);
+                if (c.isInverse()) [fg, bg] = [bg ?? "var(--panel)", fg ?? "var(--text)"];
+                const style = `${fg ? `color:${fg};` : ""}${bg ? `background:${bg};` : ""}${c.isBold() ? "font-weight:700;" : ""}${c.isItalic() ? "font-style:italic;" : ""}${c.isDim() ? "opacity:.6;" : ""}${c.isUnderline() ? "text-decoration:underline;" : ""}${c.isInvisible() ? "visibility:hidden;" : ""}`;
+                const ch = c.getChars() || " ";
+                if (cur && cur.style === style) cur.text += ch; else runs.push(cur = { style, text: ch });
+            }
+        }
+        rows.push(html`<div class="term-mirror-row" key=${y}>${runs.map((r, i) => (r.style ? html`<span key=${i} style=${r.style}>${r.text}</span>` : r.text))}</div>`);
+    }
+    return html`<div class="term-mirror" ref=${host} aria-label="Claude Code (a copy of the terminal in the other drawer)">
+        <div class="term-mirror-screen" ref=${screen} style=${`width:${w}px;height:${h}px;transform:translateY(${fitTo.y}px) scale(${fitTo.k});font-size:${MIRROR_FONT}px;--row:${rowH}px`}>${rows}</div>
+    </div>`;
 }
 async function flushKeys() {
     const qd = T.queue;
@@ -339,7 +410,8 @@ function connect() {
         T.id = s.id; T.received = s.from;
         T.ui.setRunning?.(s.running); T.ui.setExit?.(s.exit);
     });
-    es.addEventListener("start", (e) => { T.id = JSON.parse(e.data).id; T.received = 0; t.reset(); });
+    // a session started (by either copy of the AI tab, or after a restart): every copy shows it running
+    es.addEventListener("start", (e) => { T.id = JSON.parse(e.data).id; T.received = 0; t.reset(); T.ui.setRunning?.(true); T.ui.setExit?.(null); });
     es.onmessage = (e) => {
         const bin = atob(e.data); const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -451,7 +523,7 @@ export function ClaudeTerminal({ active }) {
     const live = owner === me;
     // what the app-level terminal tells this tab
     me.current = {
-        setRunning, setExit, setStatus,
+        setRunning, setExit, setStatus, setSession,
         state: ({ menu: m, prompt: p }) => {
             setMenu((was) => (was === m ? was : m));
             promptRef.current = p;
@@ -510,7 +582,8 @@ export function ClaudeTerminal({ active }) {
             const t = term.current;
             try { fit.current?.fit(); } catch { /* hidden */ }
             await api.send("POST", "/api/terminal/start", { cols: t?.cols ?? 100, rows: t?.rows ?? 30, resume, restart: running });
-            setRunning(true); setExit(null); setSession(resume || null);
+            // every copy of the tab, not only this one (the other drawer would still offer "Start Claude Code")
+            T.ui.setRunning(true); T.ui.setExit(null); T.ui.setSession(resume || null);
             t?.focus();
         } catch (e) { setError(e.message); }
         setTimeout(() => { T.starting = false; }, 300);
@@ -571,7 +644,9 @@ export function ClaudeTerminal({ active }) {
         <p class="muted">The AI tab runs Claude Code, signed in with your own Claude subscription. Install it (see <a href="https://code.claude.com/docs" target="_blank" rel="noopener">Anthropic's Claude Code docs</a>), sign in once by running <code>claude</code> in a terminal, then come back here.</p>
         <p class="muted small">Or use the API chat instead: Settings → AI assistant.</p>
         <a class="button" href="#/settings?s=ai" data-page>Open Settings</a></div></div>`;
-    return html`<div class="ai-term">
+    // the copy you use takes the terminal (with its bubbles, cards and links): a click or the focus anywhere in it, not
+    // only opening its tab, so with the AI tab open in both drawers the one you work in is never the plain-text mirror
+    return html`<div class="ai-term" onPointerDownCapture=${() => claimTerminal(me)} onFocusInCapture=${() => claimTerminal(me)}>
         <div class="ai-head">
             <span class="muted small">Claude Code · your subscription${running ? "" : exit ? " · ended" : ""}</span>
             <span class="grow" />
@@ -588,7 +663,7 @@ export function ClaudeTerminal({ active }) {
         </div>`}
         <div class="term-wrap" ref=${wrap}>
             ${live ? html`<div class="term-host" ref=${host} />` : html`<div class="term-host term-mirror-host">
-                <${TermMirror} />
+                <${TermMirror} on=${{ choose: (i, p) => { const d = i - p.cur; typeKeys((d > 0 ? "\x1b[B" : "\x1b[A").repeat(Math.abs(d)) + "\r"); box.current?.focus(); }, answer: (i) => { setAnswering(i); box.current?.focus(); }, cancel: () => { typeKeys("\x1b"); box.current?.focus(); } }} />
                 <button class="small term-takeover" onClick=${() => claimTerminal(me)} title="The terminal is showing in the other drawer; this is a live copy">Use the terminal here</button>
             </div>`}
             ${running && menu && html`<button class="term-close" title="Close this screen (Escape)" onClick=${() => { type("\x1b"); setMenu(false); box.current?.focus(); }}>✕ Close</button>`}

@@ -19,7 +19,10 @@ globalThis.addEventListener = w.addEventListener.bind(w);
 globalThis.removeEventListener = w.removeEventListener.bind(w);
 const realFetch = globalThis.fetch;
 globalThis.fetch = (u, o) => realFetch(new URL(u, BASE), o);
-globalThis.EventSource = class { };
+// no live stream in jsdom: tests that change files and need the page's data refetched call vaultChanged()
+globalThis.EventSource = class { constructor() { globalThis.__events = this; } };
+let fakeVersion = 1e6;
+const vaultChanged = () => globalThis.__events?.onmessage?.({ data: JSON.stringify({ version: ++fakeVersion }) });
 w.console.error = console.error = (...a) => errors.push(a.map(String).join(" "));
 process.on("unhandledRejection", (e) => errors.push(`unhandled: ${e?.stack ?? e}`));
 
@@ -171,13 +174,13 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     await wait(600);
     doc.querySelector("main table a[href^='#/note/']").dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
     await wait(700);
-    const strip = () => [...doc.querySelectorAll(".drawer .class-strip a")];
-    check(strip().length === 6 && strip().map((a) => +a.querySelector(".rank").textContent).join() === "1,2,3,4,5,6" && doc.querySelectorAll(".drawer .class-strip a.on").length === 1,
+    const strip = () => [...doc.querySelectorAll(".drawer .np-side .np-hier .np-pill")];
+    check(!doc.querySelector(".drawer .class-strip") && strip().length === 6 && strip().map((a) => +a.querySelector(".np-rank").textContent).join() === "1,2,3,4,5,6" && doc.querySelectorAll(".drawer .np-hier .np-pill.on").length === 1,
         "ranked taxonomy note shows its classes in order", strip().map((a) => a.textContent).join(" | "));
     const next = strip().find((a) => !a.classList.contains("on"));
     next.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
     await wait(700);
-    check(doc.querySelector(".drawer .class-strip a.on")?.textContent === next.textContent && !!doc.querySelector(".drawer .np-note .np-props"),
+    check(doc.querySelector(".drawer .np-hier .np-pill.on")?.textContent === next.textContent && !!doc.querySelector(".drawer .np-note .np-props"),
         "clicking a class opens it in the drawer with its summary");
     doc.querySelector(".drawer-tabs button[title^='Collapse']").click();
     await wait(300);
@@ -193,10 +196,12 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     const ta = descSec.querySelector("textarea");
     ta.value = "Smoke test description"; ta.dispatchEvent(new w.Event("input", { bubbles: true }));
     await wait(100);
-    saveBtn().click();
+    const secSave = [...descSec.querySelectorAll(".np-sec-actions button")].find((b) => b.textContent.trim() === "Save");
+    check(!!secSave && !!saveBtn()?.disabled, "a section's edit is saved from under the section, not the bottom bar");
+    secSave?.click();
     await wait(1000);
     const text = fs.readFileSync(`${COPY}/${note.path}`, "utf8");
-    check(text.includes("Smoke test description") && saveBtn()?.disabled, "editing a note saves only through Save changes");
+    check(text.includes("Smoke test description") && saveBtn()?.disabled && !descSec.querySelector(".np-sec-actions"), "editing a note saves only through Save");
 }
 // planning: grand plan, chapters in the drawer with the outline editor, plots by grade
 {
@@ -217,7 +222,7 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
         tab("Grand plan").click();
         await wait(300);
         const vols = doc.querySelectorAll("section.volume");
-        check(vols.length >= plan.volumes.length && doc.querySelectorAll(".chapter-row").length === plan.chapters.length, "grand plan lists volumes and chapters",
+        check(vols.length >= plan.volumes.length && doc.querySelectorAll(".chapter-row:not(.archived-chapter)").length === plan.chapters.length, "grand plan lists volumes and chapters",
             `${vols.length} volumes, ${doc.querySelectorAll(".chapter-row").length} rows / ${plan.chapters.length}`);
 
         // a chapter with a planned outline of a few events
@@ -454,6 +459,74 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
         "a new taxonomy goes into the schema, and its values are notes with parent, rank, number and power system", JSON.stringify(made).slice(0, 300) + late);
     const again = await sendJ("POST", "/api/taxonomy/facet", { name: "wb levels" });
     check(again.status === 409, "a taxonomy name can't be used twice");
+    // one set of levels shared by two power systems (a cultivation and its demonic offshoot)
+    if (ps) {
+        fs.writeFileSync(`${COPY}/80. Global Data Store/Power Systems/WB Demonic Path.md`, "---\ntitle: WB Demonic Path\ntype: power-system\n---\n");
+        await wait(800);
+        const set = await sendJ("POST", "/api/taxonomy/systems", { collection: "Taxonomy/WB Levels", systems: [ps.name, "WB Demonic Path"] });
+        const lateNow = fs.readFileSync(`${COPY}/80. Global Data Store/Taxonomy/WB Levels/WB Tier Late.md`, "utf8");
+        check(set.status === 200 && set.changed.length === 7 && lateNow.includes(`- "[[${ps.name}]]"`) && lateNow.includes('- "[[WB Demonic Path]]"'),
+            "a taxonomy's levels can belong to several power systems", lateNow);
+        const bad = await sendJ("POST", "/api/taxonomy/systems", { collection: "Taxonomy/WB Levels", systems: ["No Such System 123"] });
+        check(bad.status === 400, "an unknown power system is refused");
+        // one system off, the other kept; then changed over to another taxonomy in one step
+        const tier = () => fs.readFileSync(`${COPY}/80. Global Data Store/Taxonomy/WB Levels/WB Tier Late.md`, "utf8");
+        const off = await sendJ("POST", "/api/taxonomy/system", { collection: "Taxonomy/WB Levels", system: "WB Demonic Path", linked: false });
+        check(off.status === 200 && !tier().includes("WB Demonic Path") && tier().includes(`[[${ps.name}]]`), "unlinking one power system keeps the other", tier());
+        await sendJ("POST", "/api/taxonomy/facet", { name: "WB Demonic Levels", levels: true, values: [{ name: "WB Demon Rank", title: "WB Demon Rank" }] });
+        await sendJ("POST", "/api/taxonomy/system", { collection: "Taxonomy/WB Levels", system: "WB Demonic Path" });
+        const sw = await sendJ("POST", "/api/taxonomy/system", { collection: "Taxonomy/WB Demonic Levels", system: "WB Demonic Path", from: "Taxonomy/WB Levels" });
+        const demon = fs.readFileSync(`${COPY}/80. Global Data Store/Taxonomy/WB Demonic Levels/WB Demon Rank.md`, "utf8");
+        check(sw.status === 200 && demon.includes("[[WB Demonic Path]]") && !tier().includes("WB Demonic Path") && tier().includes(`[[${ps.name}]]`),
+            "changing a power system's taxonomy links the new one and unlinks the old, other systems untouched", demon + tier());
+        // a taxonomy made without "levels" (no power-system field) becomes levels when a power system uses it
+        await sendJ("POST", "/api/taxonomy/facet", { name: "WB Plain Ranks", values: [{ name: "WB Plain One", title: "WB Plain One" }] });
+        const plainLink = await sendJ("POST", "/api/taxonomy/system", { collection: "Taxonomy/WB Plain Ranks", system: ps.name });
+        const sch = JSON.parse(fs.readFileSync(`${COPY}/90. Templater/Data Store Schema.md`, "utf8").match(/```json\n([\s\S]*?)\n```/)[1]).collections["Taxonomy/WB Plain Ranks"];
+        check(plainLink.status === 200 && sch.fields.some(([k]) => k === "power-system") && sch.fields.some(([k]) => k === "threshold") && sch.links["power-system"] === "Power Systems"
+            && fs.readFileSync(`${COPY}/80. Global Data Store/Taxonomy/WB Plain Ranks/WB Plain One.md`, "utf8").includes(`[[${ps.name}]]`),
+            "linking a plain taxonomy to a power system makes it levels (schema fields) and links its values", JSON.stringify(sch));
+        const rm = await get(`/api/taxonomy/remove?collection=${encodeURIComponent("Taxonomy/Rarity")}`);
+        check(rm.required?.length > 0 && rm.blocked, "a required taxonomy can't be removed (the preview says what uses it)", JSON.stringify(rm.required));
+        // required ones stay whatever asks: the app / Templater (Item Condition), plans (Rating), schema links, Novels
+        const schemaNow = () => JSON.parse(fs.readFileSync(`${COPY}/90. Templater/Data Store Schema.md`, "utf8").match(/```json\n([\s\S]*?)\n```/)[1]).collections;
+        const del = (c) => realFetch(new URL(`/api/taxonomy/facet?collection=${encodeURIComponent(c)}`, BASE), { method: "DELETE", headers: { "x-requested-with": "books-meta-viewer" } });
+        const linkedCols = new Set(Object.entries(schemaNow()).flatMap(([k, c]) => Object.values(c.links ?? {}).flat().filter((t) => t !== k)));
+        const must = Object.keys(schemaNow()).filter((c) => c.startsWith("Taxonomy/") && (linkedCols.has(c) || ["Taxonomy/Rating", "Taxonomy/Item Condition", "Taxonomy/Novels"].includes(c)));
+        const statuses = [];
+        for (const c of must) statuses.push([c, (await del(c)).status]);
+        check(must.length > 10 && statuses.every(([, x]) => x === 409) && must.every((c) => schemaNow()[c] && fs.existsSync(`${COPY}/80. Global Data Store/${c}`)), "no required taxonomy can be deleted", JSON.stringify(statuses.filter(([, x]) => x !== 409)));
+        const idx2 = await get("/api/index");
+        check(must.every((c) => idx2.requiredFacets[c]?.length) && !idx2.requiredFacets["Taxonomy/WB Levels"], "the index says which taxonomies are required and why");
+        // …their values can: one by one
+        const one = "80. Global Data Store/Taxonomy/Rarity/WB Temp Rarity.md";
+        fs.writeFileSync(`${COPY}/${one}`, "---\ntitle: WB Temp Rarity\ntype: rarity\n---\n"); await wait(800);
+        const delOne = await realFetch(new URL(`/api/note?path=${encodeURIComponent(one)}`, BASE), { method: "DELETE", headers: { "x-requested-with": "books-meta-viewer" } });
+        check(delOne.status === 200 && !fs.existsSync(`${COPY}/${one}`), "a single value of a required taxonomy can be deleted");
+        // one a stat template uses is protected too
+        const used = idx2.novels.length && (await Promise.all(Object.keys(schemaNow()).filter((c) => c.startsWith("Taxonomy/") && !must.includes(c)).map((c) => get(`/api/taxonomy/remove?collection=${encodeURIComponent(c)}`)))).find((r) => r.templates.length);
+        check(!used || ((await del(used.collection)).status === 409 && !!schemaNow()[used.collection]), "a taxonomy a stat template uses can't be deleted", used?.blocked);
+        // the page: required ones have a dead button, others a dialog that says what goes
+        {
+            const doc = w.document;
+            await sendJ("POST", "/api/taxonomy/facet", { name: "WB Doomed", values: [{ name: "WB Doomed One", title: "WB Doomed One" }, { name: "WB Doomed Two", title: "WB Doomed Two" }] });
+            await wait(600); vaultChanged(); await wait(600);
+            const delBtn = () => [...doc.querySelectorAll("main .spread button")].find((b) => b.textContent.trim() === "Delete…");
+            w.location.hash = `#/c/${enc("Taxonomy/Rarity")}`; await wait(900);
+            check(delBtn()?.disabled && /Required/.test(delBtn().title), "a required taxonomy's Delete button is off and says why", delBtn()?.title);
+            w.location.hash = `#/c/${enc("Taxonomy/WB Doomed")}`; await wait(900);
+            check(delBtn() && !delBtn().disabled, "another taxonomy can be deleted from its page");
+            delBtn()?.click(); await wait(600);
+            const confirm = () => [...doc.querySelectorAll(".delete-taxonomy button")].find((b) => /Delete taxonomy|Click to confirm/.test(b.textContent));
+            check(/2 values/.test(doc.querySelector(".delete-taxonomy")?.textContent ?? "") && !!confirm(), "the dialog says how many values go", doc.querySelector(".delete-taxonomy")?.textContent);
+            confirm()?.click(); await wait(150);
+            check(!!schemaNow()["Taxonomy/WB Doomed"], "the first click only arms the delete");
+            confirm()?.click(); await wait(1200);
+            check(!schemaNow()["Taxonomy/WB Doomed"] && !fs.existsSync(`${COPY}/80. Global Data Store/Taxonomy/WB Doomed`) && fs.existsSync(`${COPY}/.trash/WB Doomed One.md`) && w.location.hash === "#/" && !doc.querySelector(".delete-taxonomy"),
+                "the second click deletes it: values in the trash, gone from the schema, back home", w.location.hash);
+            vaultChanged(); await wait(400);
+        }
+    }
     const { facetChoice } = await import("../public/stats-core.js");
     const idx = await get("/api/index");
     const notes = idx.notes.filter((n) => n.collection === "Taxonomy/WB Levels");
@@ -768,7 +841,8 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     filter.value = ""; filter.dispatchEvent(new w.Event("input", { bubbles: true }));
     [...doc.querySelectorAll(".drawer-tabs [role=tab]")].find((b) => b.textContent === "Taxonomy").click();
     await wait(300);
-    check(groupsBox().querySelectorAll(".browse-group").length === Object.keys(index.schema.collections).filter((c) => c.startsWith("Taxonomy/")).length, "the taxonomy tab lists every facet");
+    const facetsNow = Object.keys((await get("/api/index")).schema.collections).filter((c) => c.startsWith("Taxonomy/")).length;   // (earlier tests make and delete some)
+    check(groupsBox().querySelectorAll(".browse-group").length === facetsNow, "the taxonomy tab lists every facet", `${groupsBox().querySelectorAll(".browse-group").length} of ${facetsNow}`);
     doc.querySelector(".drawer-tabs button[title^='Collapse']").click();
     await wait(300);
     if (wc) {
@@ -949,7 +1023,7 @@ const check = (ok, label, detail = "") => { if (!ok) failed++; console.log(`${ok
     del().click(); await wait(50); del().click(); await wait(900);
     check(!read().includes("Languages") && read().includes("## Calendar"), "deleting a block removes its section");
     // add a block
-    btn("+ Add block").click(); await wait(100);
+    btn("+ Block", doc.querySelector("main .np-actions")).click(); await wait(100);
     const ti = doc.querySelector("main .nblock-add input");
     ti.value = "Currency"; fire(ti, "input"); await wait(50);
     fire(ti, "keydown", { key: "Enter" }); await wait(300);
@@ -1298,6 +1372,160 @@ if (process.env.SETTINGS_DIR) {
         }
     }
 }
+// chapters: changing numbers (move, swap, make room), the archive and back, on a novel of the test's own
+{
+    const doc = w.document;
+    const N = "18. WB Renumber", dir = `${COPY}/${N}`;
+    const put = (p, t) => { fs.mkdirSync(`${dir}/${p}`.replace(/\/[^/]*$/, ""), { recursive: true }); fs.writeFileSync(`${dir}/${p}`, t); };
+    const read = (p) => fs.readFileSync(`${dir}/${p}`, "utf8"), has = (p) => fs.existsSync(`${dir}/${p}`);
+    const api = (method, p, body) => realFetch(new URL(p, BASE), { method, headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: body && JSON.stringify(body) }).then(async (r) => ({ status: r.status, ...(await r.json()) }));
+    put("config.md", "---\ntype: config\n---\n");
+    for (const [n, t] of [[1, "Alpha"], [2, "Beta"], [3, "Gamma"], [4, "Delta"]]) {
+        put(`Chapters/00${n} - WB ${t}.md`, `---\ntype: chapter\nchapter: ${n}\nchapter title: ${t}\n---\n${t} text. See [[00${n === 2 ? 3 : 2} - WB ${n === 2 ? "Gamma" : "Beta"}|that one]].\n${n === 2 ? "\n%% event: [[WB Hero - Inventory#2.1 Found a rope]] %%\n" : ""}`);
+        if (n !== 4) put(`Plan/Chapter Plans/Plan 00${n} (WB Renumber).md`, `---\ntype: chapter-plan\nchapter: ${n}\ntitle: ${t}\nvolume: ""\nplan: |-\n  - ${t} plan\n---\n`);
+    }
+    put("Plots/WB Linker.md", `---\ntype: plot\ntitle: WB Linker\n---\n[[002 - WB Beta]] and [[${N}/Chapters/002 - WB Beta|full]] and [[Plan 002 (WB Renumber)]]\n`);
+    put("Characters/WB Hero.md", "---\ntype: character\nname: WB Hero\n---\n");
+    put("Ledgers/WB Hero - Inventory.md", `---\ntype: ledger\nledger-type: Inventory\nowner: "[[WB Hero]]"\nnovel: "[[WB Renumber]]"\n---\n# Chapter 1\n## 1.1 Started\nid:: wba\n- [action:: add] [item:: odd   coin] [qty:: 1]\n\n# Chapter 2\n## 2.1 Found a rope\nid:: wbb\n- [action:: add] [item:: rope] [qty:: 2]\n`);
+    await wait(1200);
+    const q = (o) => `/api/plan/renumber?${new URLSearchParams({ novel: N, ...o })}`;
+    const taken = await get(q({ from: 2, to: 3 }));
+    check(taken.blocked && taken.occupied?.number === 3 && taken.modes.join() === "swap,insert", "a taken chapter number asks: swap or make room", JSON.stringify(taken));
+    const frac = await get(q({ from: 2, to: 2.5 }));
+    check(/whole chapter/.test(frac.blocked), "ledger entries can't go to a part chapter", JSON.stringify(frac));
+    const no = await api("POST", "/api/plan/renumber", { novel: N, from: 2, to: 3 });
+    check(no.status === 409 && has("Chapters/002 - WB Beta.md"), "nothing moves onto a taken number without choosing how");
+    // a free number: chapter, plan, entries, event marker and links
+    const mv = await api("POST", "/api/plan/renumber", { novel: N, from: 2, to: 10 });
+    const ten = has("Chapters/010 - WB Beta.md") ? read("Chapters/010 - WB Beta.md") : "", led = read("Ledgers/WB Hero - Inventory.md");
+    check(mv.status === 200 && /^chapter: 10$/m.test(ten) && !has("Chapters/002 - WB Beta.md") && has("Plan/Chapter Plans/Plan 010 (WB Renumber).md") && /^chapter: 10$/m.test(read("Plan/Chapter Plans/Plan 010 (WB Renumber).md")),
+        "changing a chapter's number renames the chapter and its plan", JSON.stringify(mv));
+    check(/# Chapter 10\n## 10\.1 Found a rope/.test(led) && !/## 2\./.test(led) && led.includes("[item:: odd   coin]") && ten.includes("[[WB Hero - Inventory#10.1 Found a rope]]"),
+        "its ledger entries and the event marker follow, other entries untouched", led + ten);
+    check(read("Plots/WB Linker.md").includes(`[[010 - WB Beta]] and [[${N}/Chapters/010 - WB Beta|full]] and [[Plan 010 (WB Renumber)]]`) && read("Chapters/001 - WB Alpha.md").includes("[[010 - WB Beta|that one]]"), "links to them follow", read("Plots/WB Linker.md"));
+    const placedNow = await get(`/api/chapter?${new URLSearchParams({ novel: N, n: 10 })}`);
+    check(placedNow.entries.length === 1 && !!placedNow.entries[0].placed, "the moved entry is still found in the chapter text");
+    // swap, then make room (1 comes after 4: 2..4 don't exist as a run, so use 3 and 4)
+    const sw = await api("POST", "/api/plan/renumber", { novel: N, from: 10, to: 1, mode: "swap" });
+    const l2 = read("Ledgers/WB Hero - Inventory.md");
+    check(sw.status === 200 && has("Chapters/001 - WB Beta.md") && has("Chapters/010 - WB Alpha.md") && /## 1\.1 Found a rope[\s\S]*## 10\.1 Started/.test(l2) && read("Chapters/001 - WB Beta.md").includes("#1.1 Found a rope") && !fs.readdirSync(`${dir}/Plan/Chapter Plans`).some((f) => f.includes("moving")),
+        "swapping two chapters swaps chapters, plans and entries", JSON.stringify(fs.readdirSync(`${dir}/Chapters`)) + l2);
+    check(/\[\[010 - WB Alpha\]\]|\[\[001 - WB Beta/.test(read("Plots/WB Linker.md")) && read("Plots/WB Linker.md").includes("[[001 - WB Beta]]"), "links still point at the same chapters after a swap", read("Plots/WB Linker.md"));
+    const ins = await api("POST", "/api/plan/renumber", { novel: N, from: 10, to: 3, mode: "insert" });
+    const files = fs.readdirSync(`${dir}/Chapters`).sort().join("|");
+    check(ins.status === 200 && files === "001 - WB Beta.md|003 - WB Alpha.md|004 - WB Gamma.md|005 - WB Delta.md" && /^chapter: 4$/m.test(read("Chapters/004 - WB Gamma.md")) && /^chapter: 4$/m.test(read("Plan/Chapter Plans/Plan 004 (WB Renumber).md")) && read("Chapters/001 - WB Beta.md").includes("[[004 - WB Gamma|that one]]"),
+        "making room moves the chapters after it along, up to the first gap", files);
+    const back = await api("POST", "/api/plan/renumber", { novel: N, from: 3, to: 5, mode: "insert" });
+    check(back.status === 200 && fs.readdirSync(`${dir}/Chapters`).sort().join("|") === "001 - WB Beta.md|003 - WB Gamma.md|004 - WB Delta.md|005 - WB Alpha.md", "moving a chapter later closes the gap it leaves", fs.readdirSync(`${dir}/Chapters`).join("|"));
+    // the archive: chapter and plan together, links still find them, the number is free, entries stay
+    const ar = await api("POST", "/api/plan/archive", { novel: N, n: 1 });
+    const over = await get(`/api/plan?${new URLSearchParams({ novel: N })}`);
+    check(ar.status === 200 && has("Archive/Chapters/001 - WB Beta.md") && has("Archive/Chapter Plans/Plan 001 (WB Renumber) (Archived).md") && !over.chapters.some((c) => c.number === 1) && over.archive.length === 1 && over.archive[0].planPath && over.archive[0].number === 1 && ar.entries === 1,
+        "archiving moves a chapter and its plan out together and keeps its ledger entries", JSON.stringify(over.archive));
+    check(read("Plots/WB Linker.md").includes(`[[${N}/Archive/Chapters/001 - WB Beta|full]] and [[Plan 001 (WB Renumber) (Archived)]]`) && read("Archive/Chapters/001 - WB Beta.md").includes("Beta text."), "links, with or without a folder, follow into the archive", read("Plots/WB Linker.md"));
+    // a new chapter 1 can be made meanwhile; the archived one then needs another number
+    await api("POST", "/api/write/chapter", { novel: N, n: 1, title: "WB New One" });
+    await api("POST", "/api/plan/chapter", { novel: N, n: 1, set: { plan: "- new" } });
+    const clash = await api("POST", "/api/plan/restore", { novel: N, id: over.archive[0].id });
+    check(clash.status === 409 && has("Archive/Chapters/001 - WB Beta.md") && has("Plan/Chapter Plans/Plan 001 (WB Renumber).md"), "a number taken meanwhile refuses the restore", JSON.stringify(clash));
+    const rs = await api("POST", "/api/plan/restore", { novel: N, id: over.archive[0].id, n: 7 });
+    const p7 = has("Plan/Chapter Plans/Plan 007 (WB Renumber).md") ? read("Plan/Chapter Plans/Plan 007 (WB Renumber).md") : "";
+    check(rs.status === 200 && /^chapter: 7$/m.test(read("Chapters/007 - WB Beta.md")) && /^chapter: 7$/m.test(p7) && !/archived/.test(p7) && (await get(`/api/plan?${new URLSearchParams({ novel: N })}`)).archive.length === 0,
+        "restoring under another number brings chapter and plan back with it", p7);
+    // only archived chapters are deleted here
+    const not = await api("DELETE", `/api/plan/archive?${new URLSearchParams({ novel: N, id: `${N}/Chapters/007 - WB Beta.md` })}`);
+    check(not.status === 404 && has("Chapters/007 - WB Beta.md"), "a chapter that isn't archived can't be deleted through the archive");
+    // the page: controls on the plan, the archive in the Grand plan
+    vaultChanged(); await wait(500);
+    w.location.hash = `#/chapter/${enc(N)}/7`; await wait(1300);
+    const tools = () => doc.querySelector("main .chapter-plan .chapter-tools");
+    const tbtn = (t) => [...(tools()?.querySelectorAll("button") ?? [])].find((b) => b.textContent.trim().startsWith(t));
+    check(!!tbtn("Change number") && !!tbtn("Archive"), "a chapter's plan has its number and archive controls");
+    tbtn("Change number")?.click(); await wait(200);
+    const inp = tools()?.querySelector("input[aria-label='New chapter number']");
+    if (inp) { inp.value = "4"; inp.dispatchEvent(new w.Event("input", { bubbles: true })); }
+    await wait(700);
+    check(/Chapter 4 exists/.test(tools()?.textContent) && tbtn("Change")?.textContent === "Change number" && [...tools().querySelectorAll("button")].find((b) => b.textContent === "Change")?.disabled, "a taken number offers swap / make room and can't be applied before choosing", tools()?.textContent);
+    [...tools().querySelectorAll("button")].find((b) => b.textContent.startsWith("Swap"))?.click(); await wait(700);
+    [...tools().querySelectorAll("button")].find((b) => b.textContent === "Change")?.click(); await wait(1300);
+    check(has("Chapters/004 - WB Beta.md") && has("Chapters/007 - WB Delta.md") && w.location.hash === `#/chapter/${enc(N)}/4`, "the page follows the chapter to its new number", w.location.hash);
+    vaultChanged(); await wait(900);
+    tbtn("Archive")?.click(); await wait(150);
+    check(/Archive chapter 4\?/.test(tools()?.textContent ?? "") && has("Chapters/004 - WB Beta.md"), "archiving asks for a second click", tools()?.textContent);
+    tbtn("Archive chapter 4")?.click(); await wait(1300);
+    check(has("Archive/Chapters/004 - WB Beta.md") && w.location.hash === `#/novel/${enc(N)}`, "archiving from the plan goes back to the novel", w.location.hash);
+    vaultChanged(); await wait(1000);
+    [...doc.querySelectorAll("main .tabs button")].find((b) => b.textContent.trim().startsWith("Grand plan"))?.click(); await wait(400);   // (the page remembers its tab)
+    const arch = () => doc.querySelector("main .archive");
+    check(!!arch() && /Beta/.test(arch().textContent) && /Beta plan/.test(arch().textContent) && arch().querySelector("input")?.value === "4", "the Grand plan lists the archive with each chapter's plan and a number to restore it as", arch()?.textContent);
+    const abtn = (t) => [...(arch()?.querySelectorAll("button") ?? [])].find((b) => b.textContent.trim().startsWith(t));
+    abtn("Delete")?.click(); await wait(150); abtn("Move to the trash")?.click(); await wait(1200);
+    check(!has("Archive/Chapters/004 - WB Beta.md") && !fs.readdirSync(`${dir}/Archive/Chapter Plans`).length && fs.existsSync(`${COPY}/.trash/004 - WB Beta.md`), "deleting an archived chapter moves it and its plan to the trash");
+    // a plan makes its chapter note, and the two have one title
+    const planOf = (n) => read(`Plan/Chapter Plans/Plan ${String(n).padStart(3, "0")} (WB Renumber).md`);
+    const fmLine = (t, k) => new RegExp(`^${k}: ?"?([^"\\n]*)"?$`, "m").exec(t)?.[1];
+    const save = (n, set) => api("POST", "/api/plan/chapter", { novel: N, n, set });
+    const patch = (p, set, unset) => api("PATCH", "/api/note", { path: `${N}/${p}`, set, unset });
+    const latestBefore = (await get(`/api/novel?${new URLSearchParams({ folder: N })}`)).latestChapter;
+    const made = await save(20, { plan: "- start" });
+    check(made.status === 200 && has("Chapters/020.md") && !read("Chapters/020.md").split("---")[2].trim() && (await get(`/api/novel?${new URLSearchParams({ folder: N })}`)).latestChapter === latestBefore,
+        "a new plan makes an empty chapter note, which doesn't count as the latest chapter", JSON.stringify(made));
+    const titled = await save(20, { title: "The WB Title" });
+    check(titled.status === 200 && has("Chapters/020 - The WB Title.md") && !has("Chapters/020.md") && fmLine(read("Chapters/020 - The WB Title.md"), "chapter title") === "The WB Title" && fmLine(planOf(20), "title") === "The WB Title",
+        "the plan's title is the chapter's: note, file name and plan", JSON.stringify(titled));
+    const viaNote = await patch("Chapters/020 - The WB Title.md", { "chapter title": "Second WB Title" });
+    check(viaNote.path === `${N}/Chapters/020 - Second WB Title.md` && has("Chapters/020 - Second WB Title.md") && fmLine(planOf(20), "title") === "Second WB Title", "a title edited on the chapter (the writer) is the plan's too", JSON.stringify(viaNote));
+    const viaPlan = await patch("Plan/Chapter Plans/Plan 020 (WB Renumber).md", { title: "Third WB Title" });
+    check(viaPlan.status === 200 && viaPlan.files.length === 1 && has("Chapters/020 - Third WB Title.md"), "and one edited on the plan's note page is the chapter's", JSON.stringify(viaPlan));
+    put("Chapters/021 - My own name.md", "---\ntype: chapter\nchapter: 21\nchapter title: Other\n---\nText.\n"); await wait(700);
+    await save(21, { title: "Changed" });
+    check(has("Chapters/021 - My own name.md") && fmLine(read("Chapters/021 - My own name.md"), "chapter title") === "Changed" && fmLine(planOf(21), "title") === "Changed", "a file name that isn't the title stays as it is");
+    await patch("Chapters/020 - Third WB Title.md", { "chapter title": "" });
+    check(has("Chapters/020.md") && fmLine(planOf(20), "title") === "", "emptying the title empties it on both", planOf(20));
+    await save(20, { title: "Kept" });
+    // numbers are only changed on the plan
+    const num = await patch("Chapters/020 - Kept.md", { chapter: 33 }), num2 = await patch("Plan/Chapter Plans/Plan 020 (WB Renumber).md", { chapter: 33 }), sameNum = await patch("Chapters/020 - Kept.md", { chapter: 20 });
+    check(num.status === 400 && num2.status === 400 && sameNum.status === 200, "a chapter's number can't be typed into its note or plan", JSON.stringify([num, num2]));
+    // a live and an archived chapter never share number and title
+    await api("POST", "/api/plan/archive", { novel: N, n: 20 });
+    const arcPath = "Archive/Chapters/020 - Kept.md", id20 = `${N}/${arcPath}`;
+    const tries = {
+        writer: await api("POST", "/api/write/chapter", { novel: N, n: 20, title: "kept" }),
+        plan: await save(20, { title: "Kept", plan: "- x" }),
+        renumber: await (async () => { await save(22, { title: "Kept" }); return api("POST", "/api/plan/renumber", { novel: N, from: 22, to: 20 }); })(),
+    };
+    check(Object.values(tries).every((r) => r.status === 409) && !has("Chapters/020 - Kept.md") && !fs.existsSync(`${dir}/Plan/Chapter Plans/Plan 020 (WB Renumber).md`), "a chapter can't be made, planned or renumbered into an archived one's number and title", JSON.stringify(tries));
+    const other = await save(20, { title: "Different", plan: "- y" });
+    const retitle = [await save(20, { title: "KEPT" }), await patch("Chapters/020 - Different.md", { "chapter title": "Kept" }), await patch("Plan/Chapter Plans/Plan 020 (WB Renumber).md", { title: "Kept" }), await patch(arcPath, { "chapter title": "Different" })];
+    check(other.status === 200 && retitle.every((r) => r.status === 409) && has("Chapters/020 - Different.md") && fmLine(planOf(20), "title") === "Different", "nor retitled into one, from either side; the same number with another title is fine", JSON.stringify(retitle));
+    put("Chapters/023 - Named only.md", "---\ntype: chapter\nchapter: 23\n---\nText.\n"); await wait(700);
+    await api("POST", "/api/plan/archive", { novel: N, n: 23 });
+    put("Chapters/023 - Something.md", "---\ntype: chapter\nchapter: 23\n---\nText.\n"); await wait(700);
+    const ren = await api("POST", "/api/rename", { path: `${N}/Chapters/023 - Something.md`, name: "023 - Named Only" });
+    check(ren.status === 409 && has("Chapters/023 - Something.md"), "nor renamed into one, when the file name is the title", JSON.stringify(ren));
+    const ai = await api("POST", "/api/ai/settings", { auth: "key" }) && await realFetch(new URL("/api/ai/chat", BASE), { method: "POST", headers: { "x-requested-with": "books-meta-viewer", "content-type": "application/json" }, body: JSON.stringify({ message: "propose: " + JSON.stringify({ title: "T", changes: [{ action: "edit_fields", note: `${N}/Chapters/020 - Different.md`, set: { "chapter title": "Kept" } }] }) }) }).then((r) => r.text());
+    check(/archive has chapter 20/i.test(ai), "the assistant can't propose it either", ai.slice(0, 300));
+    const blank = [await save(24, { plan: "- a" }), await api("POST", "/api/plan/archive", { novel: N, n: 24 }), await save(24, { plan: "- b" })];
+    check(blank[0].status === 200 && blank[1].status === 200 && blank[2].status === 409, "two chapters without a title count as the same title", JSON.stringify(blank[2]));
+    // restoring: refused where another archived chapter has that number and title; a plan alone gets its note back
+    put("Archive/Chapters/030 - Kept.md", "---\ntype: chapter\nchapter: 30\nchapter title: Kept\n---\nText.\n"); await wait(700);
+    const r30 = await api("POST", "/api/plan/restore", { novel: N, id: id20, n: 30 }), r31 = await api("POST", "/api/plan/restore", { novel: N, id: id20, n: 31 });
+    check(r30.status === 409 && r31.status === 200 && has("Chapters/031 - Kept.md"), "restoring can't make the pair either", JSON.stringify([r30, r31]));
+    put("Archive/Chapter Plans/Plan 032 (WB Renumber) (Archived).md", "---\ntype: chapter-plan\nchapter: 32\ntitle: Only A Plan\nplan: \"- p\"\n---\n"); await wait(700);
+    const r32 = await api("POST", "/api/plan/restore", { novel: N, id: `${N}/Archive/Chapter Plans/Plan 032 (WB Renumber) (Archived).md` });
+    check(r32.status === 200 && has("Chapters/032 - Only A Plan.md"), "a plan restored without a chapter gets a chapter note", JSON.stringify(r32));
+    // a plan made outside the app: opening it makes the note; the title field is always there
+    put("Plan/Chapter Plans/Plan 040 (WB Renumber).md", "---\ntype: chapter-plan\nchapter: 40\ntitle: From Obsidian\nplan: \"- p\"\n---\n");
+    await wait(900); vaultChanged(); await wait(400);
+    w.location.hash = `#/chapter/${enc(N)}/40`; await wait(1500);
+    check(has("Chapters/040 - From Obsidian.md"), "opening a plan without a chapter note makes the note");
+    vaultChanged(); await wait(900);
+    const ti = () => doc.querySelector("main .chapter-plan input[aria-label='Chapter title']");
+    check(ti()?.value === "From Obsidian" && /not written yet/.test(doc.querySelector("main .view")?.textContent), "the plan shows the chapter's title to edit, and an empty note is not written yet", ti()?.value);
+    if (ti()) { ti().value = "Renamed here"; ti().dispatchEvent(new w.Event("input", { bubbles: true })); await wait(150); [...doc.querySelectorAll("main .chapter-plan .savebar button")].find((b) => b.textContent === "Save changes")?.click(); await wait(1300); }
+    check(has("Chapters/040 - Renamed here.md") && fmLine(planOf(40), "title") === "Renamed here", "saving it there renames the chapter");
+    fs.rmSync(dir, { recursive: true, force: true }); await wait(800); vaultChanged(); await wait(400);
+}
 // an item's page: Details, then Description, then Info, with the small fields under them
 {
     const doc = w.document;
@@ -1306,8 +1534,71 @@ if (process.env.SETTINGS_DIR) {
         w.location.hash = `#/note/${enc(item.path)}`; await wait(1500);
         const secs = [...doc.querySelectorAll("main .np-sec .np-sec-head h2")].map((h) => h.textContent);
         const props = [...doc.querySelectorAll("main .np-props .np-prop-k, main > * .np-prop-k")].filter((k) => !k.closest(".np-sec")).map((k) => k.title);
-        check(secs.slice(0, 3).join("|") === "Details|Description|Info" && !props.includes("cat") && !props.includes("rarity"),
-            "an item's page groups its fields under Details, Description and Info", JSON.stringify({ secs, props }));
+        const allKeys = [...doc.querySelectorAll("main .np-main > div:not([hidden]) .np-prop-k")].map((k) => k.title);
+        const infoKeys = [...doc.querySelectorAll("main .np-sec")].find((x) => x.querySelector("h2")?.textContent === "Info")?.querySelectorAll(".np-prop-k") ?? [];
+        check(secs.slice(0, 3).join("|") === "Details|Description|Info" && !props.includes("cat") && !props.includes("rarity")
+            && !["novels", "uom", "recipe"].some((k) => allKeys.includes(k)) && (!("value" in item.fm) || [...infoKeys].some((k) => k.title === "value")),
+            "an item's page groups its fields under Details, Description and Info (novels, uom, recipe on Links & more)", JSON.stringify({ secs, props, allKeys }));
+    }
+    if (item) {
+        // long text fields are edited with the block editor and shown formatted
+        doc.querySelector("main button[aria-label='Edit Description']")?.click(); await wait(400);
+        check(!!doc.querySelector("main .np-sec-blocks .be-page") && !doc.querySelector("main .np-sec textarea.np-sec-text"), "the description is edited with the block editor");
+        [...doc.querySelectorAll("main .np-sec button")].find((b) => b.textContent === "Done")?.click(); await wait(200);
+    }
+    const mat = index.notes.find((n) => n.collection === "Materials" && n.fm.cat);
+    if (mat) {
+        w.location.hash = `#/note/${enc(mat.path)}`; await wait(1500);
+        const secs = [...doc.querySelectorAll("main .np-sec .np-sec-head h2")].map((h) => h.textContent);
+        check(secs[0] === "Details" && secs[1] === "Description", "other collections use the same Details / Description / Info sections", secs.join("|"));
+    }
+    // teaching: items that teach an art, the art's tree in the column, several sources cycled
+    const DS = "80. Global Data Store";
+    fs.writeFileSync(`${COPY}/${DS}/Abilities/Smoke Teach Art.md`, "---\ntitle: Smoke Teach Art\ntype: ability\n---\n");
+    fs.writeFileSync(`${COPY}/${DS}/Abilities/Smoke Teach Sub.md`, "---\ntitle: Smoke Teach Sub\ntype: ability\nparent-art: \"[[Smoke Teach Art]]\"\n---\n");
+    fs.writeFileSync(`${COPY}/${DS}/Items/Smoke Manual A.md`, "---\ntitle: Smoke Manual A\ntype: item\nteaches:\n  - \"[[Smoke Teach Art]]\"\n---\n");
+    fs.writeFileSync(`${COPY}/${DS}/Races/Smoke Elder Race.md`, "---\ntitle: Smoke Elder Race\ntype: race\n---\n");
+    fs.writeFileSync(`${COPY}/${DS}/Races/Smoke Middle Race.md`, "---\ntitle: Smoke Middle Race\ntype: race\nparent-race: \"[[Smoke Elder Race]]\"\n---\n");
+    fs.writeFileSync(`${COPY}/${DS}/Races/Smoke Young Race.md`, "---\ntitle: Smoke Young Race\ntype: race\nparent-race: \"[[Smoke Middle Race]]\"\n---\n");
+    fs.writeFileSync(`${COPY}/${DS}/Items/Smoke Manual B.md`, "---\ntitle: Smoke Manual B\ntype: item\nteaches:\n  - \"[[Smoke Teach Sub]]\"\n---\n");
+    await wait(1200); vaultChanged(); await wait(800);
+    w.location.hash = "#/qa"; await wait(300);
+    w.location.hash = `#/note/${enc(`${DS}/Abilities/Smoke Teach Sub.md`)}`; await wait(1500);
+    const side = () => doc.querySelector("main .np-side");
+    const src = () => side()?.querySelectorAll(".np-side-sec")[0]?.querySelector(".np-pill")?.textContent;
+    const first = src();
+    const topFirst = !!side()?.querySelector(".np-tree > li > .np-pill.on") && !side()?.querySelector(".np-tree .np-tree");
+    const counter = side()?.querySelector(".np-cycle .small")?.textContent;
+    side()?.querySelector("button[aria-label='Next source']")?.click(); await wait(200);
+    const second = src();
+    const nested = topFirst && !!side()?.querySelector(".np-tree .np-tree .np-pill.on");
+    check(first === "Smoke Manual B" && counter === "1 / 2" && second === "Smoke Manual A" && nested,
+        "an art taught by several notes cycles between them, the tree follows the chosen one", JSON.stringify({ first, counter, second, nested }));
+    w.location.hash = `#/note/${enc(`${DS}/Items/Smoke Manual A.md`)}`; await wait(1500);
+    const pills = [...(side()?.querySelectorAll(".np-pill") ?? [])].map((b) => b.textContent);
+    check(side()?.querySelector(".np-pill.on")?.textContent === "Smoke Manual A" && pills.includes("Smoke Teach Art") && pills.includes("Smoke Teach Sub"),
+        "a note that teaches shows itself and the tree of what it teaches in the column", pills.join(" | "));
+    w.location.hash = `#/note/${enc(`${DS}/Races/Smoke Middle Race.md`)}`; await wait(1500);
+    const hier = side()?.querySelector(".np-hier");
+    check(hier?.querySelector(":scope > .np-tree > li > .np-pill")?.textContent === "Smoke Elder Race" && hier?.querySelector(".np-tree .np-tree > li > .np-pill.on")?.textContent === "Smoke Middle Race"
+        && hier?.querySelector(".np-tree .np-tree .np-tree .np-pill")?.textContent === "Smoke Young Race",
+        "a race shows its lineage from the topmost parent down, itself marked", hier?.textContent);
+    const heads = () => [...doc.querySelectorAll("main .np-sec .np-sec-head h2")].map((h) => h.textContent);
+    const plain = index.notes.find((n) => n.collection === "Items" && !n.fm.recipe);
+    if (itemWithRecipe && plain) {
+        w.location.hash = `#/note/${enc(itemWithRecipe)}`; await wait(1500);
+        const withTree = heads().includes("Build tree") && !!doc.querySelector("main .np-build-sec .tree li") && !doc.querySelector("main .np-main .panel .tree");
+        w.location.hash = `#/note/${enc(plain.path)}`; await wait(1500);
+        check(withTree && !heads().includes("Build tree"), "an item with a recipe has a Build tree section (not a box); one without has none");
+        // items add blocks from a small header button, not from a row under the blocks, and get no title suggestions
+        for (const path of [itemWithRecipe, plain.path, firstOf("Materials"), firstOf("Locations")].filter(Boolean)) {
+            w.location.hash = `#/note/${enc(path)}`; await wait(1500);
+            const btn = [...doc.querySelectorAll("main .np-actions button")].find((b) => b.textContent.trim() === "+ Block");
+            const noRow = !doc.querySelector("main .nblock-add") && !doc.querySelector("main .nblock-suggest");
+            btn?.click(); await wait(300);
+            check(!!btn && noRow && !!doc.querySelector("main .nblock-add input") && !doc.querySelector("main .nblock-add datalist") && !doc.querySelector("main .nblock-suggest"),
+                "a note's header has + Block, which opens the block title box (no add row, no suggestions)", path);
+        }
     }
 }
 // AI assistant (the test server runs with WB_AI_MOCK=1: a stand-in for Claude, no network)
@@ -1422,6 +1713,51 @@ if (process.env.SETTINGS_DIR) {
             check(applied.changes[0].status === "applied" && /## \d+(\.\d+)?\.\d+ WB test find/.test(txt) && /\[item:: WB test flute\] \[qty:: 2\]/.test(txt),
                 "applying it writes the entry into the ledger like the ledger editor", JSON.stringify(applied.changes[0].error ?? txt.slice(-300)));
         }
+    }
+    // taxonomies through proposals: a facet of levels for two power systems, then removed again
+    {
+        const ask = (changes) => send("POST", "/api/ai/chat", { message: "propose: " + JSON.stringify({ title: "Facets", changes }) }).then((r) => r.text());
+        const pidOf = (out) => out.trim().split("\n").map((l) => { try { return JSON.parse(l); } catch { return {}; } }).find((e) => e.proposal)?.proposal.id;
+        const systems = (await get("/api/index")).notes.filter((n) => n.collection === "Power Systems").slice(0, 2).map((n) => n.name);
+        const dup = await ask([{ action: "create_facet", name: "Rarity" }]);
+        check(/already a taxonomy called Rarity/.test(dup), "a proposed taxonomy that exists is refused with a reason");
+        const viaNote = await ask([{ action: "create_note", collection: "Taxonomy/WB Nowhere", name: "x" }]);
+        check(/create_facet/.test(viaNote), "a note for a taxonomy that doesn't exist yet points to create_facet", viaNote.slice(0, 300));
+        const out = await ask([{ action: "create_facet", name: "WB AI Realms", levels: true, power_systems: systems, values_text: "WB Mortal (Early, Late)\nWB Ascendant = 900" }]);
+        const pid = pidOf(out);
+        const p = pid && await get(`/api/ai/proposal?id=${pid}`);
+        const dir = `${COPY}/80. Global Data Store/Taxonomy/WB AI Realms`;
+        check(p?.changes[0].values.length === 4 && p.changes[0].values[3].threshold === 900 && !fs.existsSync(dir), "a proposed taxonomy lists its values and writes nothing yet", JSON.stringify(p?.changes[0] ?? out).slice(0, 300));
+        const ap = pid && await send("POST", "/api/ai/proposal/apply", { id: pid, which: "all" }).then((r) => r.json());
+        const asc = fs.existsSync(`${dir}/WB Ascendant.md`) ? fs.readFileSync(`${dir}/WB Ascendant.md`, "utf8") : "";
+        check(ap?.changes[0].status === "applied" && /threshold: 900/.test(asc) && systems.every((x) => asc.includes(`[[${x}]]`)) && fs.readFileSync(`${COPY}/90. Templater/Data Store Schema.md`, "utf8").includes('"Taxonomy/WB AI Realms"'),
+            "applying it makes the taxonomy and its values for every power system named", JSON.stringify(ap?.changes[0].error ?? asc));
+        if (systems.length) {
+            const noLv = await ask([{ action: "create_facet", name: "WB AI Talent", power_systems: [systems[0]], values: [{ name: "WB Talent Low" }] }]);
+            const nid = pidOf(noLv);
+            const np = nid && await get(`/api/ai/proposal?id=${nid}`);
+            check(np?.changes[0].levels === true, "a proposed taxonomy for a power system is made as levels even without levels: true", JSON.stringify(np?.changes[0] ?? noLv).slice(0, 200));
+        }
+        const rmOut = await ask([{ action: "remove_facet", facet: "WB AI Realms" }]);
+        const rid = pidOf(rmOut);
+        const rr = rid && await send("POST", "/api/ai/proposal/apply", { id: rid, which: "all" }).then((r) => r.json());
+        check(rr?.changes[0].status === "applied" && !fs.existsSync(`${dir}/WB Ascendant.md`) && !fs.readFileSync(`${COPY}/90. Templater/Data Store Schema.md`, "utf8").includes('"Taxonomy/WB AI Realms"') && fs.existsSync(`${COPY}/.trash/WB Ascendant.md`),
+            "a proposed taxonomy removal moves its values to the trash and takes it out of the schema", JSON.stringify(rr?.changes[0] ?? rmOut).slice(0, 300));
+        if (systems.length) {
+            const lk = await ask([{ action: "link_facet_system", facet: "WB Demonic Levels", power_system: systems[0] }]);
+            const lid = pidOf(lk);
+            const lp = lid && await get(`/api/ai/proposal?id=${lid}`);
+            const la = lid && await send("POST", "/api/ai/proposal/apply", { id: lid, which: "all" }).then((r) => r.json());
+            const rank = () => fs.readFileSync(`${COPY}/80. Global Data Store/Taxonomy/WB Demonic Levels/WB Demon Rank.md`, "utf8");
+            check(lp?.changes[0].after.length === 2 && la?.changes[0].status === "applied" && rank().includes(`[[${systems[0]}]]`) && rank().includes("[[WB Demonic Path]]"),
+                "a proposed link adds a power system to a taxonomy and keeps the one it had", JSON.stringify(lp?.changes[0] ?? lk).slice(0, 300));
+            const un = await ask([{ action: "unlink_facet_system", facet: "WB Demonic Levels", power_system: systems[0] }]);
+            const uid = pidOf(un);
+            uid && await send("POST", "/api/ai/proposal/apply", { id: uid, which: "all" });
+            check(!rank().includes(`[[${systems[0]}]]`) && rank().includes("[[WB Demonic Path]]"), "a proposed unlink takes one power system off and keeps the rest", rank());
+        }
+        const guarded = await ask([{ action: "remove_facet", facet: "Rarity" }]);
+        check(/can't be removed/.test(guarded), "removing a taxonomy other collections link to is refused");
     }
     // relationships: friendly / neutral / hostile with a note, folded from the ledger; the sheet gets the three lists
     {

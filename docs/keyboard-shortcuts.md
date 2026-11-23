@@ -14,9 +14,9 @@ blurb: Every keyboard shortcut in the app, in one table.
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>]</kbd> | Move the split between the writer and the drawer left / right (both open) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>\\</kbd> | Put the split back in the middle |
 | <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Back / forward: with no drawer open on the page; with one drawer open in that drawer (the side drawer's pages and tabs, or the left drawer's tabs and the pages a tab followed); with both open in the one you last clicked or typed in |
-| <kbd>Escape</kbd> twice | Discard a new item you're making (a new block, note, entry or recipe); the first press says so |
+| <kbd>Escape</kbd> twice | Discard a new item you're making (a new block, note, entry or recipe); the first press says so. In a text section or block: select the block, then close the editor |
 | Double-click | Edit a block or a ledger entry (double-click the block's edges again to close it) |
-| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the form or note you're editing |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the form or note you're editing; a text section with no changes just closes |
 | <kbd>/</kbd> | Search the docs (on a docs page) |
 | <kbd>Ctrl</kbd>+<kbd>R</kbd>, <kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd>, <kbd>F11</kbd> | Reload, zoom, full screen (desktop app) |
 

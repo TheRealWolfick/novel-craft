@@ -1,6 +1,6 @@
 # Builds Novel Craft for Linux (AppImage, .deb), Windows (installer) and macOS (.dmg, arm64 + x64, unsigned) and puts
 # them on a draft GitHub Release with SHA256SUMS and build attestations. Runs when a version tag is pushed:
-#   (bump "version" in package.json, commit)  git tag v1.0.0 && git push origin v1.0.0
+#   (bump "version" in package.json, write .github/release-notes/v<version>.md, commit)  git tag v1.0.0 && git push origin v1.0.0
 # then review the draft on GitHub and press Publish. "Run workflow" by hand builds the files without a release.
 name: Release
 
@@ -67,6 +67,10 @@ jobs:
       id-token: write        # build attestations
       attestations: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/release-notes
+          path: repo
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -81,4 +85,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --draft --generate-notes --title "Novel Craft ${GITHUB_REF_NAME#v}"
+        run: |
+          notes="repo/.github/release-notes/$GITHUB_REF_NAME.md"   # written for this version, else GitHub's own list
+          if [ -f "$notes" ]; then set -- --notes-file "$notes"; else set -- --generate-notes; fi
+          gh release create "$GITHUB_REF_NAME" dist/* --draft "$@" --title "Novel Craft ${GITHUB_REF_NAME#v}"

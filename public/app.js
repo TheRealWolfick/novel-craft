@@ -6,7 +6,7 @@ import { parseOutline, serializeOutline } from "./outline.js";
 import { parseLevels } from "./levels.js";
 import { MapEditor } from "./map-editor.js";
 import { WorldView, WorldOutline, MapAssetsView } from "./world.js";
-import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, expandWriter, BlockEditor, openOnLeft, closeLeftTab, renameLeftTab, leftGo, writerNow } from "./writer.js";
+import { WriterDrawer, openWriter, useWriter, collapseWriter, toggleWriter, expandWriter, BlockEditor, openOnLeft, closeLeftTab, renameLeftTab, followChapters, leftGo, writerNow } from "./writer.js";
 import { joinSections, sectionRaw, preRaw, parseSections, isImagesSection } from "./sections.js";
 import { inlineHtml, setSpeechGroups } from "./blocks.js";
 import { CalloutDesigner, useCalloutStyles } from "./callout-designer.js";
@@ -106,7 +106,8 @@ export function useScrollMemory(box, key, { ready = true, rows = null, scroller 
         if (!ready || !root || !key) return;
         const find = () => (scroller ? scroller(root) : root === window ? document.scrollingElement : root);
         const topOf = (el) => (el === document.scrollingElement ? 0 : el.getBoundingClientRect().top);
-        const p = restore ? store.get(SCROLL_KEY, {})[key] : null;
+        // a note opened from the column keeps the current place (`keepScroll`): no remembered place of its own then
+        const p = restore && !(keptScroll && keptScroll.area === areaOf(find()) && Date.now() - keptScroll.at < 5000) ? store.get(SCROLL_KEY, {})[key] : null;
         let moved = false, restoring = !!p, timer = null;
         const apply = () => {
             const el = find();
@@ -151,6 +152,43 @@ export function useScrollMemory(box, key, { ready = true, rows = null, scroller 
             for (const ev of INPUT) root.removeEventListener(ev, mine);
         };
     }, [ready, key, restore]);
+}
+
+/**
+ * Opening a related note from a page's column (plots, teaching, hierarchy) keeps where you were: the page's scroller
+ * and the column's own scroll are noted here and put back by the next note page shown in that scroller
+ */
+let keptScroll = null;   // {area, top, side, at}
+// where a note page sits: the side drawer, the left drawer, or the page (null); the scrolling box inside an area can be
+// replaced when the page changes (the drawer keys its body by page), the area stays
+const areaOf = (el) => el?.closest?.(".drawer-wrap, .writer-wrap") ?? null;
+const scrollerOf = (el) => {
+    for (let n = el?.closest(".np-note")?.parentElement; n && n !== document.body; n = n.parentElement) {
+        const o = getComputedStyle(n).overflowY;
+        if ((o === "auto" || o === "scroll") && n.scrollHeight > n.clientHeight) return n;
+    }
+    return document.scrollingElement;
+};
+function keepScroll(from) {
+    const el = scrollerOf(from);
+    keptScroll = el && { area: areaOf(from), top: el.scrollTop, side: from.closest(".np-side")?.scrollTop ?? 0, at: Date.now() };
+}
+/** Put back a kept place in the scroller holding `root` (a note page that just loaded); true when it did */
+function restoreKeptScroll(root) {
+    const k = keptScroll;
+    if (!k || !root) return false;
+    if (Date.now() - k.at > 5000) { keptScroll = null; return false; }
+    if (areaOf(root) !== k.area) return false;
+    keptScroll = null;
+    const put = () => {
+        const el = scrollerOf(root), side = root.querySelector(".np-side");
+        if (el && Math.abs(el.scrollTop - k.top) > 2) el.scrollTop = k.top;
+        if (side && Math.abs(side.scrollTop - k.side) > 2) side.scrollTop = k.side;
+    };
+    put();
+    // content that settles a moment later (fonts, images, the column's data) can clamp it: try again shortly
+    [60, 250, 700].forEach((ms) => setTimeout(put, ms));
+    return true;
 }
 
 // ------------------------------------------------------------------ theme: light / dark / system, novel accents
@@ -503,7 +541,7 @@ function DrawerViewer({ index, d }) {
                 onClick=${() => openInDrawer(h)}>${label(h)}</button>`)}</div>
             <button onClick=${() => { collapseDrawer(); go(href); }}>Open page</button>
         </div>
-        <div class="drawer-body" key=${href}>
+        <div class="drawer-body" key=${name === "note" ? "note" : href}>
             ${pick && html`<div class="pick-banner"><span>Choosing for <b>${pick.label}</b>: press Add on a row, or open one and press Use this.</span>
                 <span class="row">${pick.collections.map((c) => html`<button class=${`small ${name === "c" && args.join("/") === c ? "on" : ""}`} onClick=${() => openInDrawer(`#/c/${encodeURIComponent(c)}`)}>${collectionLabel(c)}</button>`)}
                     <button class="small" onClick=${() => setItemPick(null)}>Cancel</button></span></div>`}
@@ -1090,19 +1128,26 @@ function Portal({ children }) {
     return null;
 }
 
+/** The power systems a facet's values belong to (names; a facet's levels can serve several systems) */
+const facetSystemsOf = (index, collection) => {
+    const out = [];
+    for (const n of index?.inCollection(collection) ?? []) for (const v of asList(n.fm["power-system"])) { const name = linkLabel(String(v)); if (name && !out.some((x) => x.toLowerCase() === name.toLowerCase())) out.push(name); }
+    return out;
+};
+const isLevelsFacet = (index, c) => c?.startsWith("Taxonomy/") && (index?.schema.collections[c]?.fields ?? []).some(([k]) => k === "threshold" || k === "power-system");
+
 function TaxonomyDialog({ index, collection = null, onClose }) {
     const existing = collection ? index.schema.collections[collection] : null;
     const levelsFacet = existing ? existing.fields.some(([k]) => k === "threshold") : true;
     const [name, setName] = useState("");
     const [levels, setLevels] = useState(levelsFacet);
-    const [system, setSystem] = useState(() => { const v = collection && index.inCollection(collection).map((n) => n.fm["power-system"]).find(Boolean); return v ? linkLabel(String(v)) : ""; });
+    const [systems, setSystems] = useState(() => (collection ? facetSystemsOf(index, collection) : []).map(toLink));
     const [text, setText] = useState("");
     const [numbers, setNumbers] = useState({});
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState("");
     useEffect(() => { const k = (e) => { if (e.key === "Escape") onClose(); }; addEventListener("keydown", k); return () => removeEventListener("keydown", k); }, []);
     const values = useMemo(() => parseLevels(text), [text]);
-    const systems = index.inCollection("Power Systems").map((n) => n.name).sort();
     const numberOf = (v) => (v.name in numbers ? numbers[v.name] : v.threshold ?? "");
     const submit = async (e) => {
         e.preventDefault();
@@ -1111,8 +1156,8 @@ function TaxonomyDialog({ index, collection = null, onClose }) {
         const list = values.map((v) => ({ ...v, threshold: levels && numberOf(v) !== "" ? Number(numberOf(v)) : null }));
         try {
             const r = collection
-                ? await api.send("POST", "/api/taxonomy/values", { collection, values: list, powerSystem: levels ? system : "" })
-                : await api.send("POST", "/api/taxonomy/facet", { name: name.trim(), levels, values: list, powerSystem: levels ? system : "" });
+                ? await api.send("POST", "/api/taxonomy/values", { collection, values: list, powerSystems: levels ? systems : [] })
+                : await api.send("POST", "/api/taxonomy/facet", { name: name.trim(), levels, values: list, powerSystems: levels ? systems : [] });
             toast(`${collection ? "Added" : `Made ${r.collection.slice(9)} with`} ${r.paths.length} value${r.paths.length === 1 ? "" : "s"}`);
             onClose();
             if (!collection) go(`#/c/${encodeURIComponent(r.collection)}`);
@@ -1124,8 +1169,8 @@ function TaxonomyDialog({ index, collection = null, onClose }) {
             <div class="spread"><h2 style="margin:0">${collection ? `Add to ${collectionLabel(collection)}` : "New taxonomy"}</h2><button type="button" onClick=${onClose} aria-label="Close">×</button></div>
             ${!collection && html`<label class="field"><span>Name</span><input value=${name} onInput=${(e) => setName(e.target.value)} placeholder="Cultivation Levels" required autofocus /></label>`}
             ${(!collection || levelsFacet) && html`<label class="row"><input type="checkbox" style="width:auto" checked=${levels} disabled=${!!collection} onChange=${(e) => setLevels(e.target.checked)} /> levels with a number each (stat templates can work a level out from a stat, e.g. a cultivation stage from qi)</label>`}
-            ${levels && html`<label class="field"><span>Levels of the power system</span><select value=${system} onChange=${(e) => setSystem(e.target.value)}>
-                <option value="">none</option>${systems.map((x) => html`<option value=${x}>${x}</option>`)}</select></label>`}
+            ${levels && html`<div class="field"><span>Levels of the power systems</span><${LinkField} value=${systems} multiple=${true} target="Power Systems" index=${index} onChange=${setSystems} clearOnPick=${true} />
+                <span class="muted small">Several systems can share these levels (a cultivation and its demonic offshoot); each one is named, nothing is inherited.</span></div>`}
             <label class="field"><span>Values, one per line</span>
                 <textarea class="mono" style="min-height:130px" value=${text} onInput=${(e) => setText(e.target.value)}
                     placeholder=${"Qi Refining (Layer 1 - 9)\nFoundation Establishment (Early, Mid, Late, Peak)\nGolden Core = 5000\n\tEarly = 5000\n\tMid = 6000"} /></label>
@@ -1137,6 +1182,44 @@ function TaxonomyDialog({ index, collection = null, onClose }) {
             <div class="row" style="justify-content:flex-end"><button type="button" onClick=${onClose}>Cancel</button>
                 <button type="submit" class="primary" disabled=${busy || (!collection && !name.trim()) || (collection && !values.length)}>${busy ? "Saving…" : collection ? `Add ${values.length} value${values.length === 1 ? "" : "s"}` : `Make taxonomy${values.length ? ` with ${values.length} value${values.length === 1 ? "" : "s"}` : ""}`}</button></div>
         </form>
+    </div><//>`;
+}
+
+/**
+ * Deleting a whole taxonomy: what goes (its values to the vault's .trash, its schema entry) and which notes would be
+ * left with unresolved links, or why it can't go (a stat template uses it; required ones have no working button at all)
+ */
+function DeleteTaxonomyDialog({ collection, onClose, onDeleted }) {
+    const [info, setInfo] = useState(null);
+    const [err, setErr] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [all, setAll] = useState(false);
+    useEffect(() => { api.get(`/api/taxonomy/remove?${qs({ collection })}`).then(setInfo).catch((e) => setErr(e.message)); }, [collection]);
+    useEffect(() => { const k = (e) => { if (e.key === "Escape") onClose(); }; addEventListener("keydown", k); return () => removeEventListener("keydown", k); }, []);
+    const label = collectionLabel(collection), n = info?.values.length ?? 0;
+    const del = async () => {
+        setBusy(true); setErr("");
+        try {
+            const r = await api.send("DELETE", `/api/taxonomy/facet?${qs({ collection })}`);
+            toast(`Deleted ${label}${r.trashed.length ? `, ${r.trashed.length} value${r.trashed.length === 1 ? "" : "s"} moved to .trash` : ""}`);
+            onDeleted(r);
+        } catch (e) { setErr(e.message); setBusy(false); }
+    };
+    const shown = all ? info?.linkedFrom : info?.linkedFrom.slice(0, 12);
+    return html`<${Portal}><div class="modal-back" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+        <div class="modal taxonomy-modal delete-taxonomy" role="dialog" aria-label=${`Delete ${label}`}>
+            <div class="spread"><h2 style="margin:0">Delete ${label}</h2><button type="button" onClick=${onClose} aria-label="Close">×</button></div>
+            ${!info && !err && html`<p class="muted">Loading…</p>`}
+            ${info?.blocked && html`<div class="warnbox">${info.blocked}.</div>`}
+            ${info && !info.blocked && html`
+                <p>${n ? html`Its <b>${n} value${n === 1 ? "" : "s"}</b> move${n === 1 ? "s" : ""} to the vault's .trash folder, and the` : "It has no values. The"} taxonomy leaves the data store schema.</p>
+                ${info.systems.length > 0 && html`<p>Used as levels by: ${info.systems.join(", ")}</p>`}
+                ${info.linkedFrom.length > 0 && html`<div class="warnbox"><div>${info.linkedFrom.length} note${info.linkedFrom.length === 1 ? " links" : "s link"} to its values and will show them as unresolved:</div>
+                    <div>${shown.map((x) => x.name).join(", ")}${info.linkedFrom.length > shown.length && html` <button type="button" class="linkish" onClick=${() => setAll(true)}>and ${info.linkedFrom.length - shown.length} more</button>`}</div></div>`}`}
+            ${err && html`<p class="error">${err}</p>`}
+            <div class="row" style="justify-content:flex-end"><button type="button" onClick=${onClose}>${info?.blocked ? "Close" : "Cancel"}</button>
+                ${info && !info.blocked && html`<${ConfirmButton} class="" disabled=${busy} onConfirm=${del}>${busy ? "Deleting…" : "Delete taxonomy"}<//>`}</div>
+        </div>
     </div><//>`;
 }
 
@@ -1208,6 +1291,7 @@ function CollectionView({ index, collection, novelFilter, scope = "page" }) {
     const pick = useItemPick();
     const [q, setQ] = useState("");
     const [addingMany, setAddingMany] = useState(false);
+    const [deleting, setDeleting] = useState(false);   // the delete dialog of a taxonomy
     // picked filter values, kept per collection in localStorage like the rest of the view's settings
     const [filters, setFiltersNow] = useState(() => store.get(`filters:${collection}`, {}));
     const setFilters = (fn) => setFiltersNow((f) => { const next = typeof fn === "function" ? fn(f) : fn; store.set(`filters:${collection}`, next); return next; });
@@ -1226,6 +1310,13 @@ function CollectionView({ index, collection, novelFilter, scope = "page" }) {
     if (!index) return html`<${Loading} />`;
     const col = index.schema.collections[collection];
     if (!col) return html`<p class="error">Unknown collection ${collection}</p>`;
+    const required = index.requiredFacets?.[collection];
+    // a deleted taxonomy: its page and its values' pages leave the drawers; the main page goes home
+    const deleted = (r) => {
+        setDeleting(false);
+        for (const h of [`#/c/${encodeURIComponent(collection)}`, ...r.trashed.map(noteHref)]) { dropFromDrawer(h); closeLeftTab(h); }
+        if (location.hash === `#/c/${encodeURIComponent(collection)}`) go("#/");
+    };
     const all = index.inCollection(collection);
     const facetKeys = Object.keys(col.links).filter((k) => !["novels"].includes(k)).concat(col.fields.some(([k]) => k === "tier") ? ["tier"] : []);
     const values = (n, k) => asList(n.fm[k]).map((v) => (isLink(v) ? linkLabel(v) : String(v)));
@@ -1291,10 +1382,12 @@ function CollectionView({ index, collection, novelFilter, scope = "page" }) {
                 <input placeholder="Filter…" value=${q} onInput=${(e) => setQ(e.target.value)} />
                 ${allFacets.length > 0 && html`<button title="Choose which filter groups show" onClick=${() => setPicking(true)}>Filters${hiddenFacets.some((k) => allFacets.some((f) => f.key === k)) ? html` <span class="muted">(${facets.length}/${allFacets.length})</span>` : ""}</button>`}
                 <button onClick=${() => { const m = mode === "table" ? "cards" : "table"; setMode(m); store.set("viewMode", m); }}>${mode === "table" ? "Cards" : "Table"}</button>
-                ${collection.startsWith("Taxonomy/") && html`<button title="Add several values at once from a list (levels with sub-levels and numbers)" onClick=${() => setAddingMany(true)}>Add several…</button>`}
+                ${collection.startsWith("Taxonomy/") && html`<button title="Add several values at once from a list (levels with sub-levels and numbers)" onClick=${() => setAddingMany(true)}>Add several…</button>
+                    <button class="danger" disabled=${!!required} title=${required ? `Required, so it can't be deleted: used by ${required.join("; ")}. Single values can be deleted on their own pages` : "Delete this taxonomy and all its values"} onClick=${() => setDeleting(true)}>Delete…</button>`}
                 <button class="primary" onClick=${() => (inDrawer(scope) ? openInDrawer : go)(`#/new/${encodeURIComponent(collection)}`)}>New</button>
             </div>
             ${addingMany && html`<${TaxonomyDialog} index=${index} collection=${collection} onClose=${() => setAddingMany(false)} />`}
+            ${deleting && html`<${DeleteTaxonomyDialog} collection=${collection} onClose=${() => setDeleting(false)} onDeleted=${deleted} />`}
         </div>
         <div class="facets">
             ${facets.map((f) => html`<div class="facet"><b>${f.key}</b>${f.values.slice(0, 40).map(([v, c]) => {
@@ -1622,22 +1715,23 @@ function BlueprintPanel({ page, index }) {
     const item = page.collection === "Recipes" ? page.blueprint.root.item : page.path;
     const { data } = useApi(count === 1 ? null : `/api/blueprint?${qs({ item, count })}`);
     const bp = count === 1 ? page.blueprint : data ?? page.blueprint;
-    return html`<div class="panel">
-        <div class="spread"><h2 style="margin:0">Build tree</h2>
-            <div class="row"><label class="row muted">Build <input type="number" min="1" value=${count} style="width:70px" onInput=${(e) => setCount(Math.max(1, Number(e.target.value) || 1))} /></label>
+    // a section of the page (shown only when the item has a recipe, or on a recipe): the tree, then what the whole build takes
+    return html`<section class="np-sec np-build-sec">
+        <div class="np-sec-head"><h2>Build tree</h2>
+            <div class="row"><label class="row muted small">Build <input type="number" min="1" value=${count} style="width:64px" onInput=${(e) => setCount(Math.max(1, Number(e.target.value) || 1))} /></label>
                 <button class="small" title="Copy the blueprint as a callout (components, materials and what it takes to make)" onClick=${() => copyText(blueprintCallout(bp, page, count, index), `Copied the ${bp.root.name} blueprint as a callout`)}>⧉ Copy callout</button></div></div>
-        <div class="grid2" style="margin-top:10px">
+        <div class="np-build">
             <div class="tree"><ul><${Tree} node=${bp.root} /></ul></div>
-            <div>
+            <div class="np-build-side">
                 <h3>Total materials</h3>
-                <table><tbody>${bp.bill.map((b) => html`<tr><td>${b.material ? html`<a href=${noteHref(b.material)}>${b.name}</a>` : b.name}</td><td class="num">${b.qtyText}</td></tr>`)}</tbody></table>
-                ${bp.parts.length > 0 && html`<h3 style="margin-top:12px">Parts without a blueprint</h3>
+                ${bp.bill.length ? html`<table><tbody>${bp.bill.map((b) => html`<tr><td>${b.material ? html`<a href=${noteHref(b.material)}>${b.name}</a>` : b.name}</td><td class="num">${b.qtyText}</td></tr>`)}</tbody></table>` : html`<p class="muted">-</p>`}
+                ${bp.parts.length > 0 && html`<h3>Parts without a blueprint</h3>
                     <table><tbody>${bp.parts.map((p) => html`<tr><td><a href=${noteHref(p.item)}>${p.name}</a></td><td class="num">${p.count}×</td></tr>`)}</tbody></table>`}
-                <h3 style="margin-top:12px">Knowledge needed</h3>
-                <div>${bp.disciplines.map((d) => html`<span class="chip">${d}</span>`)}${bp.maxTier ? html` <span class="badge">max tier ${bp.maxTier}</span>` : ""}</div>
+                <h3>Knowledge needed</h3>
+                <div>${bp.disciplines.length ? bp.disciplines.map((d) => html`<span class="chip">${d}</span>`) : html`<span class="muted">-</span>`}${bp.maxTier ? html` <span class="badge">max tier ${bp.maxTier}</span>` : ""}</div>
             </div>
         </div>
-    </div>`;
+    </section>`;
 }
 
 function ImageDrop({ path, onDone }) {
@@ -1733,16 +1827,21 @@ function RenameDialog({ path: p, title: title0 = "", withTitle = false, onDone, 
 const DEFAULT_GROUPS = { characters: {
     bio: ["name", "aliases", "race", "alive", "age-introduced", "age-current", "age", "member-of", "wealth", "character/power-system", "character/talent", "role"],
     appearance: ["gender", "height", "weight", "eye-color", "hair-color", "hair-style", "facial-hair", "bust-size", "attractiveness"],
-}, Items: {
-    details: ["title", "aliases", "cat", "subcat", "topics", "heritage", "genre", "tradition"],
+},
+// every data store and taxonomy collection (fields a collection lacks are skipped)
+datastore: {
+    details: ["title", "aliases", "cat", "subcat", "topics", "heritage", "genre", "tradition", "system-item"],
     description: [],
-    info: ["power-system", "energy-source", "rarity", "tier", "elements", "teaches"],
+    info: ["power-system", "energy-source", "rarity", "tier", "elements", "teaches", "value", "currency"],
 } };
 // list fields that read better as a section of their own (a list under a heading) than as a property
 const DEFAULT_LIST_SECTIONS = { characters: ["character/skills"] };
 // fields the page never shows (only Links & more): leftovers, or covered elsewhere (ledgers, stat templates); a schema
 // collection's `hidden` replaces the list for it
-const DEFAULT_HIDDEN = { characters: ["novel", "chapter-introduced", "chapter-updated", "character/level", "character/sub-level", "items", "inventory"] };
+const DEFAULT_HIDDEN = { characters: ["novel", "chapter-introduced", "chapter-updated", "character/level", "character/sub-level", "items", "inventory"],
+    datastore: ["novels", "uom", "recipe"] };
+/** A page's default from one of the tables above: characters, a collection's own entry, else the data store's */
+const defaultFor = (table, page) => { const kind = kindOf(page); return kind == null ? undefined : table[kind] ?? (page.collection ? table.datastore : undefined); };
 const HIDDEN_EVERYWHERE = new Set(["cssclasses"]);
 const PLAN_SECTIONS = { plots: ["plot"], volumes: ["description", "plan"], chapters: ["plan"] };
 const TECH_KEYS = new Set(["type", "created-date", "facet", "images"]);
@@ -1756,7 +1855,7 @@ function summarySpec(page, index) {
 /** Fields the Page tab leaves out (shown on Links & more): technical keys, ledger-made ones, a character's synced relations */
 const kindOf = (page) => (page.plan ? null : page.fm.type === "character" ? "characters" : page.collection);
 const technicalField = (page, spec, k) => TECH_KEYS.has(k) || HIDDEN_EVERYWHERE.has(k) || (spec?.generated ?? []).includes(k)
-    || asList(spec?.hidden ?? DEFAULT_HIDDEN[kindOf(page)]).includes(k) || (page.fm.type === "character" && k.startsWith("relations/"));
+    || asList(spec?.hidden ?? defaultFor(DEFAULT_HIDDEN, page)).includes(k) || (page.fm.type === "character" && k.startsWith("relations/"));
 /** Which fields are sections (long text) and which small fields sit under a section */
 function docLayout(page, spec, index, keys, defs) {
     const kind = kindOf(page);
@@ -1768,7 +1867,7 @@ function docLayout(page, spec, index, keys, defs) {
     const sections = [...new Set([...named.filter((k) => keys.includes(k)), ...keys.filter(long)])].filter((k) => isText(k) && !technicalField(page, spec, k));
     for (const k of lists) if (!sections.includes(k) && !technicalField(page, spec, k)) sections.push(k);
     const grouped = new Map();   // small field -> the section it sits under
-    const groups = spec?.groups ?? DEFAULT_GROUPS[kind] ?? {};
+    const groups = spec?.groups ?? defaultFor(DEFAULT_GROUPS, page) ?? {};
     for (const [sec, list] of Object.entries(groups)) for (const k of asList(list)) if (keys.includes(k) && !sections.includes(k)) grouped.set(k, sec);
     // a group whose section isn't a text field of the note still gets a section of its own (just the small fields):
     // right after the section of the group before it in the groups' order (an item's Info after Description), else
@@ -1813,6 +1912,8 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
     useEffect(() => { if (open) requestAnimationFrame(() => root.current?.querySelector(".np-prop.open input:not([type=checkbox]), .np-prop.open textarea")?.focus()); }, [open]);
     const edit = (k, v) => { if (baseMtime == null) setBaseMtime(mtime); setEdits((s) => ({ ...s, [k]: v })); };
     const reset = () => { setEdits({}); setBaseMtime(null); setErr(""); setOpenSec(null); };
+    // one section's edit undone (and the section closed); the rest stay
+    const discard = (k) => { setEdits((s) => { const n = { ...s }; delete n[k]; return n; }); setOpenSec((o) => (o === k ? null : o)); };
     const save = async () => {
         if (!dirty || busy) return;
         setBusy(true); setErr("");
@@ -1822,12 +1923,14 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
             setSaved({ mtime: r.mtime, fm: { ...(page.mtime >= saved.mtime ? {} : saved.fm), ...set } });
             reset(); setOpen(null);
             toast("Saved");
+            if (r.files?.length) { markDirty(scope, page.path, false); chaptersMoved(page.path.split("/")[0], new Map(), r.files); }   // (a chapter's file follows its title)
         } catch (e) { setErr(e.message); }
         setBusy(false);
     };
-    const readOnly = (k) => READONLY_KEYS.has(k) || generated.has(k) || (fm[k] && typeof fm[k] === "object" && asList(fm[k]).some((x) => x && typeof x === "object"));
+    const readOnly = (k) => READONLY_KEYS.has(k) || (k === "chapter" && (page.plan?.kind === "chapters" || ["chapter", "chapter-plan"].includes(fm.type))) || generated.has(k) || (fm[k] && typeof fm[k] === "object" && asList(fm[k]).some((x) => x && typeof x === "object"));
     const cur = (k) => (k in edits ? edits[k] : fm[k]);
-    const def = (k) => (defs.has(k) ? defs.get(k) : Array.isArray(fm[k]) ? [] : typeof fm[k] === "boolean" ? false : "");
+    // a taxonomy value's power systems are a list (one set of levels can serve several systems), whatever the schema's default
+    const def = (k) => (k === "power-system" && page.collection?.startsWith("Taxonomy/") ? [] : defs.has(k) ? defs.get(k) : Array.isArray(fm[k]) ? [] : typeof fm[k] === "boolean" ? false : "");
     const input = (k) => {
         const target = linkTargetOf(spec, k, fm[k]);
         return fieldInput({ key: k, def: def(k), target, value: cur(k), index, options: linkOptionsFor(target, index, linkOptions), onChange: (v) => edit(k, v) });
@@ -1857,21 +1960,26 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
         const toggle = () => setOpenSec(editing ? null : k);
         return html`<section key=${k} class=${`np-sec ${changed.includes(k) ? "changed" : ""} ${!hasField && sub.length ? "only-mini" : ""}`} onDblClick=${hasField && !readOnly(k) ? dblToggle(toggle) : undefined}>
             <div class="np-sec-head"><h2>${sectionTitle(k)}</h2>
-                ${hasField && !readOnly(k) && (editing ? html`<button class="small" onClick=${toggle}>Done</button>`
-                    : html`<button class="icon" title=${`Edit ${sectionTitle(k)} (or double-click)`} aria-label=${`Edit ${sectionTitle(k)}`} onClick=${toggle}>${ICONS.edit}</button>`)}</div>
+                ${hasField && !readOnly(k) && !editing && html`<button class="icon" title=${`Edit ${sectionTitle(k)} (or double-click)`} aria-label=${`Edit ${sectionTitle(k)}`} onClick=${toggle}>${ICONS.edit}</button>`}</div>
             ${hasField && (editing
                 ? (k === "plan" ? html`<${PlanEditor} value=${v ?? ""} onChange=${(x) => edit(k, x)} />`
                     : Array.isArray(def(k)) || linkTargetOf(spec, k, fm[k]) != null ? html`<div class="np-sec-input">${input(k)}</div>`
-                    : html`<${AutoTextarea} class="np-sec-text" value=${v} autoFocus=${true} onInput=${(e) => edit(k, e.target.value)} aria-label=${sectionTitle(k)} />`)
+                    : html`<div class="np-sec-blocks"><${BlockEditor} value=${String(v ?? "")} compact=${true} callouts=${false} sceneBreaks=${false} autoFocus=${true} onChange=${(x) => edit(k, x)} onEscape=${() => setOpenSec(null)} /></div>`)
                 : !filled(v) ? html`<p class="np-prose blank">-</p>`
                 : k === "plan" ? html`<${PlanView} text=${String(v)} />`
-                : typeof v === "string" ? html`<p class="np-prose">${v}</p>`
+                : typeof v === "string" ? html`<${MdText} text=${v} />`
                 : Array.isArray(v) ? html`<ul class="np-list">${v.map((x) => html`<li>${isLink(x) ? html`<${Chip} value=${x} links=${page.links} index=${index} />` : String(x)}</li>`)}</ul>`
                 : html`<div class="np-prose"><${Value} v=${v} links=${page.links} index=${index} /></div>`)}
+            ${hasField && (editing || changed.includes(k)) && html`<div class="row np-sec-actions">
+                <button class="primary" disabled=${busy || !dirty} onClick=${save}>${busy ? "Saving…" : "Save"}</button>
+                ${changed.includes(k) ? html`<button onClick=${() => discard(k)}>Discard</button>` : html`<button onClick=${() => setOpenSec(null)}>Close</button>`}
+                <span class="muted small">Ctrl+S ${changed.includes(k) ? "saves" : "closes"} · Esc Esc closes${changed.length > 1 ? ` · saves all ${changed.length} changes` : ""}</span></div>`}
             ${sub.length > 0 && html`<div class="np-mini">${sub.map(row)}</div>`}
         </section>`;
     };
-    return html`<div class="np-fields" ref=${root} onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); save(); } }}>
+    // the save bar at the bottom is for property changes; a section's changes are saved from under that section
+    const outside = changed.filter((k) => !sections.includes(k));
+    return html`<div class="np-fields" ref=${root} onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); if (dirty) save(); else { setOpenSec(null); setOpen(null); } } }}>
         <div class="np-props">
             ${props.filter((k) => showEmpty || isFilled(k)).map(row)}
             ${emptyCount > 0 && html`<button class="np-more" onClick=${() => setShowEmpty(!showEmpty)}>${showEmpty ? "Hide empty fields" : `+ ${emptyCount} empty field${emptyCount === 1 ? "" : "s"}`}</button>`}
@@ -1879,9 +1987,9 @@ function FieldsEditor({ page, index, spec, scope, linkOptions }) {
         ${sections.map(section)}
         ${statsInfo && statTpl && html`<section class="np-sec"><${SheetStats} info=${statsInfo} tpl=${statTpl} tplName=${tplName} fm=${fm} edits=${edits} edit=${edit} changed=${changed} index=${index} /></section>`}
         ${err && html`<p class="error">${err}</p>`}
-        <div class=${`savebar ${dirty ? "dirty" : "quiet"}`}>
-            <button class="primary" disabled=${!dirty || busy} onClick=${save}>${busy ? "Saving…" : "Save changes"}</button>
-            ${dirty && html`<button onClick=${reset}>Discard</button><span class="muted">${changed.length} changed · Ctrl+S</span>`}
+        <div class=${`savebar ${outside.length ? "dirty" : "quiet"}`}>
+            <button class="primary" disabled=${!outside.length || busy} onClick=${save}>${busy ? "Saving…" : "Save changes"}</button>
+            ${outside.length > 0 && html`<button onClick=${() => outside.forEach(discard)}>Discard</button><span class="muted">${changed.length} changed · Ctrl+S</span>`}
         </div>
     </div>`;
 }
@@ -1950,13 +2058,46 @@ function RelationsBox({ page, index, rel: given, title = "Relationships" }) {
 
 // Ranked taxonomy notes (`ordered: true`) show every value of their facet in `class` order
 const ranked = (n) => n.fm.ordered === true && n.fm.class !== "" && n.fm.class != null && !Number.isNaN(Number(n.fm.class));
-function ClassStrip({ page, index }) {
-    if (!page.collection?.startsWith("Taxonomy/") || !ranked(page)) return null;
-    const sibs = (index?.inCollection(page.collection) ?? []).filter(ranked)
-        .sort((a, b) => Number(a.fm.class) - Number(b.fm.class) || a.name.localeCompare(b.name));
-    if (sibs.length < 2) return null;
-    return html`<nav class="class-strip">${sibs.map((n) => html`<a href=${noteHref(n.path)} class=${n.path === page.path ? "on" : ""}>
-        <span class="rank">${n.fm.class}</span>${n.fm.title || n.name}</a>`)}</nav>`;
+/**
+ * A note's place in its collection's hierarchy, for the column: a race's family through `parent-race` (from its topmost
+ * ancestor down), or every value of a ranked taxonomy in `class` order (sub-values under their `parent`). Null when
+ * there is nothing to show besides the note itself.
+ */
+const PARENT_FIELDS = { Races: "parent-race" };
+function hierarchyFor(page, index) {
+    if (!index || !page.collection) return null;
+    const titleOf = (n) => String(n.fm.title || n.name);
+    const parentOf = (n, field) => { const p = n.fm[field] && index.resolve(String(asList(n.fm[field])[0])); return p && p.collection === page.collection ? p : null; };
+    const build = (list, field, order) => {
+        const kids = (n) => list.filter((c) => c.path !== n.path && parentOf(c, field)?.path === n.path).sort(order);
+        const node = (n, seen) => ({ path: n.path, title: titleOf(n), rank: n.fm.class, children: seen.has(n.path) ? [] : kids(n).map((c) => node(c, new Set([...seen, n.path]))) });
+        return (roots) => roots.sort(order).map((r) => node(r, new Set()));
+    };
+    if (page.collection.startsWith("Taxonomy/")) {
+        if (!ranked(page)) return null;
+        const list = index.inCollection(page.collection).filter(ranked);
+        if (list.length < 2) return null;
+        const order = (a, b) => Number(a.fm.class) - Number(b.fm.class) || a.name.localeCompare(b.name);
+        const inList = (n) => { const p = parentOf(n, "parent"); return p && list.some((x) => x.path === p.path); };
+        return { title: collectionLabel(page.collection), ranked: true, nodes: build(list, "parent", order)(list.filter((n) => !inList(n))) };
+    }
+    const field = PARENT_FIELDS[page.collection];
+    if (!field) return null;
+    const list = index.inCollection(page.collection);
+    const me = list.find((n) => n.path === page.path) ?? { path: page.path, name: page.name, fm: page.fm, collection: page.collection };
+    let root = me;
+    for (const seen = new Set([me.path]); ;) { const up = parentOf(root, field); if (!up || seen.has(up.path)) break; seen.add(up.path); root = up; }
+    const order = (a, b) => titleOf(a).localeCompare(titleOf(b));
+    const nodes = build(list.some((n) => n.path === me.path) ? list : [...list, me], field, order)([root]);
+    return nodes[0].children.length ? { title: "Lineage", nodes } : null;
+}
+
+/** The column's hierarchy: titles as a tree (ranks beside ranked taxonomy values), the open note marked; a click opens one */
+function HierarchySide({ tree, current, open }) {
+    const pill = (t) => html`<button class=${`np-pill ${t.path === current ? "on" : ""}`} aria-current=${t.path === current ? "page" : undefined}
+        title=${t.title} onClick=${(e) => t.path !== current && open(t.path, e.currentTarget)}>${tree.ranked && html`<span class="np-rank">${t.rank}</span>`}${t.title}</button>`;
+    const branch = (nodes) => html`<ul class="np-tree">${nodes.map((t) => html`<li key=${t.path}>${pill(t)}${t.children.length > 0 && branch(t.children)}</li>`)}</ul>`;
+    return html`<div class="np-side-sec np-hier"><h4>${tree.title}</h4>${branch(tree.nodes)}</div>`;
 }
 
 /** A [[link]]'s target note name (no alias, heading or folders), lower case, for matching */
@@ -1972,12 +2113,16 @@ const SIDE_SHOWN = 3;
  */
 function NoteView({ index, path, scope = "page" }) {
     const { data: page, error } = useApi(`/api/note?${qs({ path })}`);
+    const noteRef = useRef();
+    // opened from another note's column: keep the place on the page (see keepScroll)
+    useLayoutEffect(() => { if (page && page.path === path) restoreKeptScroll(noteRef.current); }, [page?.path === path ? path : null]);
     const { data: plan } = useApi(page?.plan ? `/api/plan?${qs({ novel: page.plan.novel })}` : null);
     const linkOptions = useMemo(() => plan && {
         "@plots": plan.plots.map((p) => ({ label: p.name, hint: p.title !== p.name ? p.title : p.rating?.title ?? "" })),
         "@characters": plan.characters.map((c) => ({ label: c.name })),
     }, [plan]);
     const [renaming, setRenaming] = useState(false);
+    const [addBlock, setAddBlock] = useState({ path: null, n: 0 });   // bumped by the header's "+ Block" button, for that note
     const [tab, setTabState] = useState(() => (store.get("characterTab", "page") === "ledger" ? "ledger" : "page"));
     const setTab = (t) => { setTabState(t); if (t === "page" || t === "ledger") store.set("characterTab", t); };
     // a ledger entry being written or edited from a character's tabs: a tab of its own, kept while you look at the others
@@ -1991,6 +2136,23 @@ function NoteView({ index, path, scope = "page" }) {
     const novelLinks = useNovelLinks(page?.fm.type === "character" ? novel?.folder : null);
     // a character's ledgers at the column's chapter (null: the latest)
     const [at, setAt] = useState(null);
+    // the view stays mounted from one note to the next (only its content changes, the column keeps its place): what
+    // belongs to one note starts over when the path changes
+    const firstPath = useRef(path);
+    useLayoutEffect(() => {
+        if (firstPath.current === path) return;
+        firstPath.current = path;
+        setRenaming(false); setEntryTab(null); setAt(null);
+        setTabState((t) => (t === "entry" ? "ledger" : t));
+        // opened any other way than from the column: start at the top, as a new page would (a drawer then puts back a
+        // place it remembers for that page)
+        const root = noteRef.current;
+        if (root && !(keptScroll && Date.now() - keptScroll.at < 5000 && areaOf(root) === keptScroll.area)) {
+            const el = scrollerOf(root), side = root.querySelector(".np-side");
+            if (el) el.scrollTop = 0;
+            if (side) side.scrollTop = 0;
+        }
+    }, [path]);
     const { data: owned } = useApi(isChar ? `/api/owner?${qs({ novel: novel.folder, owner: page.name, at })}` : null);
     const { data: stats } = useApi(isChar ? `/api/stats?${qs({ novel: novel.folder, owner: page.name, at })}` : null);
     if (!page) return html`<${Loading} error=${error} />`;
@@ -2024,27 +2186,31 @@ function NoteView({ index, path, scope = "page" }) {
     const startRename = () => { if (!dirtyForms.has(`${scope}:${page.path}`) || confirm("Renaming reloads this note. Discard unsaved changes?")) setRenaming(true); };
     // opening another note from the page: in the drawer it becomes the drawer page, in a left tab that tab follows it
     const openNote = (p) => (scope === "drawer" ? openInDrawer(noteHref(p)) : scope === "left" ? renameLeftTab(noteHref(page.path), noteHref(p)) : go(noteHref(p)));
+    const openSide = (p, el) => { if (el) keepScroll(el); openNote(p); };   // from the column: stay at the same place
     const tabs = [["page", "Page"],
         ...(isChar ? [["relations", "Relations"], ["inventory", "Inventory"], ["ledger", "Ledger"]] : []),
         ...(entryTab ? [["entry", entryTabLabel(entryTab)]] : []),
         ["links", "Links & more"]];
     const tabNow = tabs.some(([k]) => k === tab) ? tab : "page";
     const family = page.plan?.kind === "plots" ? plotFamily(plan, page) : page.plan?.kind === "volumes" && plan ? { ...volumePlots(plan, page.fm), volumes: plan.volumes.filter((v) => v.path === page.path) } : null;
+    const teaching = family ? null : teachingFor(page, index);
+    const hierarchy = family ? null : hierarchyFor(page, index);
     const usage = html`
         ${page.heldBy?.length > 0 && html`<div class="np-side-sec"><h4>Held by</h4>${page.heldBy.map((x) => html`<div class="np-side-row"><a href=${ownerHref(x.novel, x.owner)}>${x.owner}</a><span class="muted">${x.qtyText}${x.store !== "inventory" ? ` @ ${x.store}` : ""}</span></div>`)}</div>`}
         ${page.whereUsed?.length > 0 && html`<div class="np-side-sec"><h4>Used in</h4><${WhereUsed} uses=${page.whereUsed} /></div>`}
         ${page.collection === "Items" && !page.blueprint && html`<div class="np-side-sec"><h4>Recipe</h4><button class="small-link linkish" onClick=${() => { if (inDrawer(scope)) collapseDrawer(); go(`#/newrecipe/${encodeURIComponent(page.path)}`); }}>Create recipe</button></div>`}
         ${page.creatureStats && html`<${CreatureNovels} page=${page} index=${index} />`}`;
     const side = isChar ? html`<${CharacterSide} owned=${owned} stats=${stats} chapter=${chapter} setAt=${setAt} relLedger=${relLedger} stockLedgers=${stockLedgers} index=${index} goTab=${setTab} />`
-        : family ? html`<${PlotFamily} family=${family} current=${page.path} open=${openNote} />`
-        : (page.heldBy?.length || page.whereUsed?.length || (page.collection === "Items" && !page.blueprint) || page.creatureStats) ? usage : null;
-    const content = blocksFor(page) ? html`<${NoteBlocks} key=${page.path} page=${page} scope=${scope} />` : html`
-        ${page.blueprint && html`<${BlueprintPanel} page=${page} index=${index} />`}
-        ${page.body.trim() && (page.plan
+        : family ? html`<${PlotFamily} family=${family} current=${page.path} open=${openSide} />`
+        : (teaching || hierarchy || page.heldBy?.length || page.whereUsed?.length || (page.collection === "Items" && !page.blueprint) || page.creatureStats)
+            ? html`${hierarchy && html`<${HierarchySide} tree=${hierarchy} current=${page.path} open=${openSide} />`}${teaching && html`<${TeachingSide} key=${page.path} sources=${teaching} current=${page.path} open=${openSide} />`}${usage}` : null;
+    const headerAdd = blocksFor(page);   // note pages add blocks from "+ Block" in the header, not from a row under the blocks
+    const content = html`${page.blueprint && html`<${BlueprintPanel} page=${page} index=${index} />`}
+        ${blocksFor(page) ? html`<${NoteBlocks} key=${page.path} page=${page} scope=${scope} addSignal=${headerAdd ? (addBlock.path === page.path ? addBlock.n : 0) : null} />` : page.body.trim() && (page.plan
             ? html`<details class="np-sec"><summary class="muted">Note body (not used by the plan, edit it in Obsidian)</summary><${Html} html=${page.html} /></details>`
             : html`<div class="np-body"><${Html} html=${page.html} /></div>`)}`;
     const technical = Object.keys(page.fm).filter((k) => technicalField(page, spec, k));
-    return html`<div class="np-note">
+    return html`<div class="np-note" ref=${noteRef}>
         ${renaming && html`<${RenameDialog} path=${page.path} onDone=${renamed} onClose=${() => setRenaming(false)} />`}
         <header class="np-head">
             <div class="np-crumbs">${page.collection ? html`<a href=${`#/c/${encodeURIComponent(page.collection)}`}>${collectionLabel(page.collection)}</a>` : page.path.split("/").slice(0, -1).join(" / ")}</div>
@@ -2054,6 +2220,7 @@ function NoteView({ index, path, scope = "page" }) {
             <div class="np-actions">
                 ${pickable(pick, page.collection) && html`<button class="primary" onClick=${() => pick.pick(page.name)}>Use this for ${pick.label}</button>`}
                 ${["Items", "Materials"].includes(page.collection) && html`<button class="small" title="Copy as an item callout (like a game's item tooltip)" onClick=${() => copyText(itemCallout(page, spec), `Copied ${page.name} as a callout`)}>⧉ Copy callout</button>`}
+                ${headerAdd && html`<button class="small" title="Add a block (a ## section of the note's text)" onClick=${() => { setTab("page"); setAddBlock((b) => ({ path: page.path, n: (b.path === page.path ? b.n : 0) + 1 })); }}>+ Block</button>`}
                 ${deletable && html`<button class="small" title="Rename the file; links to it in the vault follow" onClick=${startRename}>Rename file</button>`}
                 ${deletable && html`<${ConfirmButton} class="small" onConfirm=${del}
                     title=${`Move to the vault's .trash folder${linkedFrom ? `. ${linkedFrom} note${linkedFrom > 1 ? "s" : ""} link here and will show it as unresolved` : ""}${page.heldBy?.length ? ". Ledger lines still name it" : ""}`}>Delete<//>`}
@@ -2064,7 +2231,6 @@ function NoteView({ index, path, scope = "page" }) {
             <div class="np-main">
                 <div hidden=${tabNow !== "page"}>
                     ${family?.parent && html`<div class="np-parent"><span class="muted">Subplot of</span><button class="linkish" onClick=${() => openNote(family.parent.path)}>${family.parent.title}</button></div>`}
-                    <${ClassStrip} page=${page} index=${index} />
                     ${page.fmError ? html`<p class="muted">Fix the frontmatter in Obsidian to edit fields here.</p>`
                         : html`<${FieldsEditor} key=${page.path} page=${page} index=${index} spec=${spec} scope=${scope} linkOptions=${linkOptions ?? novelLinks} />`}
                     ${family && html`<${PagePlots} page=${page} family=${family} open=${openNote} />`}
@@ -2086,7 +2252,7 @@ function NoteView({ index, path, scope = "page" }) {
                         ${technical.map((k) => html`<div class="np-prop ro" key=${k}><span class="np-prop-k mono" title=${k}>${k}</span><div class="np-prop-v">${filled(page.fm[k]) ? html`<${Value} v=${page.fm[k]} links=${page.links} index=${index} />` : html`<span class="blank">-</span>`}</div></div>`)}</section>
                 </div>`}
             </div>
-            ${side && html`<aside class="np-side">${side}</aside>`}
+            ${side && html`<${SideColumn}>${side}<//>`}
         </div>
     </div>`;
 }
@@ -2194,11 +2360,108 @@ function volumePlots(plan, fm) {
 /** The column beside a plot or volume: its volume(s), the main plot and its subplots as titles, the open one marked; a click opens one */
 function PlotFamily({ family, current, open }) {
     const pill = (p, label = p.title) => html`<button key=${p.path} class=${`np-pill ${p.path === current ? "on" : ""}`} aria-current=${p.path === current ? "page" : undefined}
-        onClick=${() => p.path !== current && open(p.path)}>${label}</button>`;
+        title=${label} onClick=${(e) => p.path !== current && open(p.path, e.currentTarget)}>${label}</button>`;
     const vols = family.volumes ?? [];
     return html`<div class="np-side-sec"><h4>${vols.length > 1 ? "Volumes" : "Volume"}</h4>${vols.length ? vols.map((v) => pill(v, v.label ?? v.title)) : html`<p class="muted small">None yet.</p>`}</div>
         <div class="np-side-sec"><h4>Main plot</h4>${family.main ? pill(family.main) : html`<p class="muted small">None yet.</p>`}</div>
         <div class="np-side-sec"><h4>Subplots</h4>${family.subplots.length ? family.subplots.map((p) => pill(p)) : html`<p class="muted small">None yet.</p>`}</div>`;
+}
+
+/**
+ * A note page's column. It scrolls on its own (sticky beside the page) without a scrollbar: a fade with an arrow at the
+ * top and / or bottom shows there is more that way, and clicking it scrolls most of a column height
+ */
+function SideColumn({ children }) {
+    const ref = useRef();
+    const [more, setMore] = useState({ up: false, down: false });
+    useLayoutEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const check = () => {
+            const up = el.scrollTop > 2, down = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
+            setMore((m) => (m.up === up && m.down === down ? m : { up, down }));
+        };
+        check();
+        el.addEventListener("scroll", check, { passive: true });
+        const ro = typeof ResizeObserver === "function" ? new ResizeObserver(check) : null;
+        ro?.observe(el);
+        const mo = typeof MutationObserver === "function" ? new MutationObserver(() => { check(); if (ro) for (const c of el.children) ro.observe(c); }) : null;
+        mo?.observe(el, { childList: true, subtree: true });
+        if (ro) for (const c of el.children) ro.observe(c);
+        // its height is what is visible of it in the window, drawer or tab (it starts below the page's header), so its
+        // bottom, and the arrow there, are always in view; stacked above the page (narrow) it isn't sticky and grows
+        let frame = 0;
+        const fit = () => {
+            frame = 0;
+            if (getComputedStyle(el).position !== "sticky") { if (el.style.maxHeight) { el.style.maxHeight = ""; check(); } return; }
+            const box = scrollerOf(el);
+            const view = box === document.scrollingElement ? { top: 0, bottom: innerHeight } : box.getBoundingClientRect();
+            const h = Math.max(160, Math.floor(view.bottom - Math.max(el.getBoundingClientRect().top, view.top + 12) - 16));
+            if (el.style.maxHeight !== `${h}px`) { el.style.maxHeight = `${h}px`; check(); }
+        };
+        const queue = (e) => { if (e?.target !== el && !frame) frame = requestAnimationFrame(fit); };
+        fit();
+        addEventListener("scroll", queue, { capture: true, passive: true });
+        addEventListener("resize", queue);
+        return () => { el.removeEventListener("scroll", check); ro?.disconnect(); mo?.disconnect(); removeEventListener("scroll", queue, { capture: true }); removeEventListener("resize", queue); cancelAnimationFrame(frame); };
+    }, []);
+    const by = (dir) => ref.current?.scrollBy({ top: dir * ref.current.clientHeight * 0.7, behavior: "smooth" });
+    const hint = (dir) => html`<button class=${`np-more-hint ${dir < 0 ? "up" : "down"} ${(dir < 0 ? more.up : more.down) ? "show" : ""}`} tabIndex="-1"
+        aria-label=${dir < 0 ? "Scroll the column up" : "Scroll the column down"} onClick=${() => by(dir)}><span aria-hidden="true">${dir < 0 ? "⌃" : "⌄"}</span></button>`;
+    return html`<aside class="np-side" ref=${ref}>${hint(-1)}${children}${hint(1)}</aside>`;
+}
+
+/**
+ * What a note teaches, or who teaches it: `teaches` links (an item to abilities) and the abilities' own tree
+ * (`parent-art`, `sub-arts`). A note with `teaches` is its own source; an ability's sources are the notes whose `teaches`
+ * names it or one of its parent arts. Null when there is nothing to show.
+ */
+function teachingFor(page, index) {
+    if (!index || page.plan || page.fm.type === "character") return null;
+    const note = (v) => (v ? index.resolve(String(v)) : null);
+    const titleOf = (n) => String(n.fm.title || n.name);
+    const taught = (n) => [...new Map(asList(n.fm.teaches).map(note).filter(Boolean).map((x) => [x.path, x])).values()];
+    // an ability's sub-arts: listed in its `sub-arts`, or naming it as `parent-art`
+    const childrenOf = (a) => {
+        const listed = asList(a.fm["sub-arts"]).map(note).filter(Boolean);
+        const naming = index.notes.filter((n) => asList(n.fm["parent-art"]).some((v) => note(v)?.path === a.path));
+        return [...new Map([...listed, ...naming].filter((x) => x.path !== a.path).map((x) => [x.path, x])).values()].sort((x, y) => titleOf(x).localeCompare(titleOf(y)));
+    };
+    const tree = (a, seen = new Set()) => (seen.has(a.path) ? { note: a, title: titleOf(a), children: [] }
+        : (seen.add(a.path), { note: a, title: titleOf(a), children: childrenOf(a).map((c) => tree(c, new Set(seen))) }));
+    let sources;
+    if (asList(page.fm.teaches).length) sources = [index.notes.find((n) => n.path === page.path) ?? { path: page.path, name: page.name, fm: page.fm }];
+    else {
+        // this note and its parent arts (nearest first), then the notes teaching any of them
+        const chain = [page.path];
+        for (let cur = page.fm, i = 0; i < 12; i++) {
+            const up = note(asList(cur["parent-art"])[0]);
+            if (!up || chain.includes(up.path)) break;
+            chain.push(up.path); cur = up.fm;
+        }
+        sources = index.notes.filter((n) => taught(n).some((a) => chain.includes(a.path)))
+            .sort((x, y) => Math.min(...taught(x).map((a) => chain.indexOf(a.path)).filter((i) => i >= 0)) - Math.min(...taught(y).map((a) => chain.indexOf(a.path)).filter((i) => i >= 0)) || titleOf(x).localeCompare(titleOf(y)));
+    }
+    if (!sources.length) return null;
+    return sources.map((src) => ({ path: src.path, title: titleOf(src), teaches: taught(src).map((a) => tree(a)) }));
+}
+
+/**
+ * The column's teaching links: the source ("Taught by", cycled with ‹ › when several notes teach this one) and the
+ * tree of what that source teaches, the open note marked; a click opens one
+ */
+function TeachingSide({ sources, current, open }) {
+    const [i, setI] = useState(0);
+    const at = Math.min(i, sources.length - 1);
+    const src = sources[at];
+    const pill = (path, title) => html`<button key=${path} class=${`np-pill ${path === current ? "on" : ""}`} aria-current=${path === current ? "page" : undefined}
+        title=${title} onClick=${(e) => path !== current && open(path, e.currentTarget)}>${title}</button>`;
+    const branch = (nodes) => html`<ul class="np-tree">${nodes.map((t) => html`<li key=${t.note.path}>${pill(t.note.path, t.title)}${t.children.length > 0 && branch(t.children)}</li>`)}</ul>`;
+    const step = (by) => setI((at + by + sources.length) % sources.length);
+    return html`<div class="np-side-sec"><div class="np-side-h"><h4>Taught by</h4>
+            ${sources.length > 1 && html`<span class="np-cycle"><button class="icon" aria-label="Previous source" onClick=${() => step(-1)}>‹</button><span class="muted small">${at + 1} / ${sources.length}</span><button class="icon" aria-label="Next source" onClick=${() => step(1)}>›</button></span>`}</div>
+            ${pill(src.path, src.title)}</div>
+        <div class="np-side-sec"><h4>Teaches</h4>${src.teaches.length ? branch(src.teaches) : html`<p class="muted small">None yet.</p>`}</div>`;
 }
 
 /**
@@ -2212,6 +2475,7 @@ function PlotTexts({ plots, open, level = 3 }) {
     const [busy, setBusy] = useState(false);
     const start = (p) => { setEditing(p.path); setDraft(String(p.fm.plot ?? "")); };
     const save = async (p) => {
+        if (draft === String(p.fm.plot ?? "")) { setEditing(null); return; }   // nothing changed: Ctrl+S just closes
         setBusy(true);
         try { await api.send("PATCH", "/api/note", { path: p.path, set: { plot: draft }, baseMtime: p.mtime }); setEditing(null); toast(`Saved ${p.title}`); }
         catch (e) { toast(e.message); }
@@ -2225,10 +2489,11 @@ function PlotTexts({ plots, open, level = 3 }) {
             <span class="grow" />
             ${editing !== p.path && html`<button class="icon" aria-label=${`Edit the text of ${p.title}`} title="Edit (or double-click)" onClick=${() => start(p)}>${ICONS.edit}</button>`}
         </div>
-        ${editing === p.path ? html`<${AutoTextarea} class="np-sec-text" value=${draft} autoFocus=${true} onInput=${(e) => setDraft(e.target.value)} aria-label=${`The plot of ${p.title}`}
-                onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); e.stopPropagation(); save(p); } if (e.key === "Escape") { e.stopPropagation(); setEditing(null); } }} />
+        ${editing === p.path ? html`<div class="np-sec-blocks" onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); e.stopPropagation(); save(p); } }}>
+                <${BlockEditor} value=${draft} compact=${true} callouts=${false} sceneBreaks=${false} autoFocus=${true} onChange=${setDraft}
+                    onEscape=${() => (draft === String(p.fm.plot ?? "") ? setEditing(null) : toast("Unsaved changes: Ctrl+S saves them, Cancel throws them away"))} /></div>
             <div class="row" style="margin-top:6px"><button class="primary" disabled=${busy} onClick=${() => save(p)}>${busy ? "Saving…" : "Save"}</button><button onClick=${() => setEditing(null)}>Cancel</button><span class="muted small">Saved to ${p.name}</span></div>`
-            : html`<p class=${`np-prose ${filled(p.fm.plot) ? "" : "blank"}`}>${filled(p.fm.plot) ? String(p.fm.plot) : "-"}</p>`}
+            : filled(p.fm.plot) ? html`<${MdText} text=${String(p.fm.plot)} />` : html`<p class="np-prose blank">-</p>`}
     </div>`);
 }
 
@@ -2276,23 +2541,53 @@ function PagePlots({ page, family, open }) {
     </section>`;
 }
 
-/** A power system's levels: taxonomy values whose `power-system` is this note, per taxonomy, sub-levels indented, with their numbers */
+/**
+ * A power system's levels: taxonomy values whose `power-system` names this note (one or several systems), per
+ * taxonomy, sub-levels indented, with their numbers. A taxonomy of levels can be shared: "Use levels from…" adds this
+ * system to every value of another one, "Stop using" takes it off again (the other systems keep them).
+ */
 function PowerLevels({ page, index }) {
+    const [busy, setBusy] = useState(false);
+    const [changing, setChanging] = useState(null);   // the facet being swapped for another
     if (page.collection !== "Power Systems" || !index) return null;
     const me = page.name.toLowerCase();
-    const notes = index.notes.filter((n) => n.collection?.startsWith("Taxonomy/") && n.fm["power-system"] && linkLabel(String(n.fm["power-system"])).toLowerCase() === me);
-    if (!notes.length) return null;
-    const facets = [...new Set(notes.map((n) => n.collection))];
-    return html`<div class="panel note-summary power-levels"><h3>Levels</h3>
-        ${facets.map((c) => {
-            const own = notes.filter((n) => n.collection === c);
+    // any taxonomy can be a power system's levels (linking one made without "levels" adds the fields it needs)
+    const facetsAll = Object.keys(index.schema.collections).filter((c) => c.startsWith("Taxonomy/") && c !== "Taxonomy/Novels");
+    const mine = facetsAll.filter((c) => facetSystemsOf(index, c).some((x) => x.toLowerCase() === me));
+    const others = facetsAll.filter((c) => !mine.includes(c)).sort((a, b) => (isLevelsFacet(index, b) - isLevelsFacet(index, a)) || a.localeCompare(b));
+    // this system on or off a facet's values; every other system they name stays
+    const link = async (c, linked, from, msg) => {
+        setBusy(true);
+        try { await api.send("POST", "/api/taxonomy/system", { collection: c, system: page.name, linked, from }); toast(msg); setChanging(null); } catch (e) { toast(e.message); }
+        setBusy(false);
+    };
+    const use = (c) => link(c, true, null, `${page.name} now uses ${collectionLabel(c)}`);
+    const stop = (c) => link(c, false, null, `${page.name} no longer uses ${collectionLabel(c)}`);
+    const change = (from, to) => link(to, true, from, `${page.name} now uses ${collectionLabel(to)} instead of ${collectionLabel(from)}`);
+    const opt = (c) => { const sys = facetSystemsOf(index, c); return html`<option value=${c}>${collectionLabel(c)}${sys.length ? ` (${sys.join(", ")})` : ""}</option>`; };
+    const levelsOthers = others.filter((c) => isLevelsFacet(index, c)), plainOthers = others.filter((c) => !isLevelsFacet(index, c));
+    const pickOther = (label, onPick) => html`<select disabled=${busy} value="" aria-label=${label} onChange=${(e) => e.target.value && onPick(e.target.value)}>
+        <option value="">${label}</option>
+        ${levelsOthers.length > 0 && html`<optgroup label="Levels">${levelsOthers.map(opt)}</optgroup>`}
+        ${plainOthers.length > 0 && html`<optgroup label="Other taxonomies (become levels)">${plainOthers.map(opt)}</optgroup>`}</select>`;
+    return html`<section class="np-sec power-levels"><div class="np-sec-head"><h2>Levels</h2></div>
+        ${!mine.length && html`<p class="muted">No levels yet.</p>`}
+        ${mine.map((c) => {
+            const own = index.inCollection(c);
             const { options, noteThresholds } = facetChoice(own, "all", (l) => index.resolve(l)?.path ?? null);
             const byName = new Map(own.map((n) => [n.name, n]));
-            return html`${facets.length > 1 && html`<h4>${collectionLabel(c)}</h4>`}
+            const shared = facetSystemsOf(index, c).filter((x) => x.toLowerCase() !== me);
+            return html`<div class="power-levels-facet" key=${c}><div class="power-levels-head"><h4><a href=${`#/c/${encodeURIComponent(c)}`}>${collectionLabel(c)}</a></h4>
+                    ${shared.length > 0 && html`<span class="muted small">shared with ${shared.join(", ")}</span>`}<span class="grow" />
+                    ${others.length > 0 && (changing === c ? html`${pickOther("Use instead…", (to) => change(c, to))}<button class="small" onClick=${() => setChanging(null)}>Cancel</button>`
+                        : html`<button class="small" disabled=${busy} title=${`Use another taxonomy's levels instead of ${collectionLabel(c)}`} onClick=${() => setChanging(c)}>Change</button>`)}
+                    <${ConfirmButton} class="small" disabled=${busy} confirmLabel="Stop using?" title=${`Take ${page.name} off every value of ${collectionLabel(c)}${shared.length ? ` (${shared.join(", ")} keep${shared.length === 1 ? "s" : ""} them)` : ""}`} onConfirm=${() => stop(c)}>Stop using<//></div>
                 <table class="levels-table"><tbody>${options.map((o) => { const n = byName.get(o); const sub = !!(n.fm.parent && index.resolve(String(n.fm.parent))); return html`<tr class=${sub ? "sub" : ""}>
-                    <td><a href=${noteHref(n.path)}>${n.fm.title || n.name}</a></td><td class="num muted">${n.fm.threshold !== "" && n.fm.threshold != null ? n.fm.threshold : sub ? "" : noteThresholds[o] ?? ""}</td></tr>`; })}</tbody></table>
-                <p class="muted small-note"><a href=${`#/c/${encodeURIComponent(c)}`}>${collectionLabel(c)}</a>: a stat template's choice can take these values and work them out from a stat.</p>`;
-        })}</div>`;
+                    <td><a href=${noteHref(n.path)}>${n.fm.title || n.name}</a></td><td class="num muted">${n.fm.threshold !== "" && n.fm.threshold != null ? n.fm.threshold : sub ? "" : noteThresholds[o] ?? ""}</td></tr>`; })}</tbody></table></div>`;
+        })}
+        ${others.length > 0 && html`<div class="row power-levels-use muted small">${mine.length ? "Also use levels from" : "Use levels from"} ${pickOther("a taxonomy…", use)}</div>`}
+        <p class="muted small-note">A stat template's choice can take these values and work them out from a stat.</p>
+    </section>`;
 }
 
 // ------------------------------------------------------------------ note blocks (the body's "## " sections)
@@ -2345,7 +2640,7 @@ export function dblToggle(fn) {
  * mode, Enter or Escape to finish) or deleted; "+ Add block" offers titles other notes of the collection use.
  * Changes are saved at once, rewriting only the sections involved. `wholePage` adds "Edit as one page".
  */
-function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, addLabel = "+ Add block", empty = "" }) {
+function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, addLabel = "+ Add block", empty = "", addSignal = null }) {
     const [local, setLocal] = useState(null); // {mtime, pre, sections} just saved, until the refetched page catches up
     const doc = local && local.mtime > page.mtime ? local : { mtime: page.mtime, pre: page.pre, sections: page.sections };
     const [editing, setEditing] = useState(null); // "pre" | section index | "new" | "all"
@@ -2356,6 +2651,10 @@ function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, 
     const [busy, setBusy] = useState(false);
     const moveRef = useRef();
     const rootRef = useRef();
+    // `addSignal` (a number) means the add button is elsewhere (an item's header): each new value opens the title box,
+    // and the blocks show no add row or title suggestions of their own
+    const external = addSignal != null;
+    useEffect(() => { if (addSignal) { setMoving(null); setNewTitle(""); setAdding(true); } }, [addSignal]);
     const dirtyKey = `blocks:${page.path}`;
     const changed = !!draft && (editing === "new" || draft.changed);
     useEffect(() => markDirty(scope, dirtyKey, changed), [changed]);
@@ -2448,7 +2747,8 @@ function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, 
         ${withTitle && html`<input class="nblock-title-input" value=${draft.title} placeholder="Block title" aria-label="Block title"
             onInput=${(e) => setDraft({ ...draft, title: e.target.value, changed: true })} />`}
         <${BlockEditor} value=${draft.text} compact=${true} callouts=${callouts} sceneBreaks=${false} autoFocus=${true}
-            onChange=${(text) => setDraft((d) => ({ ...d, text, changed: true }))} />
+            onChange=${(text) => setDraft((d) => ({ ...d, text, changed: true }))}
+            onEscape=${() => (changed ? toast("Unsaved changes: Ctrl+S saves them, Cancel throws them away") : stopEdit())} />
         <div class="row nblock-actions">
             <button class="primary" disabled=${busy} onClick=${saveEdit}>${busy ? "Saving…" : editing === "new" ? "Add" : "Save"}</button>
             <button onClick=${stopEdit}>Cancel</button><span class="muted">Ctrl+S</span>
@@ -2483,21 +2783,21 @@ function NoteBlocks({ page, scope = "page", callouts = true, wholePage = false, 
         })}
         ${editing === "new" && html`<section class="panel nblock editing">${editor(true)}</section>`}
         ${!shown.length && !doc.pre.text.trim() && editing == null && empty && html`<p class="muted">${empty}</p>`}
-        <div class="nblock-add row">
-            ${adding ? html`<input autoFocus list=${`nb-titles-${page.path}`} value=${newTitle} placeholder="Block title, e.g. Calendar" aria-label="New block title"
+        ${(!external || adding) && html`<div class="nblock-add row">
+            ${adding ? html`<input autoFocus list=${external ? undefined : `nb-titles-${page.path}`} value=${newTitle} placeholder="Block title, e.g. Calendar" aria-label="New block title"
                     onInput=${(e) => setNewTitle(e.target.value)} onKeyDown=${(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") { e.stopPropagation(); setAdding(false); } }} />
-                <datalist id=${`nb-titles-${page.path}`}>${(page.sectionTitles ?? []).map((t) => html`<option value=${t} />`)}</datalist>
+                ${!external && html`<datalist id=${`nb-titles-${page.path}`}>${(page.sectionTitles ?? []).map((t) => html`<option value=${t} />`)}</datalist>`}
                 <button class="primary" disabled=${!newTitle.trim()} onClick=${add}>Add</button><button onClick=${() => setAdding(false)}>Cancel</button>`
             : html`<button disabled=${busy || editing != null} onClick=${() => { setMoving(null); setAdding(true); }}>${addLabel}</button>
                 ${!doc.pre.text.trim() && editing == null && html`<button class="small-link linkish" onClick=${() => startEdit("pre", "", "")}>Add text above the blocks</button>`}
                 ${wholePage && html`<span class="grow" /><button disabled=${editing != null} onClick=${() => { setMoving(null); setEditing("all"); setDraft({ text: joinSections(doc.pre.text, doc.sections), changed: false }); }}>Edit as one page</button>`}`}
-            ${!adding && (page.sectionTitles ?? []).length > 0 && html`<span class="muted nblock-suggest">${page.sectionTitles.slice(0, 6).map((t) => html`<button class="chip linkish" title=${`Add a ${t} block`}
+            ${!adding && !external && (page.sectionTitles ?? []).length > 0 && html`<span class="muted nblock-suggest">${page.sectionTitles.slice(0, 6).map((t) => html`<button class="chip linkish" title=${`Add a ${t} block`}
                 disabled=${editing != null} onClick=${() => startEdit("new", t, "")}>${t}</button>`)}</span>`}
-        </div>
+        </div>`}
     </div>`;
 }
 /** Notes whose body is shown as blocks (recipes keep their body for the crafting scripts; plans, chapters and ledgers have their own pages) */
-const blocksFor = (page) => !page.plan && !page.blueprint && page.collection !== "Recipes" && !["chapter", "ledger", "config"].includes(page.fm.type) && !page.path.startsWith("90. Templater/");
+const blocksFor = (page) => !page.plan && page.collection !== "Recipes" && !["chapter", "ledger", "config"].includes(page.fm.type) && !page.path.startsWith("90. Templater/");
 
 // ------------------------------------------------------------------ create / edit notes
 
@@ -2684,7 +2984,8 @@ function linkOptionsFor(target, index, linkOptions) {
 
 function fieldInput({ key, def, target, value, onChange, index, options }) {
     if (target != null) return html`<${LinkField} value=${value} multiple=${Array.isArray(def)} target=${target} index=${index} onChange=${onChange} options=${options} />`;
-    if (typeof def === "boolean") return html`<input type="checkbox" checked=${!!value} onChange=${(e) => onChange(e.target.checked)} style="width:auto" />`;
+    if (typeof def === "boolean") return html`<label class="co-switch"><input type="checkbox" role="switch" checked=${!!value} onChange=${(e) => onChange(e.target.checked)} aria-label=${fieldLabel(key)} />
+        <span class="switch-track" aria-hidden="true"><span class="switch-thumb" /></span></label>`;
     if (Array.isArray(def)) return html`<input value=${asList(value).join(", ")} placeholder="comma separated" onChange=${(e) => onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} />`;
     if (key === "plan") return html`<${PlanEditor} value=${value ?? ""} onChange=${onChange} />`;
     if (key === "plot") return html`<${AutoTextarea} class="prose" value=${value} onInput=${(e) => onChange(e.target.value)} placeholder="The plot idea…" />`;
@@ -2821,7 +3122,7 @@ function ChoiceOptions({ f, t, facets, index, set }) {
     // a facet's values (and their own numbers) as the server fills them in
     const fromFacet = (facet, depth = f.depth) => (facet ? facetChoice(index.inCollection(`Taxonomy/${facet}`), depth, (l) => index.resolve(l)?.path ?? null) : { options: [], noteThresholds: {} });
     // the power system a facet's values belong to, to show beside its name
-    const systemOf = (facet) => { const v = index.inCollection(`Taxonomy/${facet}`).map((n) => n.fm["power-system"]).find(Boolean); return v ? linkLabel(String(v)) : ""; };
+    const systemOf = (facet) => facetSystemsOf(index, `Taxonomy/${facet}`).join(", ");
     const numbers = t.fields.filter((x) => x !== f && ["number", "resource", "computed"].includes(x.type));
     const src = numbers.find((x) => x.key === f.from || x.id === f.from);
     const hasLevels = f.facet && index.inCollection(`Taxonomy/${f.facet}`).some((n) => n.fm.parent);
@@ -3185,6 +3486,7 @@ function GrandPlan({ folder, plan }) {
             <div class="chapter-list">${loose.map((c) => html`<${ChapterRow} key=${c.number} folder=${folder} c=${c} />`)}</div></section>`}
         ${drafts.length > 0 && html`<section class="panel volume" data-flip="vol|drafts"><h2>Drafts <span class="muted" style="font-size:13px">chapter ${plan.draftFrom}+</span></h2>
             <div class="chapter-list">${drafts.map((c) => html`<${ChapterRow} key=${c.number} folder=${folder} c=${c} />`)}</div></section>`}
+        <${ArchivedChapters} folder=${folder} plan=${plan} />
     </div>`;
 }
 
@@ -3475,8 +3777,141 @@ function itemCallout(note, spec, extra = {}) {
 }
 
 /** A chapter's plan (and working title while there's no chapter note); saved with "Save changes" */
-function ChapterPlan({ folder, n, plan, hasNote, scope }) {
-    const server = { plan: String(plan?.fm.plan ?? ""), title: String(plan?.fm.title ?? "") };
+/**
+ * Chapters changed number or went to the archive (Map old -> new, null = gone): every open page of them follows, in the
+ * drawer, the left drawer, the writer and the main page, and so do the pages of the notes whose `files` moved ({from,
+ * to}, to null = deleted); open ledger entry pages of the novel close (their keys moved)
+ */
+function chaptersMoved(folder, numbers, files = []) {
+    const href = (n) => chapterHref(folder, n);
+    const to = new Map([...[...numbers].map(([a, b]) => [href(a), b == null ? null : href(b)]), ...files.map((f) => [noteHref(f.from), f.to ? noteHref(f.to) : null])]);
+    const drop = (h) => numbers.size > 0 && h.startsWith(`#/entry/${encodeURIComponent(folder)}?`);
+    const recent = [...new Set(drawer.recent.filter((h) => !drop(h)).map((h) => (to.has(h) ? to.get(h) : h)).filter(Boolean))];
+    setDrawer({ ...drawer, recent, open: drawer.open && (recent.length > 0 || drawer.tab !== "viewer") });
+    followChapters(folder, numbers, to, drop);
+    if (to.has(location.hash)) location.replace(to.get(location.hash) ?? novelHref(folder));
+}
+/** Moving chapters about rewrites files other pages may be editing: those are saved (or discarded) first */
+const nothingUnsaved = () => {
+    if (!dirtyForms.size) return true;
+    toast("Save or discard your unsaved changes first (a page, the plan or the writer has some)");
+    return false;
+};
+
+/** A chapter's own controls, on its plan: its number (the chapter, plan and ledger entries together) and the archive */
+function ChapterTools({ folder, n, entries, hasNote, hasPlan }) {
+    const [open, setOpen] = useState(false);
+    const [to, setTo] = useState("");
+    const [mode, setMode] = useState("");
+    const [ledgers, setLedgers] = useState(true);
+    const [p, setP] = useState(null);
+    const [busy, setBusy] = useState(false);
+    useEffect(() => {
+        setP(null);
+        if (!open || to === "" || Number(to) === n) return;
+        let live = true;
+        const t = setTimeout(() => api.get(`/api/plan/renumber?${qs({ novel: folder, from: n, to, mode, ledgers: ledgers ? 1 : 0 })}`)
+            .then((r) => live && setP(r)).catch((e) => live && setP({ blocked: e.message, moves: [], modes: [] })), 150);
+        return () => { live = false; clearTimeout(t); };
+    }, [open, to, mode, ledgers, folder, n]);
+    const close = () => { setOpen(false); setTo(""); setMode(""); setLedgers(true); };
+    const apply = async () => {
+        if (busy || !p || p.blocked || !p.moves.length || !nothingUnsaved()) return;
+        setBusy(true);
+        try {
+            const r = await api.send("POST", "/api/plan/renumber", { novel: folder, from: n, to: Number(to), mode, ledgers });
+            toast(r.moves.length > 1 ? `Moved ${r.moves.length} chapters` : `Chapter ${n} is now chapter ${to}`);
+            close();
+            chaptersMoved(folder, new Map(r.moves.map((m) => [m.from, m.to])), r.files);
+        } catch (e) { toast(e.message); }
+        setBusy(false);
+    };
+    const archive = async () => {
+        if (busy || !nothingUnsaved()) return;
+        setBusy(true);
+        try {
+            const r = await api.send("POST", "/api/plan/archive", { novel: folder, n });
+            toast(`Chapter ${n} is in the archive (Grand plan)${r.entries ? `; its ${r.entries} ledger ${r.entries === 1 ? "entry stays" : "entries stay"}` : ""}`);
+            chaptersMoved(folder, new Map([[n, null]]), r.files);
+        } catch (e) { toast(e.message); }
+        setBusy(false);
+    };
+    if (!hasNote && !hasPlan) return null;
+    const what = [hasNote && "chapter", hasPlan && "plan"].filter(Boolean).join(" and ");
+    const blocking = p?.blocked && !(p.occupied && !mode);   // (a taken number only needs a choice)
+    return html`<div class="chapter-tools">
+        <div class="row">
+            <button class="small" aria-expanded=${open} onClick=${() => (open ? close() : setOpen(true))}>Change number</button>
+            <${ConfirmButton} class="small" disabled=${busy} confirmLabel=${`Archive chapter ${n}?`} onConfirm=${archive}
+                title=${`Move the ${what} to the archive, at the bottom of the Grand plan${entries ? `. Its ${entries} ledger ${entries === 1 ? "entry stays" : "entries stay"} where ${entries === 1 ? "it is" : "they are"}` : ""}`}>Archive<//>
+        </div>
+        ${open && html`<form class="chapter-renumber" onSubmit=${(e) => { e.preventDefault(); apply(); }} onKeyDown=${(e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } }}>
+            <div class="row"><label class="row">Chapter ${n} becomes chapter <input type="number" min="0" step="any" style="width:90px" value=${to} autoFocus aria-label="New chapter number" onInput=${(e) => { setTo(e.target.value); setMode(""); }} /></label></div>
+            ${p?.occupied && html`<div class="row" role="group" aria-label="The number is taken">
+                <span>Chapter ${p.occupied.number} exists${p.occupied.title ? ` (${p.occupied.title})` : ""}:</span>
+                ${p.modes.includes("swap") && html`<button type="button" class=${`small ${mode === "swap" ? "on" : ""}`} aria-pressed=${mode === "swap"} onClick=${() => setMode("swap")}>Swap the two</button>`}
+                ${p.modes.includes("insert") && html`<button type="button" class=${`small ${mode === "insert" ? "on" : ""}`} aria-pressed=${mode === "insert"} onClick=${() => setMode("insert")}>Make room (move the others along)</button>`}</div>`}
+            ${p?.moves.length > 1 && html`<p class="small muted chapter-moves">${p.moves.map((m) => html`<span key=${m.from}>${m.from} → ${m.to}${m.title ? ` ${m.title}` : ""}</span>`)}</p>`}
+            ${(p?.entries > 0 || (entries > 0 && !p)) && html`<label class="row"><input type="checkbox" style="width:auto" checked=${ledgers} onChange=${(e) => setLedgers(e.target.checked)} /> ${p ? `${p.entries} ledger ${p.entries === 1 ? "entry moves" : "entries move"}` : "Ledger entries move"} too</label>`}
+            ${blocking && html`<p class="error small">${p.blocked}</p>`}
+            <div class="row"><button type="submit" class="primary small" disabled=${busy || !p || !!p.blocked || !p.moves.length}>${busy ? "Moving…" : "Change"}</button><button type="button" class="small" onClick=${close}>Cancel</button></div>
+        </form>`}
+    </div>`;
+}
+
+/** The archive, at the bottom of the Grand plan: each chapter's plan with restoring (as a number that is free) and deleting */
+function ArchivedChapters({ folder, plan }) {
+    const list = plan.archive ?? [];
+    if (!list.length) return null;
+    return html`<details class="panel volume archive" data-flip="vol|archive"><summary><h2>Archive <span class="muted" style="font-size:13px">${list.length}</span></h2></summary>
+        <div class="chapter-list">${list.map((a) => html`<${ArchivedChapter} key=${a.id} folder=${folder} a=${a} plan=${plan} />`)}</div></details>`;
+}
+function ArchivedChapter({ folder, a, plan }) {
+    const taken = (n) => plan.chapters.some((c) => c.number === n);
+    const next = Math.max(0, ...plan.chapters.filter((c) => !c.draft).map((c) => c.number)) + 1;
+    const [to, setTo] = useState(null);   // null: its own number, or the next free one when that is taken
+    const [busy, setBusy] = useState(false);
+    const value = to ?? String(a.number != null && !taken(a.number) ? a.number : next);
+    const num = value === "" ? NaN : Number(value);
+    const what = [a.chapterPath && "chapter", a.planPath && "plan"].filter(Boolean).join(" and ");
+    const restore = async () => {
+        setBusy(true);
+        try { const r = await api.send("POST", "/api/plan/restore", { novel: folder, id: a.id, n: num }); toast(`Restored as chapter ${r.number}`); chaptersMoved(folder, new Map(), r.files); } catch (e) { toast(e.message); }
+        setBusy(false);
+    };
+    const del = async () => {
+        setBusy(true);
+        try {
+            const r = await api.send("DELETE", `/api/plan/archive?${qs({ novel: folder, id: a.id })}`);
+            chaptersMoved(folder, new Map(), [a.chapterPath, a.planPath].filter(Boolean).map((from) => ({ from, to: null })));
+            toast(`Moved to ${r.trashed.join(", ")}`);
+        } catch (e) { toast(e.message); }
+        setBusy(false);
+    };
+    return html`<div class="chapter-row archived-chapter">
+        <div class="chapter-head">
+            ${a.number != null && html`<span class="badge">${a.number}</span>`}
+            <b>${a.title || html`<span class="muted">Untitled</span>`}</b>
+            ${plan.chapters.some((c) => c.number === a.number && c.title.trim().toLowerCase() === a.title.trim().toLowerCase()) && html`<span class="badge bad" title="Changed outside the app: give one of them another title or number">same number and title as a live chapter</span>`}
+            <span class="muted small">${[a.chapterPath ? `${a.words.toLocaleString()} words` : "no chapter text", !a.planPath && "no plan", a.archived && `archived ${a.archived}`].filter(Boolean).join(" · ")}</span>
+            <span class="grow" />
+            ${a.chapterPath && html`<a class="button small" href=${noteHref(a.chapterPath)}>Text</a>`}
+            ${a.planPath && html`<a class="button small" href=${noteHref(a.planPath)}>Plan note</a>`}
+        </div>
+        ${a.plan.trim() && html`<${PlanView} text=${a.plan} />`}
+        <div class="row archived-tools">
+            <label class="row small">Restore as chapter <input type="number" min="0" step="any" style="width:80px" value=${value} aria-label="Chapter number to restore it as" onInput=${(e) => setTo(e.target.value)} /></label>
+            <button class="small" disabled=${busy || !Number.isFinite(num) || taken(num)} onClick=${restore}>Restore</button>
+            ${taken(num) && html`<span class="muted small">Chapter ${num} exists</span>`}
+            <span class="grow" />
+            <${ConfirmButton} class="small" disabled=${busy} confirmLabel="Move to the trash?" title=${`Move the ${what} to the vault's .trash folder`} onConfirm=${del}>Delete<//>
+        </div>
+    </div>`;
+}
+
+function ChapterPlan({ folder, n, plan, title, hasNote, entries = 0, scope }) {
+    // the title is the chapter's: the plan and the chapter note have the same one
+    const server = { plan: String(plan?.fm.plan ?? ""), title };
     const mtime = plan?.mtime ?? 0;
     const [edits, setEdits] = useState({});
     const [baseMtime, setBaseMtime] = useState(null);
@@ -3494,20 +3929,23 @@ function ChapterPlan({ folder, n, plan, hasNote, scope }) {
     const reset = () => { setEdits({}); setBaseMtime(null); setErr(""); };
     const save = async () => {
         if (!dirty || busy) return;
+        if (changed.includes("title") && dirtyForms.has(`writer:write:${folder}:${n}`)) return setErr("Save the chapter in the writer first: its note takes the new title");
         setBusy(true); setErr("");
         try {
-            const set = Object.fromEntries(changed.map((k) => [k, edits[k]]));
+            const set = Object.fromEntries(changed.map((k) => [k, k === "title" ? edits[k].trim() : edits[k]]));
             const r = await api.send("POST", "/api/plan/chapter", { novel: folder, n, set, baseMtime: plan ? baseMtime ?? mtime : undefined });
             setSaved({ mtime: r.mtime, vals: { ...(mtime >= saved.mtime ? {} : saved.vals), ...set } });
             reset();
-            toast("Plan saved");
+            toast(hasNote ? "Plan saved" : "Plan saved, and its chapter note made");
+            if (r.files?.length) chaptersMoved(folder, new Map(), r.files);
         } catch (e) { setErr(e.message); }
         setBusy(false);
     };
     return html`<div class="panel chapter-plan" onKeyDown=${(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); save(); } }}>
         <div class="spread"><h2 style="margin:0">Plan</h2>${plan && html`<a class="muted" href=${noteHref(plan.path)} title="The plan note in the vault">${plan.path.split("/").pop().replace(/\.md$/, "")}</a>`}</div>
-        ${!hasNote && html`<label class="row muted" style="margin:8px 0">Working title
-            <input style="flex:1" value=${val("title")} onInput=${(e) => edit("title", e.target.value)} placeholder="Chapter title" /></label>`}
+        <${ChapterTools} folder=${folder} n=${n} entries=${entries} hasNote=${hasNote} hasPlan=${!!plan} />
+        <label class="row muted" style="margin:8px 0">Chapter title
+            <input style="flex:1" value=${val("title")} onInput=${(e) => edit("title", e.target.value)} placeholder="Chapter title" aria-label="Chapter title" /></label>
         <${PlanEditor} value=${val("plan")} onChange=${(v) => edit("plan", v)} />
         ${err && html`<p class="error">${err}</p>`}
         <div class=${`savebar ${dirty ? "dirty" : ""}`}>
@@ -3522,6 +3960,13 @@ function ChapterView({ folder, n, scope = "page" }) {
     const { data, error } = useApi(`/api/chapter?${qs({ novel: folder, n: num })}`);
     const { data: novel } = useApi(`/api/novel?${qs({ folder })}`);
     const [type, setType] = useState("");
+    // a plan without a chapter note (made outside the app) gets one
+    const [noteErr, setNoteErr] = useState("");
+    const lacks = !!data && data.n === num && !!data.plan && !data.chapter;
+    useEffect(() => {
+        setNoteErr("");
+        if (lacks) api.send("POST", "/api/plan/chapter-note", { novel: folder, n: num }).catch((e) => setNoteErr(e.message));
+    }, [folder, num, lacks, data?.plan?.fm.title]);
     if (!data || !novel) return html`<${Loading} error=${error} />`;
     const entries = data.entries.filter((e) => !type || e.type === type);
     const types = [...new Set(data.entries.map((e) => e.type))];
@@ -3538,11 +3983,12 @@ function ChapterView({ folder, n, scope = "page" }) {
             </div>
         </div>
         <p class="row">
-            <button class="primary" onClick=${() => openWriter(folder, num, { withPlan: scope !== "drawer" })} title="Write in the chapter writer (left); the plan stays on the right">✎ ${data.chapter ? "Write" : "Start writing"}</button>
-            ${!data.chapter && html`<span class="badge">not written yet</span>`}
+            <button class="primary" onClick=${() => openWriter(folder, num, { withPlan: scope !== "drawer" })} title="Write in the chapter writer (left); the plan stays on the right">✎ ${data.written ? "Write" : "Start writing"}</button>
+            ${!data.written && html`<span class="badge">not written yet</span>`}
             ${data.entries.length > 0 && html`<span class="muted">${unplaced} ${unplaced === 1 ? "entry" : "entries"} not yet in the chapter text</span>`}
         </p>
-        <${ChapterPlan} key=${`${folder}:${num}`} folder=${folder} n=${num} plan=${data.plan} hasNote=${!!data.chapter} scope=${scope} />
+        ${noteErr && html`<div class="warnbox">This plan has no chapter note. ${noteErr}.</div>`}
+        <${ChapterPlan} key=${`${folder}:${num}`} folder=${folder} n=${num} plan=${data.plan} title=${String(title)} hasNote=${!!data.chapter} entries=${data.entries.length} scope=${scope} />
         <div class="spread" style="margin-top:18px">
             <h2 style="margin:0">Ledger entries <span class="muted" style="font-size:13px">${data.entries.length}</span></h2>
             <div class="row">
@@ -3956,6 +4402,26 @@ function EntryEditor({ index, folder, params, embedded = false, onDone = null })
     </div>`;
 }
 
+/**
+ * A text field (description, plot…) shown formatted: its markdown rendered by the server (cached per text), the plain
+ * text until then. Edited with the block editor (paste splits paragraphs, formatting is kept as markdown).
+ */
+const mdCache = new Map();
+function MdText({ text }) {
+    const [out, setOut] = useState(() => mdCache.get(text) ?? null);
+    useEffect(() => {
+        if (mdCache.has(text)) { setOut(mdCache.get(text)); return; }
+        let live = true;
+        api.send("POST", "/api/render", { markdown: text }).then((r) => {
+            if (mdCache.size > 300) mdCache.delete(mdCache.keys().next().value);
+            mdCache.set(text, r.html);
+            if (live) setOut(r.html);
+        }).catch(() => {});
+        return () => { live = false; };
+    }, [text]);
+    return out == null ? html`<p class="np-prose">${text}</p>` : html`<div class="np-prose np-md" dangerouslySetInnerHTML=${{ __html: out }} />`;
+}
+
 function CalloutRender({ text }) {
     const [out, setOut] = useState("");
     useEffect(() => {
@@ -4232,7 +4698,7 @@ function App() {
     switch (route.name) {
         case "c": view = html`<${CollectionView} index=${index} collection=${a} novelFilter=${novelFilter} />`; break;
         case "edit": // old edit links: notes are editable on their page
-        case "note": view = html`<${NoteView} key=${a} index=${index} path=${a} />`; break;
+        case "note": view = html`<${NoteView} index=${index} path=${a} />`; break;   // not keyed: see NoteView
         case "new": view = html`<${NoteForm} key=${a} index=${index} collection=${a} />`; break;
         case "newrecipe": view = html`<${RecipeCreator} key=${a} index=${index} item=${a} />`; break;
         case "newchar": view = html`<${NoteForm} key=${a} index=${index} collection="characters" novel=${a} />`; break;
@@ -4266,7 +4732,7 @@ function App() {
                 // the Tools pages have nothing to search or filter by novel: only the assistant's button, in the corner
                 ? html`<div class="topbar-float"><button class="bot-button" title="AI assistant" aria-label="AI assistant" onClick=${toggleAi}><${BotIcon} /></button></div>`
                 : html`<div class="topbar"><${Search} index=${index} /><${NovelFilter} index=${index} value=${novelFilter} onChange=${setNF} /><span class="grow" /><button class="bot-button" title="AI assistant" aria-label="AI assistant" onClick=${toggleAi}><${BotIcon} /></button></div>`}
-            <div class=${`view view-${route.name}`} key=${route.name === "docs" ? "docs" : route.name + (a ?? "")}><${ErrorBoundary} reset=${location.hash}>${view}<//></div>
+            <div class=${`view view-${route.name}`} key=${route.name === "docs" || route.name === "note" ? route.name : route.name + (a ?? "")}><${ErrorBoundary} reset=${location.hash}>${view}<//></div>
         </main>
         ${!noVault && html`<div class=${`drawer-backdrop ${d.open || writer.open ? "on" : ""}`} onClick=${() => { collapseDrawer(); collapseWriter(); }} />
         <${WriterDrawer} index=${index} />
